@@ -51,7 +51,7 @@ export function createAuraRouter(
       })(),
       chatModel: settings?.defaultProjectModel || settings?.defaultModel || process.env.OLLAMA_MODEL || 'glm-5.1:cloud',
       embedModel: settings?.defaultEmbeddingModel || 'mxbai-embed-large:335m',
-      contextWindow: settings?.contextWindowSize || 200_000,
+      contextWindow: settings?.contextWindowSize || 8192,
     }
   }
 

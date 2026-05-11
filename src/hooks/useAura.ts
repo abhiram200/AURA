@@ -1194,7 +1194,8 @@ export function useAura(projectId: string | null) {
                     timestamp: m.timestamp,
                   }))
                   setChatMessages(prev => {
-                    // Keep the current turn (last user message + streaming assistant message)
+                    // The server sends compacted summary + kept last 2 messages
+                    // Replace everything except the current streaming turn
                     const currentTurn = prev.slice(-2)
                     return [...newMessages, ...currentTurn]
                   })

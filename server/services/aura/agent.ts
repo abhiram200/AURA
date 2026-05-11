@@ -5,6 +5,7 @@ import type { Response } from 'express'
 import type { AuraQueryService } from './graph.ts'
 import type { AgentEventSink } from './sse.ts'
 import { SilentEventSink } from './sse.ts'
+import { COMPACTION_PROMPT } from '../../prompts.ts'
 
 // ── Token estimation ────────────────────────────────────────────────────────
 
@@ -702,43 +703,81 @@ export class AuraAgent {
 
   private async compactPriorMessages(
     priorMessages: Array<{ role: string; content: string }>,
-    systemPrompt: string,
     eventSink: AgentEventSink,
-  ): Promise<Array<{ role: string; content: string }>> {
-    const conversationText = priorMessages
+  ): Promise<{ compacted: Array<{ role: string; content: string }>; kept: Array<{ role: string; content: string }> }> {
+    // Exclude last 2 messages (1 user+assistant exchange) from compaction
+    const toCompact = priorMessages.slice(0, -2)
+    const kept = priorMessages.slice(-2)
+
+    const conversationText = toCompact
       .map(m => `${m.role.toUpperCase()}: ${m.content}`)
       .join('\n\n---\n\n')
 
-    const summaryPrompt = `Summarize this conversation between a user and a code intelligence assistant. Preserve ALL important technical details: file paths, symbol names, code references, relationships found, and conclusions. Remove verbose tool outputs and repetitive exchanges. Be concise but complete.\n\nCONVERSATION:\n${conversationText}`
-
     const result = await this.streamChat(
       [
-        { role: 'system', content: 'You are a conversation summarizer for a code intelligence system called AURA. Create a concise summary that preserves all important technical details, decisions, and findings. Focus on what was discovered and concluded, not the process of discovery.' },
-        { role: 'user', content: summaryPrompt },
+        { role: 'system', content: 'You are a conversation summarizer for a code intelligence system called AURA. Create a structured working state that preserves all important technical details, decisions, and findings.' },
+        { role: 'user', content: `${COMPACTION_PROMPT}\n${conversationText}` },
       ],
       [],
       new SilentEventSink(),
     )
 
-    const summary = result?.content || 'Previous conversation context was summarized due to length. Key findings are preserved.'
+    const raw = result?.content || ''
+    let summaryText: string
+
+    // Try to parse as structured working state
+    try {
+      const parsed = JSON.parse(raw)
+      if (parsed && typeof parsed.intent === 'string') {
+        const lines: string[] = ['[Earlier Conversation Summary]']
+        lines.push(`Intent: ${parsed.intent}`)
+        if (parsed.current_step) lines.push(`Current step: ${parsed.current_step}`)
+        if (Array.isArray(parsed.decisions) && parsed.decisions.length > 0) {
+          lines.push('Decisions:')
+          for (const d of parsed.decisions) lines.push(`- ${d}`)
+        }
+        if (Array.isArray(parsed.topics) && parsed.topics.length > 0) {
+          lines.push('Topics:')
+          for (const t of parsed.topics) lines.push(`- ${t}`)
+        }
+        if (Array.isArray(parsed.unresolved) && parsed.unresolved.length > 0) {
+          lines.push('Unresolved:')
+          for (const u of parsed.unresolved) lines.push(`- ${u}`)
+        }
+        summaryText = lines.join('\n')
+      } else {
+        summaryText = `[Earlier Conversation Summary]\n${raw}`
+      }
+    } catch {
+      summaryText = `[Earlier Conversation Summary]\n${raw || 'Previous conversation context was summarized due to length. Key findings are preserved.'}`
+    }
 
     // Build compacted messages: a summary pair that gives the agent context
     const compacted: Array<{ role: string; content: string }> = [
-      { role: 'user', content: `[Earlier conversation summary]\n${summary}` },
+      { role: 'user', content: summaryText },
       { role: 'assistant', content: 'Understood. I have the context from our previous conversation and am ready to continue.' },
     ]
 
     // Emit compacted event with replacement messages for the client
-    const clientMessages = compacted.map(m => ({
-      id: crypto.randomUUID(),
-      role: m.role,
-      content: m.content,
-      timestamp: Date.now(),
-    }))
+    // Include the kept messages so the client can replace the full history
+    const clientMessages = [
+      ...compacted.map(m => ({
+        id: crypto.randomUUID(),
+        role: m.role,
+        content: m.content,
+        timestamp: Date.now(),
+      })),
+      ...kept.map(m => ({
+        id: crypto.randomUUID(),
+        role: m.role as 'user' | 'assistant',
+        content: m.content,
+        timestamp: Date.now(),
+      })),
+    ]
 
     eventSink.emit('compacted', { messages: clientMessages })
 
-    return compacted
+    return { compacted, kept }
   }
 
   async run(prompt: string, eventSink: AgentEventSink, context?: Record<string, unknown>, priorMessages?: Array<{ role: string; content: string }>): Promise<void> {
@@ -762,7 +801,7 @@ export class AuraAgent {
     const tools = defineAgentTools(this.qs, this.projectPath)
     const ollamaTools = buildOllamaTools(tools)
 
-    // Check if context compaction is needed
+    // Check if context compaction is needed (1.5x threshold, matching main chat)
     const contextLimit = this.contextWindow
     let effectivePriorMessages = priorMessages || []
 
@@ -770,10 +809,12 @@ export class AuraAgent {
     const promptTokens = estimateTokens(prompt)
     const priorTokens = estimateMessagesTokens(effectivePriorMessages)
     const totalEstimated = systemTokens + promptTokens + priorTokens
+    const compactionThreshold = Math.floor(contextLimit * 1.5)
 
-    if (totalEstimated > contextLimit && effectivePriorMessages.length > 2) {
+    if (totalEstimated > compactionThreshold && effectivePriorMessages.length > 2) {
       eventSink.emit('compacting', {})
-      effectivePriorMessages = await this.compactPriorMessages(effectivePriorMessages, systemPrompt, eventSink)
+      const { compacted, kept } = await this.compactPriorMessages(effectivePriorMessages, eventSink)
+      effectivePriorMessages = [...compacted, ...kept]
     }
 
     // Build messages: system + prior conversation + current prompt
