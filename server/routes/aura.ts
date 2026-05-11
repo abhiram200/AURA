@@ -15,10 +15,11 @@ import { syncContracts, loadContracts } from '../services/aura/contract-registry
 import { GroupQueryService } from '../services/aura/group-query.ts'
 import { installSkills, listAvailableSkills } from '../services/skill-installer.ts'
 import { AuraChatService } from '../services/aura-chat.ts'
-import type { AuraChatMessage } from '../services/aura-chat.ts'
+import type { AuraChatSession } from '../services/aura-chat.ts'
 import type { GitDiffScope } from '../services/aura/types.ts'
 
 const groupQueryService = new GroupQueryService()
+const chatService = new AuraChatService()
 
 function matchesGlobSimple(str: string, glob: string): boolean {
   const re = glob
@@ -40,7 +41,6 @@ export function createAuraRouter(
   store: FileStore,
 ): Router {
   const router = Router()
-  const chatService = new AuraChatService(store)
 
   async function getAuraConfig() {
     const settings = await store.read<Settings>('settings.json')
@@ -964,67 +964,50 @@ export function createAuraRouter(
 
   // ── Chat Session Endpoints ─────────────────────────────────────────────────
 
-  // GET /api/aura/chats/:projectId — List chat summaries
-  router.get('/chats/:projectId', async (_req, res) => {
-    const { projectId } = _req.params
-    const summaries = await chatService.list(projectId)
-    res.json(summaries)
-  })
-
-  // GET /api/aura/chats/:projectId/active — Get active chat
-  router.get('/chats/:projectId/active', async (_req, res) => {
-    const { projectId } = _req.params
-    const chat = await chatService.getActive(projectId)
-    if (!chat) {
-      res.json(null)
+  // GET /api/aura/chats/:projectId — Get or create chat for a project
+  router.get('/chats/:projectId', async (req, res) => {
+    const { projectId } = req.params
+    const project = await projectService.get(projectId)
+    if (!project) {
+      res.status(404).json({ error: 'Project not found' })
       return
+    }
+    let chat = await chatService.get(project.workspacePath)
+    if (!chat) {
+      chat = await chatService.create(project.workspacePath)
     }
     res.json(chat)
   })
 
-  // POST /api/aura/chats/:projectId — Create new chat
-  router.post('/chats/:projectId', async (_req, res) => {
-    const { projectId } = _req.params
-    const chat = await chatService.create(projectId)
-    res.json(chat)
-  })
-
-  // PATCH /api/aura/chats/:projectId/:chatId/switch — Switch to a chat
-  router.patch('/chats/:projectId/:chatId/switch', async (req, res) => {
-    const { projectId, chatId } = req.params
-    const chat = await chatService.switchTo(projectId, chatId)
-    if (!chat) {
-      res.status(404).json({ error: 'Chat not found' })
+  // POST /api/aura/chats/:projectId — Create new chat (replaces existing)
+  router.post('/chats/:projectId', async (req, res) => {
+    const { projectId } = req.params
+    const project = await projectService.get(projectId)
+    if (!project) {
+      res.status(404).json({ error: 'Project not found' })
       return
     }
+    const chat = await chatService.create(project.workspacePath)
     res.json(chat)
   })
 
   // PATCH /api/aura/chats/:projectId/:chatId — Save messages
   router.patch('/chats/:projectId/:chatId', async (req, res) => {
     const { projectId, chatId } = req.params
-    const { messages, activeLeafId, title } = req.body as {
-      messages: AuraChatMessage[]
-      activeLeafId: string | null
-      title?: string
+    const project = await projectService.get(projectId)
+    if (!project) {
+      res.status(404).json({ error: 'Project not found' })
+      return
     }
-    const chat = await chatService.saveMessages(projectId, chatId, messages, activeLeafId, title)
-    if (!chat) {
+    const { messages } = req.body as { messages: unknown[] }
+    const existing = await chatService.get(project.workspacePath)
+    if (!existing || existing.id !== chatId) {
       res.status(404).json({ error: 'Chat not found' })
       return
     }
-    res.json(chat)
-  })
-
-  // DELETE /api/aura/chats/:projectId/:chatId — Delete a chat
-  router.delete('/chats/:projectId/:chatId', async (req, res) => {
-    const { projectId, chatId } = req.params
-    const deleted = await chatService.delete(projectId, chatId)
-    if (!deleted) {
-      res.status(404).json({ error: 'Chat not found' })
-      return
-    }
-    res.json({ ok: true })
+    existing.messages = messages as AuraChatSession['messages']
+    await chatService.save(project.workspacePath, existing)
+    res.json(existing)
   })
 
   return router

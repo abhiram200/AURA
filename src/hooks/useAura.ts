@@ -434,6 +434,11 @@ export function useAura(projectId: string | null) {
   const [chatError, setChatError] = useState<string | null>(null)
   const [activeChatId, setActiveChatId] = useState<string | null>(null)
 
+  const chatMessagesRef = useRef<AuraChatMessage[]>(chatMessages)
+  const activeChatIdRef = useRef<string | null>(activeChatId)
+  chatMessagesRef.current = chatMessages
+  activeChatIdRef.current = activeChatId
+
   const pollIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const watchPollRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const startWatchPollingRef = useRef<(pid: string) => void>(() => {})
@@ -467,21 +472,24 @@ export function useAura(projectId: string | null) {
   // ── Chat Persistence ─────────────────────────────────────────────────────────
 
   const saveChat = useCallback(async () => {
-    if (!projectId || !activeChatId) return
+    const pid = projectId
+    const cid = activeChatIdRef.current
+    const msgs = chatMessagesRef.current
+    if (!pid || !cid) return
     try {
-      await fetch(`/api/aura/chats/${projectId}/${activeChatId}`, {
+      await fetch(`/api/aura/chats/${pid}/${cid}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ messages: chatMessages, activeLeafId: null }),
+        body: JSON.stringify({ messages: msgs }),
       })
     } catch {
       // Save failed silently
     }
-  }, [projectId, activeChatId, chatMessages])
+  }, [projectId])
 
   const loadActiveChat = useCallback(async (pid: string) => {
     try {
-      const res = await fetch(`/api/aura/chats/${pid}/active`)
+      const res = await fetch(`/api/aura/chats/${pid}`)
       if (res.ok) {
         const chat = await res.json()
         if (chat) {
@@ -490,7 +498,7 @@ export function useAura(projectId: string | null) {
           return
         }
       }
-      // No active chat — create one
+      // No chat — create one
       const createRes = await fetch(`/api/aura/chats/${pid}`, { method: 'POST' })
       if (createRes.ok) {
         const newChat = await createRes.json()
@@ -1250,6 +1258,7 @@ export function useAura(projectId: string | null) {
     chatError,
     clearChat,
     clearChatError,
+    activeChatId,
   }
 }
 

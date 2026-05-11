@@ -36,7 +36,6 @@ async function start() {
 
   const store = new FileStore(DATA_DIR)
   await store.init()
-  await store.ensureDir('aura-chats/.gitkeep')
 
   // Auto-detect first available model from Ollama
   let detectedModel = 'llama3.2'
