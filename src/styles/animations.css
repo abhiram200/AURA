@@ -1,0 +1,102 @@
+@keyframes pulse-glow {
+  0%, 100% { box-shadow: 0 0 8px var(--glow-primary); }
+  50% { box-shadow: 0 0 20px var(--glow-primary), 0 0 40px var(--glow-secondary); }
+}
+
+@keyframes float {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-8px); }
+}
+
+@keyframes blink-cursor {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0; }
+}
+
+@keyframes ripple {
+  0% { transform: scale(0); opacity: 0.5; }
+  100% { transform: scale(4); opacity: 0; }
+}
+
+@keyframes slide-in-right {
+  from { transform: translateX(20px); opacity: 0; }
+  to { transform: translateX(0); opacity: 1; }
+}
+
+@keyframes slide-in-left {
+  from { transform: translateX(-20px); opacity: 0; }
+  to { transform: translateX(0); opacity: 1; }
+}
+
+@keyframes fade-up {
+  from { transform: translateY(8px); opacity: 0; }
+  to { transform: translateY(0); opacity: 1; }
+}
+
+.glow-btn {
+  position: relative;
+  overflow: hidden;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  padding: 8px 16px;
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--text-primary);
+  background: var(--bg-tertiary);
+  cursor: pointer;
+  transition: box-shadow 0.3s ease, border-color 0.3s ease;
+}
+
+.glow-btn:hover {
+  box-shadow: var(--shadow-glow);
+  border-color: var(--accent-primary);
+}
+
+.glow-btn--primary {
+  background: linear-gradient(135deg, var(--accent-primary), var(--accent-secondary));
+  color: #fff;
+  border: none;
+}
+
+.glow-btn--primary:hover {
+  box-shadow: 0 0 24px var(--glow-primary), 0 0 48px var(--glow-secondary);
+}
+
+.glow-btn--ghost {
+  background: transparent;
+  border-color: transparent;
+}
+
+.glow-btn--ghost:hover {
+  border-color: var(--border-color);
+  background: var(--sidebar-hover);
+}
+
+.glow-btn__ripple {
+  position: absolute;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.3);
+  transform: translate(-50%, -50%);
+  animation: ripple 0.6s ease-out forwards;
+  pointer-events: none;
+}
+
+.theme-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 8px;
+  border: 1px solid var(--border-color);
+  background: var(--bg-tertiary);
+  color: var(--accent-primary);
+  cursor: pointer;
+  transition: box-shadow 0.3s ease;
+}
+
+.theme-toggle:hover {
+  box-shadow: var(--shadow-glow);
+}

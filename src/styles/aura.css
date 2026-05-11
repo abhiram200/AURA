@@ -1,0 +1,2033 @@
+/* ===== AURA — Code Intelligence UI ===== */
+
+/* ── Page Layout ────────────────────────────────────────────────────────────── */
+
+.aura-page {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  background: var(--bg-primary);
+  position: relative;
+  overflow: hidden;
+}
+
+.aura-page__content {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  position: relative;
+}
+
+.aura-page__empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  gap: 16px;
+  text-align: center;
+  padding: 48px 24px;
+}
+
+.aura-page__empty-brand {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  color: var(--accent-primary);
+}
+
+.aura-page__empty-brand svg {
+  opacity: 0.6;
+  margin-bottom: 4px;
+}
+
+.aura-page__empty-brand h2 {
+  font-size: 28px;
+  font-weight: 700;
+  letter-spacing: 4px;
+  color: var(--accent-primary);
+  margin: 0;
+}
+
+.aura-page__empty-brand p {
+  font-size: 14px;
+  color: var(--text-secondary);
+  margin: 0;
+}
+
+.aura-page__index-btn {
+  padding: 10px 24px;
+  background: var(--accent-primary);
+  color: var(--bg-primary);
+  border: none;
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  font-family: inherit;
+  transition: opacity 0.15s, box-shadow 0.2s;
+}
+
+.aura-page__index-btn:hover {
+  opacity: 0.85;
+  box-shadow: 0 0 16px var(--glow-primary);
+}
+
+.aura-page__error {
+  font-size: 13px;
+  color: #ff4444;
+  padding: 8px 16px;
+  background: rgba(255, 68, 68, 0.08);
+  border: 1px solid rgba(255, 68, 68, 0.25);
+  border-radius: 6px;
+  max-width: 400px;
+}
+
+.aura-page__error-bar {
+  padding: 8px 16px;
+  background: rgba(255, 68, 68, 0.1);
+  border-top: 1px solid rgba(255, 68, 68, 0.3);
+  color: #ff6666;
+  font-size: 13px;
+  text-align: center;
+}
+
+.aura-page__loading {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  flex: 1;
+  min-height: 0;
+  gap: 12px;
+  color: var(--text-tertiary);
+  font-size: 14px;
+}
+
+.aura-page__loading-spinner {
+  width: 32px;
+  height: 32px;
+  border: 3px solid var(--border-color);
+  border-top-color: var(--accent-primary);
+  border-radius: 50%;
+  animation: aura-spin 0.8s linear infinite;
+}
+
+@keyframes aura-spin {
+  to { transform: rotate(360deg); }
+}
+
+/* ── Toolbar ─────────────────────────────────────────────────────────────────── */
+
+.aura-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 16px;
+  background: var(--bg-secondary);
+  border-bottom: 1px solid var(--border-primary);
+  flex-shrink: 0;
+  z-index: 10;
+}
+
+.aura-toolbar__brand {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--accent-primary);
+  font-weight: 700;
+  font-size: 13px;
+  letter-spacing: 2px;
+  flex-shrink: 0;
+}
+
+.aura-toolbar__search {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.aura-toolbar__search-input {
+  padding: 5px 12px;
+  background: var(--bg-input, var(--bg-primary));
+  border: 1px solid var(--border-primary);
+  border-radius: 6px;
+  color: var(--text-primary);
+  font-size: 13px;
+  font-family: inherit;
+  outline: none;
+  width: 200px;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.aura-toolbar__search-input:focus {
+  border-color: var(--accent-primary);
+  box-shadow: 0 0 8px var(--glow-primary);
+}
+
+.aura-toolbar__search-input::placeholder {
+  color: var(--text-tertiary);
+}
+
+.aura-toolbar__search-wrapper {
+  position: relative;
+  flex-shrink: 0;
+}
+
+.aura-toolbar__search-results {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  width: 320px;
+  max-height: 280px;
+  overflow-y: auto;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-primary);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+  z-index: 50;
+  display: flex;
+  flex-direction: column;
+}
+
+.aura-toolbar__search-result {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-family: inherit;
+  cursor: pointer;
+  text-align: left;
+  transition: background 0.1s;
+}
+
+.aura-toolbar__search-result:hover {
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.aura-toolbar__search-result-kind {
+  display: inline-block;
+  padding: 1px 5px;
+  border-radius: 3px;
+  font-size: 9px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  color: #fff;
+  flex-shrink: 0;
+}
+
+.aura-toolbar__search-result-name {
+  font-weight: 500;
+  color: var(--text-primary);
+  white-space: nowrap;
+}
+
+.aura-toolbar__search-result-path {
+  font-size: 10px;
+  color: var(--text-tertiary);
+  font-family: 'Fira Code', 'Cascadia Code', monospace;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+  min-width: 0;
+}
+
+.aura-toolbar__stats {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--text-tertiary);
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
+.aura-toolbar__stat-sep {
+  opacity: 0.4;
+}
+
+/* View Toggle */
+.aura-toolbar__view-toggle {
+  display: flex;
+  background: var(--bg-input, var(--bg-primary));
+  border: 1px solid var(--border-primary);
+  border-radius: 6px;
+  overflow: hidden;
+  flex-shrink: 0;
+}
+
+.aura-toolbar__toggle-btn {
+  padding: 4px 12px;
+  border: none;
+  background: transparent;
+  color: var(--text-tertiary);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  font-family: inherit;
+  transition: background 0.15s, color 0.15s;
+}
+
+.aura-toolbar__toggle-btn:hover {
+  color: var(--text-secondary);
+}
+
+.aura-toolbar__toggle-btn--active {
+  background: var(--accent-primary);
+  color: var(--bg-primary);
+  font-weight: 600;
+}
+
+/* Icon Buttons */
+.aura-toolbar__icon-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 6px;
+  border: 1px solid var(--border-primary);
+  background: transparent;
+  color: var(--text-tertiary);
+  cursor: pointer;
+  transition: color 0.15s, border-color 0.15s;
+  flex-shrink: 0;
+}
+
+.aura-toolbar__icon-btn:hover:not(:disabled) {
+  color: var(--accent-primary);
+  border-color: var(--accent-primary);
+}
+
+.aura-toolbar__icon-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+/* Filters Dropdown */
+.aura-toolbar__filters-wrapper {
+  position: relative;
+  flex-shrink: 0;
+}
+
+.aura-toolbar__filters {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  width: 240px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-primary);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+  padding: 12px;
+  z-index: 50;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.aura-toolbar__filter-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.aura-toolbar__filter-group-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.aura-toolbar__filter-group-title {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--text-tertiary);
+  font-weight: 600;
+}
+
+.aura-toolbar__filter-group-actions {
+  display: flex;
+  gap: 4px;
+}
+
+.aura-toolbar__filter-mini-btn {
+  padding: 1px 6px;
+  border: 1px solid var(--border-primary);
+  border-radius: 3px;
+  background: transparent;
+  color: var(--text-tertiary);
+  font-size: 10px;
+  cursor: pointer;
+  font-family: inherit;
+  transition: color 0.15s, border-color 0.15s;
+}
+
+.aura-toolbar__filter-mini-btn:hover {
+  color: var(--accent-primary);
+  border-color: var(--accent-primary);
+}
+
+.aura-toolbar__filter-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.aura-toolbar__filter-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  cursor: pointer;
+  padding: 2px 4px;
+  border-radius: 4px;
+  transition: background 0.1s;
+}
+
+.aura-toolbar__filter-item:hover {
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.aura-toolbar__filter-item input[type="checkbox"] {
+  accent-color: var(--accent-primary);
+  width: 13px;
+  height: 13px;
+  cursor: pointer;
+}
+
+/* ── Panel ───────────────────────────────────────────────────────────────────── */
+
+.aura-panel {
+  width: 100%;
+  height: 100%;
+  background: var(--bg-secondary);
+  overflow-y: auto;
+  overflow-x: hidden;
+  display: flex;
+  flex-direction: column;
+  flex-shrink: 0;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(0, 240, 255, 0.25) transparent;
+}
+
+.aura-panel--empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.aura-panel__placeholder {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  color: var(--text-tertiary);
+  font-size: 13px;
+  text-align: center;
+  padding: 24px 16px;
+}
+
+.aura-panel__placeholder svg {
+  opacity: 0.4;
+}
+
+.aura-panel__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  padding: 12px;
+  border-bottom: 1px solid var(--border-primary);
+  gap: 8px;
+}
+
+.aura-panel__header-info {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.aura-panel__node-name {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin: 0;
+  word-break: break-word;
+}
+
+.aura-panel__close {
+  width: 24px;
+  height: 24px;
+  border-radius: 4px;
+  border: 1px solid var(--border-primary);
+  background: transparent;
+  color: var(--text-tertiary);
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  transition: color 0.15s, border-color 0.15s;
+}
+
+.aura-panel__close:hover {
+  color: var(--accent-primary);
+  border-color: var(--accent-primary);
+}
+
+/* Collapsible Sections */
+.aura-panel__section {
+  border-bottom: 1px solid var(--border-primary);
+}
+
+.aura-panel__section-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 7px 12px;
+  background: none;
+  border: none;
+  color: var(--text-secondary);
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  font-family: inherit;
+  text-align: left;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  transition: background 0.1s;
+}
+
+.aura-panel__section-header:hover {
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.aura-panel__section-toggle {
+  font-size: 10px;
+  color: var(--text-tertiary);
+  width: 12px;
+  flex-shrink: 0;
+}
+
+.aura-panel__section-title {
+  flex: 1;
+}
+
+.aura-panel__section-count {
+  font-size: 11px;
+  color: var(--text-tertiary);
+  font-variant-numeric: tabular-nums;
+}
+
+.aura-panel__section-body {
+  padding: 0 12px 10px;
+  overflow-y: auto;
+  max-height: 280px;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(0, 240, 255, 0.15) transparent;
+}
+
+/* Kind Badges */
+.aura-panel__kind-badge {
+  display: inline-block;
+  padding: 1px 6px;
+  border-radius: 3px;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  color: #fff;
+  flex-shrink: 0;
+}
+
+.aura-panel__kind-badge[data-kind="Function"] { background-color: #4ec9b0; }
+.aura-panel__kind-badge[data-kind="Class"] { background-color: #e8a855; }
+.aura-panel__kind-badge[data-kind="Interface"] { background-color: #b57edc; }
+.aura-panel__kind-badge[data-kind="Method"] { background-color: #f5d76e; color: #1a1a2e; }
+.aura-panel__kind-badge[data-kind="Variable"] { background-color: #f48fb1; }
+.aura-panel__kind-badge[data-kind="File"] { background-color: #5b8def; }
+.aura-panel__kind-badge[data-kind="Folder"] { background-color: #8b8b8b; }
+
+/* Info Grid */
+.aura-panel__info-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.aura-panel__info-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.aura-panel__info-label {
+  font-size: 11px;
+  color: var(--text-tertiary);
+  min-width: 52px;
+  flex-shrink: 0;
+}
+
+.aura-panel__info-value {
+  font-size: 12px;
+  color: var(--text-secondary);
+  word-break: break-all;
+}
+
+.aura-panel__info-value--mono {
+  font-family: 'Fira Code', 'Cascadia Code', monospace;
+  font-size: 11px;
+}
+
+/* Reference Lists */
+.aura-panel__ref-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.aura-panel__ref-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 4px;
+  border-radius: 4px;
+  font-size: 12px;
+}
+
+.aura-panel__ref-item:hover {
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.aura-panel__ref-name {
+  color: var(--text-primary);
+  font-weight: 500;
+}
+
+.aura-panel__ref-edge-tags {
+  display: flex;
+  gap: 3px;
+  margin-left: auto;
+  flex-shrink: 0;
+}
+
+.aura-panel__ref-edge-tag {
+  font-size: 9px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  padding: 1px 4px;
+  border-radius: 3px;
+  background: rgba(88, 166, 255, 0.12);
+  color: var(--accent-primary);
+}
+
+.aura-panel__ref-edge-tag[data-primary="true"] {
+  background: rgba(88, 166, 255, 0.25);
+}
+
+.aura-panel__ref-path {
+  font-size: 10px;
+  color: var(--text-tertiary);
+  font-family: 'Fira Code', 'Cascadia Code', monospace;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 120px;
+  flex-shrink: 0;
+}
+
+.aura-panel__ref-range {
+  font-size: 10px;
+  color: #58a6ff;
+  font-family: 'Fira Code', 'Cascadia Code', monospace;
+  flex-shrink: 0;
+}
+
+/* Impact Analysis */
+.aura-panel__impact {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.aura-panel__impact-level {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.aura-panel__impact-level-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.aura-panel__impact-label {
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.aura-panel__impact-depth {
+  font-size: 10px;
+  color: var(--text-tertiary);
+}
+
+.aura-panel__impact-nodes {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding-left: 8px;
+  border-left: 2px solid var(--border-primary);
+}
+
+.aura-panel__impact-node {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  padding: 2px 0;
+  flex-wrap: wrap;
+}
+
+/* Hierarchy */
+.aura-panel__hierarchy {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.aura-panel__hierarchy-group {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.aura-panel__hierarchy-label {
+  font-size: 11px;
+  color: var(--text-tertiary);
+  font-weight: 500;
+}
+
+/* ── Graph ───────────────────────────────────────────────────────────────────── */
+
+.aura-graph-wrapper {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  position: relative;
+  overflow: hidden;
+  display: flex;
+}
+
+
+/* ── Progress ────────────────────────────────────────────────────────────────── */
+
+.aura-progress {
+  padding: 8px 16px;
+  background: var(--bg-secondary);
+  border-top: 1px solid var(--border-primary);
+  flex-shrink: 0;
+}
+
+.aura-progress__bar-track {
+  width: 100%;
+  height: 4px;
+  background: var(--border-primary);
+  border-radius: 2px;
+  overflow: hidden;
+  margin-bottom: 6px;
+}
+
+.aura-progress__bar-fill {
+  height: 100%;
+  background: var(--accent-primary);
+  border-radius: 2px;
+  transition: width 0.3s ease;
+  box-shadow: 0 0 8px var(--glow-primary);
+}
+
+.aura-progress__info {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11px;
+  color: var(--text-tertiary);
+}
+
+.aura-progress__phase {
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.aura-progress__stats {
+  flex: 1;
+}
+
+.aura-progress__pct {
+  font-variant-numeric: tabular-nums;
+  color: var(--accent-primary);
+  font-weight: 600;
+}
+
+.aura-progress__error {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #ff4444;
+  font-size: 13px;
+}
+
+.aura-progress--watching {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.aura-progress__watch-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #00f0ff;
+  animation: aura-pulse 2s ease-in-out infinite;
+}
+
+/* ── Tooltip ──────────────────────────────────────────────────────────────────── */
+
+.aura-tooltip {
+  position: fixed;
+  z-index: 100;
+  padding: 6px 10px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-primary);
+  border-radius: 6px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+  pointer-events: none;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-width: 300px;
+}
+
+.aura-tooltip__name {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.aura-tooltip__path {
+  font-size: 11px;
+  color: var(--text-tertiary);
+  font-family: 'Fira Code', 'Cascadia Code', monospace;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.aura-tooltip__kind {
+  font-size: 10px;
+  color: var(--accent-primary);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+}
+
+/* ── 3D Optimizing Indicator ──────────────────────────────────────────────────── */
+
+.aura-3d-optimizing {
+  position: absolute;
+  bottom: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(13, 17, 23, 0.85);
+  border: 1px solid #30363d;
+  border-radius: 6px;
+  padding: 6px 14px;
+  color: #8b949e;
+  font-size: 12px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  transition: opacity 0.3s;
+  z-index: 20;
+  pointer-events: none;
+}
+
+.aura-3d-optimizing--hidden {
+  opacity: 0;
+}
+
+.aura-3d-optimizing__dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #58a6ff;
+  animation: aura-pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes aura-pulse {
+  0%, 100% { opacity: 0.3; }
+  50% { opacity: 1; }
+}
+
+/* ── 3D Graph Container ──────────────────────────────────────────────────────── */
+
+.aura-3d-canvas {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: #0d1117;
+}
+
+/* ── Landing Page ──────────────────────────────────────────────────────────────── */
+
+.aura-landing {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100vh;
+  background: var(--bg-primary);
+}
+
+.aura-landing__card {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-primary);
+  border-radius: 12px;
+  padding: 40px;
+  width: 480px;
+  max-width: 90vw;
+  box-shadow: var(--shadow-card);
+}
+
+.aura-landing__brand {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 32px;
+  color: var(--accent-primary);
+}
+
+.aura-landing__brand h1 {
+  font-size: 24px;
+  font-weight: 700;
+  letter-spacing: 2px;
+  margin: 0;
+}
+
+.aura-landing__brand p {
+  font-size: 14px;
+  color: var(--text-secondary);
+  margin: 0;
+}
+
+.aura-landing__form {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.aura-landing__label {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  margin-bottom: -8px;
+}
+
+.aura-landing__optional {
+  font-weight: 400;
+  color: var(--text-tertiary);
+}
+
+.aura-landing__input {
+  width: 100%;
+  padding: 10px 14px;
+  background: var(--bg-input);
+  border: 1px solid var(--border-primary);
+  border-radius: 6px;
+  color: var(--text-primary);
+  font-size: 14px;
+  font-family: 'Fira Code', 'Cascadia Code', monospace;
+  outline: none;
+  transition: border-color 0.2s;
+}
+
+.aura-landing__input:focus {
+  border-color: var(--accent-primary);
+  box-shadow: 0 0 0 2px var(--glow-primary);
+}
+
+.aura-landing__input::placeholder {
+  color: var(--text-tertiary);
+}
+
+.aura-landing__button {
+  width: 100%;
+  padding: 12px;
+  background: var(--accent-primary);
+  color: var(--bg-primary);
+  border: none;
+  border-radius: 6px;
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  cursor: pointer;
+  transition: background 0.2s, box-shadow 0.2s;
+  margin-top: 8px;
+}
+
+.aura-landing__button:hover:not(:disabled) {
+  box-shadow: var(--shadow-glow);
+}
+
+.aura-landing__button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.aura-landing__error {
+  color: #ff4444;
+  font-size: 13px;
+  text-align: center;
+}
+
+/* ── Impact Analysis ──────────────────────────────────────────────────────── */
+
+.aura-panel__impact {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.aura-panel__impact-summary {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  padding: 12px;
+}
+
+.aura-panel__impact-summary-stats {
+  display: flex;
+  gap: 12px;
+}
+
+.aura-panel__impact-stat {
+  flex: 1;
+  text-align: center;
+}
+
+.aura-panel__impact-stat-num {
+  display: block;
+  font-size: 20px;
+  font-weight: 700;
+}
+
+.aura-panel__impact-stat-label {
+  display: block;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.aura-panel__impact-stat--critical .aura-panel__impact-stat-num,
+.aura-panel__impact-stat--critical .aura-panel__impact-stat-label { color: #ff4444; }
+
+.aura-panel__impact-stat--moderate .aura-panel__impact-stat-num,
+.aura-panel__impact-stat--moderate .aura-panel__impact-stat-label { color: #ffaa33; }
+
+.aura-panel__impact-stat--low .aura-panel__impact-stat-num,
+.aura-panel__impact-stat--low .aura-panel__impact-stat-label { color: #5b8def; }
+
+.aura-panel__impact-direction {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.aura-panel__impact-direction-header {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.aura-panel__impact-direction-title {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.aura-panel__impact-direction-subtitle {
+  font-size: 10px;
+  color: var(--text-tertiary);
+}
+
+.aura-panel__impact-files {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.aura-panel__impact-file {
+  border-left: 3px solid;
+  background: var(--bg-input);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.aura-panel__impact-file-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 10px;
+  width: 100%;
+  background: none;
+  border: none;
+  color: inherit;
+  cursor: pointer;
+  text-align: left;
+  font-size: 13px;
+}
+
+.aura-panel__impact-severity-badge {
+  padding: 1px 5px;
+  border-radius: 3px;
+  font-size: 9px;
+  font-weight: 700;
+  color: #fff;
+  flex-shrink: 0;
+  letter-spacing: 0.3px;
+}
+
+.aura-panel__impact-file-path {
+  font-weight: 500;
+  font-family: 'Fira Code', 'Cascadia Code', monospace;
+  font-size: 12px;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.aura-panel__impact-score {
+  color: var(--text-tertiary);
+  font-size: 10px;
+  font-family: 'Fira Code', 'Cascadia Code', monospace;
+  flex-shrink: 0;
+}
+
+.aura-panel__impact-range {
+  font-size: 10px;
+  color: var(--text-tertiary);
+  font-family: 'Fira Code', 'Cascadia Code', monospace;
+}
+
+.aura-panel__impact-symbols {
+  padding: 0 10px 8px 22px;
+  border-left: 1px solid var(--border-color);
+  margin-left: 12px;
+}
+
+.aura-panel__impact-symbol {
+  margin-bottom: 6px;
+}
+
+.aura-panel__impact-symbol-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  margin-bottom: 2px;
+}
+
+.aura-panel__impact-symbol-name {
+  color: var(--text-primary);
+  font-weight: 500;
+}
+
+.aura-panel__impact-score-bar {
+  width: 32px;
+  height: 4px;
+  background: var(--bg-secondary);
+  border-radius: 2px;
+  overflow: hidden;
+  margin-left: auto;
+  flex-shrink: 0;
+}
+
+.aura-panel__impact-score-fill {
+  display: block;
+  height: 100%;
+  border-radius: 2px;
+}
+
+.aura-panel__impact-trace {
+  padding: 4px 8px;
+  border-radius: 4px;
+  font-size: 11px;
+  color: var(--text-tertiary);
+  line-height: 1.8;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0;
+  overflow-wrap: break-word;
+  word-break: break-word;
+}
+
+.aura-panel__impact-trace-step {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+
+.aura-panel__impact-trace-node {
+  color: var(--text-primary);
+  font-weight: 500;
+}
+
+.aura-panel__impact-trace-file {
+  font-size: 9px;
+  color: var(--text-tertiary);
+  margin-left: 2px;
+}
+
+.aura-panel__impact-trace-edge {
+  color: #58a6ff;
+  font-size: 10px;
+  margin: 0 4px;
+  opacity: 0.7;
+}
+
+.aura-panel__impact-trace-edge::before {
+  content: '→';
+  margin-right: 2px;
+  color: var(--text-tertiary);
+}
+
+/* ── Search Kind Filter ─────────────────────────────────────────────────────── */
+
+.aura-toolbar__search-filter {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.aura-toolbar__search-filter-btn {
+  background: none;
+  border: 1px solid #30363d;
+  border-radius: 4px;
+  color: #8b949e;
+  padding: 4px 8px;
+  cursor: pointer;
+  font-size: 12px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.aura-toolbar__search-filter-btn:hover {
+  border-color: #58a6ff;
+  color: #58a6ff;
+}
+
+.aura-toolbar__search-filter-btn--active {
+  border-color: #58a6ff;
+  color: #58a6ff;
+}
+
+.aura-toolbar__search-kinds {
+  position: absolute;
+  top: 100%;
+  right: 0;
+  background: #161b22;
+  border: 1px solid #30363d;
+  border-radius: 6px;
+  padding: 8px;
+  z-index: 50;
+  min-width: 160px;
+  margin-top: 4px;
+}
+
+.aura-toolbar__search-kind {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 0;
+  font-size: 12px;
+  color: #c9d1d9;
+  cursor: pointer;
+}
+
+.aura-toolbar__search-kind input[type="checkbox"] {
+  accent-color: #58a6ff;
+}
+
+.aura-toolbar__search-result-range {
+  font-size: 10px;
+  color: #484f58;
+  font-family: 'Fira Code', 'Cascadia Code', monospace;
+  margin-left: auto;
+  flex-shrink: 0;
+}
+
+.aura-toolbar__search-result-exported {
+  font-size: 9px;
+  font-weight: 700;
+  color: #3fb950;
+  background: rgba(63, 185, 80, 0.15);
+  padding: 1px 4px;
+  border-radius: 3px;
+  margin-left: 4px;
+}
+
+/* ===== AURA — Panel Tabs ===== */
+
+.aura-page__side-panel {
+  display: flex;
+  flex-direction: column;
+  width: 360px;
+  min-width: 360px;
+  border-right: 1px solid #1a1a1a;
+  height: 100%;
+}
+
+/* ===== AURA — Ask Page (Full-screen Chat) ===== */
+
+.aura-ask-page {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  background: #0d0d0d;
+  font-family: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', Consolas, monospace;
+}
+
+.aura-ask-page__header {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 10px 16px;
+  border-bottom: 1px solid #1a1a1a;
+  background: #0a0a0a;
+  flex-shrink: 0;
+}
+
+.aura-ask-page__back {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: none;
+  border: 1px solid #333;
+  color: #999;
+  padding: 5px 12px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 12px;
+}
+
+.aura-ask-page__back:hover {
+  color: #e0e0e0;
+  border-color: #555;
+}
+
+.aura-ask-page__brand {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: #4ade80;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 1px;
+}
+
+.aura-ask-page__project {
+  color: #555;
+  font-size: 11px;
+  margin-left: auto;
+}
+
+.aura-ask-page__content {
+  flex: 1;
+  min-height: 0;
+}
+
+/* ===== AURA — Chat (Terminal Theme) ===== */
+
+.aura-chat {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  background: var(--assistant-bg, #0d0d0d);
+  font-family: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', Consolas, monospace;
+  color: var(--assistant-fg, #c0c0c0);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.aura-chat__messages {
+  flex: 1;
+  overflow-y: auto;
+  padding: 16px;
+}
+
+.aura-chat__empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  color: var(--assistant-muted, #444);
+  text-align: center;
+}
+
+.aura-chat__empty-icon {
+  font-size: 32px;
+  color: #4ade80;
+  margin-bottom: 12px;
+}
+
+.aura-chat__empty p {
+  margin: 4px 0;
+  font-size: 13px;
+}
+
+.aura-chat__empty-hint {
+  color: #333;
+  font-size: 11px !important;
+}
+
+.aura-chat__message {
+  margin-bottom: 16px;
+  max-width: 100%;
+  word-wrap: break-word;
+}
+
+.aura-chat__message--user {
+  text-align: right;
+}
+
+.aura-chat__message--user .aura-chat__message-content {
+  display: inline-block;
+  background: var(--assistant-user-bg, #1a3a1a);
+  color: var(--assistant-fg, #e0e0e0);
+  padding: 8px 12px;
+  border-radius: 8px;
+  text-align: left;
+  max-width: 85%;
+}
+
+.aura-chat__message--assistant .aura-chat__message-content {
+  color: var(--assistant-fg, #c0c0c0);
+  line-height: 1.6;
+}
+
+/* Markdown elements inside assistant messages */
+.aura-chat__message--assistant .aura-chat__message-content h1,
+.aura-chat__message--assistant .aura-chat__message-content h2,
+.aura-chat__message--assistant .aura-chat__message-content h3 {
+  color: var(--assistant-fg, #e0e0e0);
+  margin: 12px 0 6px;
+  font-weight: 600;
+}
+
+.aura-chat__message--assistant .aura-chat__message-content h1 { font-size: 16px; border-bottom: 1px solid var(--assistant-border, #1a1a1a); padding-bottom: 4px; }
+.aura-chat__message--assistant .aura-chat__message-content h2 { font-size: 14px; }
+.aura-chat__message--assistant .aura-chat__message-content h3 { font-size: 13px; }
+
+.aura-chat__message--assistant .aura-chat__message-content p {
+  margin: 4px 0;
+}
+
+.aura-chat__message--assistant .aura-chat__message-content ul,
+.aura-chat__message--assistant .aura-chat__message-content ol {
+  margin: 4px 0;
+  padding-left: 20px;
+}
+
+.aura-chat__message--assistant .aura-chat__message-content li {
+  margin: 2px 0;
+}
+
+.aura-chat__message--assistant .aura-chat__message-content blockquote {
+  border-left: 3px solid #4ade80;
+  margin: 8px 0;
+  padding: 4px 12px;
+  color: var(--assistant-muted, #999);
+}
+
+.aura-chat__message--assistant .aura-chat__message-content table {
+  border-collapse: collapse;
+  margin: 8px 0;
+  font-size: 12px;
+}
+
+.aura-chat__message--assistant .aura-chat__message-content th,
+.aura-chat__message--assistant .aura-chat__message-content td {
+  border: 1px solid var(--assistant-border, #1a1a1a);
+  padding: 4px 8px;
+}
+
+.aura-chat__message--assistant .aura-chat__message-content th {
+  background: var(--assistant-code-bg, #111);
+  color: var(--assistant-fg, #e0e0e0);
+  font-weight: 600;
+}
+
+.aura-chat__message--assistant .aura-chat__message-content a {
+  color: #4ade80;
+  text-decoration: none;
+}
+
+.aura-chat__message--assistant .aura-chat__message-content a:hover {
+  text-decoration: underline;
+}
+
+.aura-chat__message--assistant .aura-chat__message-content hr {
+  border: none;
+  border-top: 1px solid var(--assistant-border, #1a1a1a);
+  margin: 12px 0;
+}
+
+.aura-chat__message--assistant .aura-chat__message-content strong {
+  color: var(--assistant-fg, #e0e0e0);
+}
+
+.aura-chat__message--assistant .aura-chat__message-content em {
+  color: var(--assistant-muted, #a0a0a0);
+}
+
+/* Inline code */
+.aura-chat__inline-code {
+  background: var(--assistant-code-bg, #1a1a1a);
+  color: #4ade80;
+  padding: 1px 5px;
+  border-radius: 3px;
+  font-family: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', Consolas, monospace;
+  font-size: 12px;
+}
+
+/* Code blocks */
+.aura-chat__code-block {
+  margin: 8px 0;
+  border-radius: 6px;
+  overflow: hidden;
+  border: 1px solid var(--assistant-border, #1a1a1a);
+}
+
+.aura-chat__code-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 4px 10px;
+  background: var(--assistant-code-bg, #111);
+  font-size: 11px;
+}
+
+.aura-chat__code-lang {
+  color: var(--assistant-muted, #666);
+  text-transform: lowercase;
+}
+
+.aura-chat__code-copy {
+  background: none;
+  border: 1px solid var(--assistant-border, #333);
+  color: var(--assistant-muted, #666);
+  padding: 1px 8px;
+  border-radius: 3px;
+  cursor: pointer;
+  font-family: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', Consolas, monospace;
+  font-size: 10px;
+}
+
+.aura-chat__code-copy:hover {
+  color: var(--assistant-fg, #c0c0c0);
+  border-color: var(--assistant-muted, #555);
+}
+
+.aura-chat__code-pre {
+  margin: 0;
+  padding: 10px 12px;
+  background: var(--assistant-code-bg, #0a0a0a);
+  overflow-x: auto;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.aura-chat__code-pre code {
+  font-family: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', Consolas, monospace;
+  color: var(--assistant-fg, #c0c0c0);
+}
+
+.aura-chat__tool-calls {
+  margin-bottom: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.aura-chat__tool-calls-group {
+  margin-bottom: 8px;
+  border: 1px solid var(--assistant-border, #1a1a1a);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.aura-chat__tool-calls-group summary {
+  cursor: pointer;
+  list-style: none;
+  padding: 4px 8px;
+  background: var(--assistant-code-bg, #111);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: #888;
+}
+
+.aura-chat__tool-calls-group summary::-webkit-details-marker {
+  display: none;
+}
+
+.aura-chat__tool-calls-group summary::before {
+  content: '▸';
+  color: #555;
+  font-size: 10px;
+  transition: transform 0.15s;
+}
+
+.aura-chat__tool-calls-group[open] summary::before {
+  transform: rotate(90deg);
+}
+
+.aura-chat__tool-calls-group-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.aura-chat__tool-calls-group-label {
+  color: #888;
+}
+
+.aura-chat__tool-calls-group-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 2px 0;
+}
+
+.aura-chat__tool-call {
+  border: 1px solid var(--assistant-border, #1a1a1a);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.aura-chat__tool-call summary {
+  cursor: pointer;
+  list-style: none;
+  padding: 4px 8px;
+  background: var(--assistant-code-bg, #111);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+}
+
+.aura-chat__tool-call summary::-webkit-details-marker {
+  display: none;
+}
+
+.aura-chat__tool-call summary::before {
+  content: '▸';
+  color: #555;
+  font-size: 10px;
+  transition: transform 0.15s;
+}
+
+.aura-chat__tool-call[open] summary::before {
+  transform: rotate(90deg);
+}
+
+.aura-chat__tool-call-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.aura-chat__tool-call-name {
+  color: #888;
+}
+
+.aura-chat__tool-call-details {
+  padding: 8px;
+  background: #0a0a0a;
+  border-top: 1px solid #1a1a1a;
+}
+
+.aura-chat__tool-call-label {
+  color: #4ade80;
+  font-weight: 600;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.aura-chat__tool-call-thinking {
+  color: var(--assistant-muted, #999);
+  font-size: 12px;
+  line-height: 1.5;
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--assistant-border, #1a1a1a);
+  margin-bottom: 4px;
+}
+
+.aura-chat__tool-call-args pre,
+.aura-chat__tool-call-result pre {
+  margin: 4px 0;
+  padding: 6px;
+  background: #0d0d0d;
+  border: 1px solid var(--assistant-border, #1a1a1a);
+  border-radius: 3px;
+  font-size: 11px;
+  overflow-x: auto;
+  max-height: 200px;
+  overflow-y: auto;
+}
+
+.aura-chat__tool-call-error {
+  color: #ef4444;
+  font-size: 12px;
+  margin-top: 4px;
+}
+
+.aura-chat__status-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.aura-chat__status-dot--done {
+  background: #4ade80;
+}
+
+.aura-chat__status-dot--running {
+  background: #facc15;
+  animation: aura-blink 1s ease-in-out infinite;
+}
+
+.aura-chat__status-dot--error {
+  background: #ef4444;
+}
+
+.aura-chat__status-text--done {
+  color: #4ade80;
+}
+
+.aura-chat__status-text--running {
+  color: #facc15;
+}
+
+.aura-chat__status-text--error {
+  color: #ef4444;
+}
+
+.aura-chat__sub-agents {
+  margin-bottom: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.aura-chat__sub-agents-group {
+  margin-bottom: 8px;
+  border: 1px solid var(--assistant-border, #1a1a1a);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.aura-chat__sub-agents-group summary {
+  cursor: pointer;
+  list-style: none;
+  padding: 4px 8px;
+  background: var(--assistant-code-bg, #111);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: #888;
+}
+
+.aura-chat__sub-agents-group summary::-webkit-details-marker {
+  display: none;
+}
+
+.aura-chat__sub-agents-group summary::before {
+  content: '▸';
+  color: #555;
+  font-size: 10px;
+  transition: transform 0.15s;
+}
+
+.aura-chat__sub-agents-group[open] summary::before {
+  transform: rotate(90deg);
+}
+
+.aura-chat__sub-agents-group-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.aura-chat__sub-agents-group-label {
+  color: #888;
+}
+
+.aura-chat__sub-agents-group-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 2px 0;
+}
+
+.aura-chat__sub-agent {
+  border: 1px solid var(--assistant-border, #1a1a1a);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.aura-chat__sub-agent summary {
+  cursor: pointer;
+  list-style: none;
+  padding: 4px 8px;
+  background: var(--assistant-code-bg, #111);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+}
+
+.aura-chat__sub-agent summary::-webkit-details-marker {
+  display: none;
+}
+
+.aura-chat__sub-agent summary::before {
+  content: '▸';
+  color: #555;
+  font-size: 10px;
+  transition: transform 0.15s;
+}
+
+.aura-chat__sub-agent[open] summary::before {
+  transform: rotate(90deg);
+}
+
+.aura-chat__sub-agent-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.aura-chat__sub-agent-task {
+  color: #888;
+}
+
+.aura-chat__sub-agent-result pre {
+  padding: 8px;
+  background: #0a0a0a;
+  border-top: 1px solid #1a1a1a;
+  font-size: 11px;
+  overflow-x: auto;
+  max-height: 200px;
+  overflow-y: auto;
+}
+
+.aura-chat__cursor {
+  display: inline-block;
+  width: 8px;
+  height: 16px;
+  background: #4ade80;
+  animation: aura-blink 1s ease-in-out infinite;
+  vertical-align: text-bottom;
+  margin-left: 2px;
+}
+
+@keyframes aura-blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0; }
+}
+
+.aura-chat__streaming {
+  padding: 0 0 4px 0;
+}
+
+.aura-chat__compacting {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 16px;
+  color: var(--text-tertiary);
+  font-size: 13px;
+  font-style: italic;
+}
+
+.aura-chat__compacting-spinner {
+  display: inline-block;
+  width: 14px;
+  height: 14px;
+  border: 2px solid var(--border-color);
+  border-top-color: var(--accent-primary);
+  border-radius: 50%;
+  animation: aura-spin 0.8s linear infinite;
+  flex-shrink: 0;
+}
+
+.aura-chat__error {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 16px;
+  background: rgba(239, 68, 68, 0.1);
+  border-top: 1px solid #3a1a1a;
+  color: #ef4444;
+  font-size: 12px;
+}
+
+.aura-chat__error-dismiss {
+  background: none;
+  border: none;
+  color: #ef4444;
+  cursor: pointer;
+  font-size: 16px;
+  padding: 0 4px;
+  line-height: 1;
+}
+
+.aura-chat__input-area {
+  display: flex;
+  align-items: flex-end;
+  padding: 8px 16px;
+  background: var(--assistant-bg, #0d0d0d);
+  border-top: 1px solid var(--assistant-border, #1a1a1a);
+  gap: 8px;
+}
+
+.aura-chat__input-prompt {
+  color: #4ade80;
+  font-size: 14px;
+  font-weight: 700;
+  padding-bottom: 6px;
+  user-select: none;
+}
+
+.aura-chat__input {
+  flex: 1;
+  background: var(--assistant-input-bg, #0d0d0d);
+  border: 1px solid var(--assistant-border, #1a1a1a);
+  border-radius: 4px;
+  color: var(--assistant-fg, #e0e0e0);
+  font-family: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', Consolas, monospace;
+  font-size: 13px;
+  padding: 8px 10px;
+  resize: none;
+  outline: none;
+  min-height: 36px;
+  max-height: 120px;
+  line-height: 1.4;
+  caret-color: #4ade80;
+}
+
+.aura-chat__input:focus {
+  border-color: #4ade80;
+  box-shadow: 0 0 0 1px rgba(74, 222, 128, 0.2);
+}
+
+.aura-chat__input::placeholder {
+  color: var(--assistant-muted, #333);
+}
+
+.aura-chat__input:disabled {
+  opacity: 1;
+}
+
+.aura-chat__send-btn {
+  background: #4ade80;
+  color: #0d0d0d;
+  border: none;
+  border-radius: 4px;
+  width: 36px;
+  height: 36px;
+  font-size: 16px;
+  font-weight: 700;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.2s, box-shadow 0.2s;
+}
+
+.aura-chat__send-btn:hover:not(:disabled) {
+  background: #5ee890;
+  box-shadow: 0 0 12px rgba(74, 222, 128, 0.4);
+}
+
+.aura-chat__send-btn:disabled {
+  background: var(--assistant-user-bg, #1a3a1a);
+  color: var(--assistant-muted, #333);
+  cursor: not-allowed;
+}
+
+/* ── Clickable File Paths ──────────────────────────────────────────────────────── */
+
+.aura-panel__info-value--clickable {
+  background: none;
+  border: none;
+  padding: 0;
+  font-family: inherit;
+  font-size: inherit;
+  color: var(--accent-primary, #58a6ff);
+  cursor: pointer;
+  text-align: left;
+  text-decoration: none;
+}
+
+.aura-panel__info-value--clickable:hover {
+  text-decoration: underline;
+}
+
+.aura-panel__ref-item[style*="cursor: pointer"]:hover {
+  background: rgba(88, 166, 255, 0.08);
+  border-radius: 4px;
+}
+
+.aura-panel__impact-file-path--clickable {
+  cursor: pointer;
+  color: var(--accent-primary, #58a6ff);
+}
+
+.aura-panel__impact-file-path--clickable:hover {
+  text-decoration: underline;
+}
