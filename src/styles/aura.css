@@ -1426,7 +1426,9 @@
 }
 
 .aura-chat__message--user {
-  text-align: right;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
 }
 
 .aura-chat__message--user .aura-chat__message-content {
@@ -1437,6 +1439,31 @@
   border-radius: 8px;
   text-align: left;
   max-width: 85%;
+}
+
+.aura-chat__copy-btn {
+  opacity: 0;
+  background: none;
+  border: none;
+  color: var(--assistant-muted, #666);
+  cursor: pointer;
+  padding: 4px;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: opacity 0.15s, color 0.15s;
+  font-size: 12px;
+  flex-shrink: 0;
+  font-weight: 600;
+}
+
+.aura-chat__message:hover .aura-chat__copy-btn {
+  opacity: 1;
+}
+
+.aura-chat__copy-btn:hover {
+  color: var(--assistant-fg, #e0e0e0);
 }
 
 .aura-chat__message--assistant .aura-chat__message-content {

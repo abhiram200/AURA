@@ -4072,6 +4072,7 @@ body {
   display: flex;
   flex-direction: column;
   height: 100%;
+  position: relative;
   background: var(--assistant-bg, var(--bg-primary));
   color: var(--assistant-fg, var(--text-primary));
 }
@@ -4105,4 +4106,107 @@ body {
   margin-left: 8px;
   padding-left: 8px;
   border-left: 1px solid var(--assistant-border, var(--border-color));
+}
+
+.assistant-page__new-chat-btn {
+  margin-left: auto;
+  background: none;
+  border: 1px solid var(--assistant-border, var(--border-color));
+  color: var(--assistant-fg, var(--text-primary));
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+  flex-shrink: 0;
+}
+
+.assistant-page__new-chat-btn:hover {
+  background: var(--assistant-sidebar, var(--bg-tertiary));
+  border-color: var(--accent-primary, #4ade80);
+}
+
+.assistant-confirm-overlay {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+}
+
+.assistant-confirm-dialog {
+  background: var(--bg-primary);
+  border: 1px solid var(--border-color);
+  border-radius: 12px;
+  padding: 24px;
+  max-width: 360px;
+  width: 90%;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+}
+
+.assistant-confirm-dialog__title {
+  font-size: 15px;
+  font-weight: 600;
+  margin: 0 0 8px;
+  color: var(--text-primary);
+}
+
+.assistant-confirm-dialog__text {
+  font-size: 13px;
+  color: var(--text-secondary);
+  margin: 0 0 16px;
+}
+
+.assistant-confirm-dialog__skip {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--text-tertiary);
+  margin-bottom: 20px;
+  cursor: pointer;
+}
+
+.assistant-confirm-dialog__skip input[type="checkbox"] {
+  accent-color: #4ade80;
+}
+
+.assistant-confirm-dialog__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.assistant-confirm-dialog__btn {
+  padding: 6px 16px;
+  border-radius: 6px;
+  font-size: 13px;
+  cursor: pointer;
+  border: 1px solid var(--border-color);
+  transition: background 0.15s;
+}
+
+.assistant-confirm-dialog__btn--cancel {
+  background: var(--bg-secondary);
+  color: var(--text-secondary);
+}
+
+.assistant-confirm-dialog__btn--cancel:hover {
+  background: var(--bg-tertiary);
+}
+
+.assistant-confirm-dialog__btn--confirm {
+  background: #4ade80;
+  color: #0d0d0d;
+  border-color: #4ade80;
+  font-weight: 600;
+}
+
+.assistant-confirm-dialog__btn--confirm:hover {
+  background: #22c55e;
 }

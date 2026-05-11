@@ -1,3 +1,4 @@
+import { useState, useEffect } from 'react'
 import type { useAura } from '../../hooks/useAura'
 import { useTheme } from '../../hooks/useTheme'
 import AuraChat from '../../components/aura/AuraChat'
@@ -10,9 +11,29 @@ interface AssistantPageProps {
   aura: ReturnType<typeof useAura>
 }
 
-export function AssistantPage({ projectId: _projectId, projectName, workspacePath: _workspacePath, conversationId: _conversationId, aura }: AssistantPageProps) {
+const SKIP_KEY = (pid: string) => `aura-skip-new-chat-confirm:${pid}`
+
+export function AssistantPage({ projectId, projectName, workspacePath: _workspacePath, conversationId: _conversationId, aura }: AssistantPageProps) {
   const { theme } = useTheme()
   const isLight = theme === 'light'
+  const [showConfirm, setShowConfirm] = useState(false)
+
+  const handleNewChat = () => {
+    const skip = localStorage.getItem(SKIP_KEY(projectId)) === 'true'
+    if (skip || aura.chatMessages.length === 0) {
+      aura.startNewChat()
+    } else {
+      setShowConfirm(true)
+    }
+  }
+
+  const confirmNewChat = (skipNext: boolean) => {
+    if (skipNext) {
+      localStorage.setItem(SKIP_KEY(projectId), 'true')
+    }
+    aura.startNewChat()
+    setShowConfirm(false)
+  }
 
   return (
     <div
@@ -37,6 +58,12 @@ export function AssistantPage({ projectId: _projectId, projectName, workspacePat
           <span>AURA AI</span>
           <span className="assistant-page__project-name">{projectName}</span>
         </div>
+        <button className="assistant-page__new-chat-btn" onClick={handleNewChat} title="New chat">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <line x1="12" y1="5" x2="12" y2="19" />
+            <line x1="5" y1="12" x2="19" y2="12" />
+          </svg>
+        </button>
       </div>
       <AuraChat
         messages={aura.chatMessages}
@@ -46,6 +73,25 @@ export function AssistantPage({ projectId: _projectId, projectName, workspacePat
         onAsk={aura.ask}
         onClearError={aura.clearChatError}
       />
+      {showConfirm && (
+        <div className="assistant-confirm-overlay" onClick={() => setShowConfirm(false)}>
+          <div className="assistant-confirm-dialog" onClick={e => e.stopPropagation()}>
+            <p className="assistant-confirm-dialog__title">Start new chat?</p>
+            <p className="assistant-confirm-dialog__text">This will delete your current conversation.</p>
+            <label className="assistant-confirm-dialog__skip">
+              <input type="checkbox" id="skip-new-chat-confirm" />
+              Don't show this again for this project
+            </label>
+            <div className="assistant-confirm-dialog__actions">
+              <button className="assistant-confirm-dialog__btn assistant-confirm-dialog__btn--cancel" onClick={() => setShowConfirm(false)}>Cancel</button>
+              <button className="assistant-confirm-dialog__btn assistant-confirm-dialog__btn--confirm" onClick={() => {
+                const skip = (document.getElementById('skip-new-chat-confirm') as HTMLInputElement).checked
+                confirmNewChat(skip)
+              }}>New Chat</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

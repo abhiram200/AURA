@@ -487,6 +487,21 @@ export function useAura(projectId: string | null) {
     }
   }, [projectId])
 
+  const startNewChat = useCallback(async () => {
+    if (!projectId) return
+    try {
+      const res = await fetch(`/api/aura/chats/${projectId}`, { method: 'POST' })
+      if (res.ok) {
+        const newChat = await res.json()
+        setActiveChatId(newChat.id)
+        setChatMessages([])
+        setChatError(null)
+      }
+    } catch {
+      // Create failed silently
+    }
+  }, [projectId])
+
   const loadActiveChat = useCallback(async (pid: string) => {
     try {
       const res = await fetch(`/api/aura/chats/${pid}`)
@@ -1259,6 +1274,7 @@ export function useAura(projectId: string | null) {
     clearChat,
     clearChatError,
     activeChatId,
+    startNewChat,
   }
 }
 
