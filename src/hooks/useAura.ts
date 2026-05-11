@@ -432,6 +432,7 @@ export function useAura(projectId: string | null) {
   const [isStreaming, setIsStreaming] = useState(false)
   const [isCompacting, setIsCompacting] = useState(false)
   const [chatError, setChatError] = useState<string | null>(null)
+  const [activeChatId, setActiveChatId] = useState<string | null>(null)
 
   const pollIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const watchPollRef = useRef<ReturnType<typeof setInterval> | null>(null)
@@ -461,6 +462,44 @@ export function useAura(projectId: string | null) {
     setSearchResults([])
     setLoading(false)
     setError(null)
+  }, [])
+
+  // ── Chat Persistence ─────────────────────────────────────────────────────────
+
+  const saveChat = useCallback(async () => {
+    if (!projectId || !activeChatId) return
+    try {
+      await fetch(`/api/aura/chats/${projectId}/${activeChatId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ messages: chatMessages, activeLeafId: null }),
+      })
+    } catch {
+      // Save failed silently
+    }
+  }, [projectId, activeChatId, chatMessages])
+
+  const loadActiveChat = useCallback(async (pid: string) => {
+    try {
+      const res = await fetch(`/api/aura/chats/${pid}/active`)
+      if (res.ok) {
+        const chat = await res.json()
+        if (chat) {
+          setActiveChatId(chat.id)
+          setChatMessages(chat.messages || [])
+          return
+        }
+      }
+      // No active chat — create one
+      const createRes = await fetch(`/api/aura/chats/${pid}`, { method: 'POST' })
+      if (createRes.ok) {
+        const newChat = await createRes.json()
+        setActiveChatId(newChat.id)
+        setChatMessages([])
+      }
+    } catch {
+      // Load failed
+    }
   }, [])
 
   // ── Watch Polling (5s slow-poll during watching phase) ────────────────────
@@ -984,6 +1023,17 @@ export function useAura(projectId: string | null) {
     }
   }, [clearAllPolling])
 
+  // ── Load active chat on mount ───────────────────────────────────────────
+
+  useEffect(() => {
+    if (!projectId) {
+      setChatMessages([])
+      setActiveChatId(null)
+      return
+    }
+    loadActiveChat(projectId)
+  }, [projectId, loadActiveChat])
+
   // ── Ask (AI Agent) ──────────────────────────────────────────────────────────
 
   const ask = useCallback(async (prompt: string) => {
@@ -1153,8 +1203,9 @@ export function useAura(projectId: string | null) {
     } finally {
       setIsStreaming(false)
       setIsCompacting(false)
+      saveChat()
     }
-  }, [projectId, graphData, selectedNode, nodeContext, chatMessages])
+  }, [projectId, graphData, selectedNode, nodeContext, chatMessages, saveChat])
 
   const clearChat = useCallback(() => {
     setChatMessages([])
