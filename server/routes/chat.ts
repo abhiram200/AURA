@@ -8,7 +8,7 @@ import type { MemoryService } from '../services/memory.ts'
 import type { SkillsService } from '../services/skills.ts'
 import type { ProjectService } from '../services/project.ts'
 import type { FileStore } from '../storage/fileStore.ts'
-import type { Settings, ToolCallData } from '../storage/types.ts'
+import type { Settings, ToolCallData, Message } from '../storage/types.ts'
 import { isGithubUrl } from '../routes/projects.ts'
 
 type ProjectModeChoice = 'accept' | 'dismiss' | 'open_existing' | 'create_new'
@@ -123,6 +123,7 @@ export function createChatRouter(
       }
 
       let userMessageId: string | undefined
+      let userMessage: Message | undefined
       let contextMessages: { role: string; content: string }[]
 
       if (regenerate) {
@@ -138,7 +139,7 @@ export function createChatRouter(
           branchSummary,
         )
       } else {
-        const userMessage = {
+        userMessage = {
           id: userMsgId || uuidv4(),
           role: 'user' as const,
           content: message,
@@ -146,12 +147,12 @@ export function createChatRouter(
           parentId: parentId ?? null,
         }
         userMessageId = userMessage.id
-        await conversationService.addMessage(conversationId, userMessage)
 
-        const allMessages = await conversationService.get(conversationId)
+        // Don't save user message yet — save both messages as a pair after AI response
+        // Use existing conversation messages for context; assemble() adds the newMessage separately
         const activeMessages = parentId
-          ? contextService.getActivePath(allMessages?.messages ?? conversation.messages, parentId)
-          : allMessages?.messages ?? conversation.messages
+          ? contextService.getActivePath(conversation.messages, parentId)
+          : conversation.messages
 
         const branchSummary = contextService.findSummaryForBranch(conversation.summaries, conversation.activeLeafId, conversation.messages) || conversation.summary
         contextMessages = contextService.assemble(
@@ -421,7 +422,14 @@ export function createChatRouter(
       sendSSE('token', { content: '', isFinal: true })
 
       const aiMessage = { id: aiMsgId || uuidv4(), role: 'assistant' as const, content: fullResponse, timestamp: Date.now(), thinking: fullThinking || undefined, toolCalls: toolCallData.length > 0 ? toolCallData : undefined, parentId: aiMessageParentId }
-      await conversationService.addMessage(conversationId, aiMessage)
+
+      // Save both user and assistant messages as a pair (single disk write)
+      if (userMessage) {
+        await conversationService.addMessages(conversationId, [userMessage, aiMessage])
+      } else {
+        // Regenerate — only save the assistant message
+        await conversationService.addMessage(conversationId, aiMessage)
+      }
 
       sendSSE('done', { messageId: aiMessage.id, userMessageId: userMessageId })
       res.end()
@@ -510,6 +518,10 @@ export function createChatRouter(
         }
       })()
     } catch (err) {
+      // Fallback: save the user message even if streaming failed, so it's not lost
+      if (userMessage) {
+        try { await conversationService.addMessage(conversationId, userMessage) } catch {}
+      }
       try { sendSSE('error', { error: err instanceof Error ? err.message : 'Unknown error' }) } catch {}
       try { res.end() } catch {}
     }

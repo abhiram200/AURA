@@ -58,6 +58,16 @@ export class ConversationService {
     return conv
   }
 
+  async addMessages(id: string, messages: Message[]): Promise<Conversation> {
+    const conv = await this.get(id)
+    if (!conv) throw new Error(`Conversation ${id} not found`)
+    conv.messages.push(...messages)
+    conv.activeLeafId = messages[messages.length - 1].id
+    conv.updatedAt = Date.now()
+    await this.store.write(`conversations/${id}.json`, conv)
+    return conv
+  }
+
   async updateTitle(id: string, title: string): Promise<Conversation> {
     const conv = await this.get(id)
     if (!conv) throw new Error(`Conversation ${id} not found`)
