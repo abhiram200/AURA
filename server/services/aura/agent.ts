@@ -5,7 +5,71 @@ import type { Response } from 'express'
 import type { AuraQueryService } from './graph.ts'
 import type { AgentEventSink } from './sse.ts'
 import { SilentEventSink } from './sse.ts'
-import { COMPACTION_PROMPT } from '../../prompts.ts'
+
+// ── AURA-specific compaction prompt ──────────────────────────────────────────
+
+const AURA_COMPACTION_PROMPT = `You are summarizing a conversation between a user and AURA, a code intelligence assistant connected to the user's codebase. Your job is to produce a detailed, structured markdown summary that captures everything needed to continue the conversation seamlessly — as if the summary IS the conversation from the assistant's perspective.
+
+## What to preserve (be exhaustive)
+
+- **User's intent**: What exactly are they trying to accomplish? Not vague — the specific goal.
+- **Current progress**: What has been completed, what's in progress, what's next.
+- **Findings from tools**: Every concrete fact discovered — file paths, symbol names, function signatures, dependency relationships, import/export chains, route mappings, architecture insights. These are the most important outputs and must be preserved in detail.
+- **Decisions made**: Technical choices, approaches selected, trade-offs discussed, conclusions reached.
+- **Code references**: Exact file paths, line numbers, symbol names, function/class/interface names that were discussed or investigated.
+- **User preferences**: Anything the user stated about how they want things done — coding style, preferred libraries, naming conventions, architectural preferences.
+- **Errors encountered**: Error messages, stack traces, or failure modes that were discussed and their resolutions (if any).
+- **Unresolved questions**: Open issues, unanswered questions, things the user wanted to investigate further.
+
+## What to strip
+
+- **Tool call payloads**: Remove the raw arguments sent to tools (large JSON objects, search queries, etc.). Replace with a one-line description of what the tool was asked to do.
+- **Tool result bodies**: Remove large result payloads (full file contents, long JSON responses, graph data dumps). Extract ONLY the key findings, facts, and conclusions from each result.
+- **Repetitive exchanges**: If the user asked the same thing multiple ways or the assistant retried the same approach, keep only the final successful attempt.
+- **Greeting/pleasantries**: Remove entirely.
+- **Streaming artifacts**: Remove partial responses, empty content, or cursor markers.
+
+## Output format
+
+Produce a markdown document with these sections:
+
+### Intent
+One clear sentence: what is the user trying to accomplish?
+
+### Progress
+- What has been completed
+- What is currently in progress (if anything)
+- What remains to be done
+
+### Key Findings
+The most important section. List every concrete fact, discovery, or insight from tool usage. Be specific:
+- File paths with relevant details (e.g., "src/auth.ts:login — handles JWT validation, called by authMiddleware")
+- Symbol relationships (e.g., "UserModel → depends on → DatabaseConnection, EmailService")
+- Architecture notes (e.g., "Routes are defined in src/routes/ using Express Router, middleware in src/middleware/")
+- Any numbers, sizes, counts mentioned
+
+### Decisions
+- Each decision or conclusion reached, with context on why
+
+### Code References
+- Specific files, symbols, line ranges that were discussed or investigated
+
+### User Preferences
+- Any stated preferences about approach, style, or methodology
+
+### Unresolved
+- Open questions or incomplete tasks
+
+## Rules
+- Be specific, not generic. "src/auth.ts exports validateToken which checks JWT expiry" not "auth was discussed"
+- Include exact names — function names, variable names, file paths, class names
+- Preserve the narrative: what was discovered in what order matters for continuity
+- If the conversation was about debugging, preserve the diagnosis and root cause
+- If code changes were discussed, preserve what was changed and why
+- Do NOT include any raw tool inputs/outputs — only their key takeaways
+- The summary should be detailed enough that a fresh agent can pick up exactly where the conversation left off without missing any technical context
+
+Conversation to summarize:`
 
 // ── Token estimation ────────────────────────────────────────────────────────
 
@@ -695,6 +759,13 @@ export class AuraAgent {
     this.contextWindow = contextWindow ?? 200_000
   }
 
+  static estimateSystemTokens(qs: AuraQueryService, projectPath: string, ollamaBaseUrl: string, model: string): number {
+    const tools = defineAgentTools(qs, projectPath)
+    const ollamaTools = buildOllamaTools(tools)
+    const systemPrompt = buildSystemPrompt('')
+    return estimateTokens(systemPrompt) + estimateTokens(JSON.stringify(ollamaTools))
+  }
+
   abort(): void {
     if (this.abortController) {
       this.abortController.abort()
@@ -715,47 +786,19 @@ export class AuraAgent {
 
     const result = await this.streamChat(
       [
-        { role: 'system', content: 'You are a conversation summarizer for a code intelligence system called AURA. Create a structured working state that preserves all important technical details, decisions, and findings.' },
-        { role: 'user', content: `${COMPACTION_PROMPT}\n${conversationText}` },
+        { role: 'system', content: 'You are a conversation summarizer for AURA, a code intelligence assistant. Produce a detailed, structured markdown summary following the exact format specified in the instructions. Preserve all technical details — file paths, symbol names, relationships, and findings. Strip all tool inputs/outputs to their key takeaways only.' },
+        { role: 'user', content: `${AURA_COMPACTION_PROMPT}\n\n${conversationText}` },
       ],
       [],
       new SilentEventSink(),
     )
 
-    const raw = result?.content || ''
-    let summaryText: string
-
-    // Try to parse as structured working state
-    try {
-      const parsed = JSON.parse(raw)
-      if (parsed && typeof parsed.intent === 'string') {
-        const lines: string[] = ['[Earlier Conversation Summary]']
-        lines.push(`Intent: ${parsed.intent}`)
-        if (parsed.current_step) lines.push(`Current step: ${parsed.current_step}`)
-        if (Array.isArray(parsed.decisions) && parsed.decisions.length > 0) {
-          lines.push('Decisions:')
-          for (const d of parsed.decisions) lines.push(`- ${d}`)
-        }
-        if (Array.isArray(parsed.topics) && parsed.topics.length > 0) {
-          lines.push('Topics:')
-          for (const t of parsed.topics) lines.push(`- ${t}`)
-        }
-        if (Array.isArray(parsed.unresolved) && parsed.unresolved.length > 0) {
-          lines.push('Unresolved:')
-          for (const u of parsed.unresolved) lines.push(`- ${u}`)
-        }
-        summaryText = lines.join('\n')
-      } else {
-        summaryText = `[Earlier Conversation Summary]\n${raw}`
-      }
-    } catch {
-      summaryText = `[Earlier Conversation Summary]\n${raw || 'Previous conversation context was summarized due to length. Key findings are preserved.'}`
-    }
+    const summary = result?.content || 'Previous conversation context was summarized due to length. Key findings are preserved.'
 
     // Build compacted messages: a summary pair that gives the agent context
     const compacted: Array<{ role: string; content: string }> = [
-      { role: 'user', content: summaryText },
-      { role: 'assistant', content: 'Understood. I have the context from our previous conversation and am ready to continue.' },
+      { role: 'user', content: `[Earlier Conversation Summary]\n\n${summary}` },
+      { role: 'assistant', content: 'Understood. I have the full context from our previous conversation and am ready to continue.' },
     ]
 
     // Emit compacted event with replacement messages for the client
@@ -801,21 +844,31 @@ export class AuraAgent {
     const tools = defineAgentTools(this.qs, this.projectPath)
     const ollamaTools = buildOllamaTools(tools)
 
-    // Check if context compaction is needed (1.5x threshold, matching main chat)
+    // Check if context compaction is needed
+    // Reserve 20% of context window for the model's response generation
     const contextLimit = this.contextWindow
+    const compactionThreshold = Math.floor(contextLimit * 0.8)
     let effectivePriorMessages = priorMessages || []
 
     const systemTokens = estimateTokens(systemPrompt)
     const promptTokens = estimateTokens(prompt)
     const priorTokens = estimateMessagesTokens(effectivePriorMessages)
     const totalEstimated = systemTokens + promptTokens + priorTokens
-    const compactionThreshold = Math.floor(contextLimit * 1.5)
 
     if (totalEstimated > compactionThreshold && effectivePriorMessages.length > 2) {
       eventSink.emit('compacting', {})
       const { compacted, kept } = await this.compactPriorMessages(effectivePriorMessages, eventSink)
       effectivePriorMessages = [...compacted, ...kept]
     }
+
+    // Emit context usage so the UI can show a progress bar
+    const toolsTokens = estimateTokens(JSON.stringify(ollamaTools))
+    eventSink.emit('context_usage', {
+      systemTokens: systemTokens + toolsTokens,
+      messageTokens: priorTokens,
+      promptTokens,
+      contextWindow: this.contextWindow,
+    })
 
     // Build messages: system + prior conversation + current prompt
     const messages: OllamaMessage[] = [

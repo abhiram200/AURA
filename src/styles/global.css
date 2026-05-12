@@ -4086,6 +4086,38 @@ body {
   background: var(--assistant-sidebar, var(--bg-secondary));
 }
 
+.assistant-page__context-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+  max-width: 200px;
+  min-width: 100px;
+}
+
+.assistant-page__context-bar-track {
+  flex: 1;
+  height: 6px;
+  background: var(--assistant-border, var(--border-color));
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.assistant-page__context-bar-fill {
+  height: 100%;
+  border-radius: 3px;
+  transition: width 0.3s ease, background 0.3s ease;
+}
+
+.assistant-page__context-bar-label {
+  font-size: 11px;
+  color: var(--assistant-muted, var(--text-tertiary));
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+  min-width: 48px;
+  text-align: right;
+}
+
 .assistant-page__brand {
   display: flex;
   align-items: center;

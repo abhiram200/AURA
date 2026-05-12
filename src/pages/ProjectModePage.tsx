@@ -59,9 +59,14 @@ function FolderPicker({ onPathSelected, isCreating }: { onPathSelected: (path: s
           placeholder="my-project, C:\Projects\my-project, or github.com/user/repo"
         />
       </div>
-      {folderPath.trim() && isGithubUrl(cleanPath(folderPath)) && (
+      {folderPath.trim() && isGithubUrl(cleanPath(folderPath)) && settings.defaultProjectPath && (
         <div className="folder-picker__hint">
           GitHub repo will be cloned into your default project path
+        </div>
+      )}
+      {folderPath.trim() && isGithubUrl(cleanPath(folderPath)) && !settings.defaultProjectPath && (
+        <div className="folder-picker__hint folder-picker__hint--warning">
+          No default project path set. Set a default path in Settings first, or enter a full local path instead.
         </div>
       )}
       {folderPath.trim() && !isGithubUrl(cleanPath(folderPath)) && !isPathLike(cleanPath(folderPath)) && settings.defaultProjectPath && (
@@ -119,16 +124,24 @@ export function ProjectModePage() {
     setIsCreating(true)
     try {
       if (isGithubUrl(input)) {
-        const project = await cloneGithub(input)
-        if (project) {
-          if (conversationId) {
-            fetch(`/api/conversations/${conversationId}/project`, {
-              method: 'PATCH',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ projectId: project.id }),
-            }).catch(() => {})
+        if (!settings.defaultProjectPath) {
+          alert('No default project path set. Please set a default project path in Settings first.')
+          return
+        }
+        try {
+          const project = await cloneGithub(input)
+          if (project) {
+            if (conversationId) {
+              fetch(`/api/conversations/${conversationId}/project`, {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ projectId: project.id }),
+              }).catch(() => {})
+            }
+            navigate(`/project-mode/${project.id}`, { state: { workspacePath: project.workspacePath, conversationId } })
           }
-          navigate(`/project-mode/${project.id}`, { state: { workspacePath: project.workspacePath, conversationId } })
+        } catch (err: any) {
+          alert(err.message || 'Failed to clone repository')
         }
       } else if (isPathLike(input)) {
         // Full path — add existing directory or create at that path

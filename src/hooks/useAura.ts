@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from 'react'
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -1143,6 +1143,14 @@ export function useAura(projectId: string | null) {
               const data = JSON.parse(line.substring(6))
               const eventType = currentEvent // capture before React defers the updater
 
+              // Handle context_usage outside the messages updater
+              if (eventType === 'context_usage') {
+                if (data.systemTokens) setSystemPromptTokens(data.systemTokens as number)
+                if (data.contextWindow) setContextWindowSize(data.contextWindow as number)
+                currentEvent = ''
+                continue
+              }
+
               setChatMessages(prev => {
                 const updated = [...prev]
                 const idx = updated.findIndex(m => m.id === assistantId)
@@ -1240,6 +1248,47 @@ export function useAura(projectId: string | null) {
     setChatError(null)
   }, [])
 
+  // ── Context Usage ──────────────────────────────────────────────────────────
+
+  const [contextWindowSize, setContextWindowSize] = useState(8192)
+  const [systemPromptTokens, setSystemPromptTokens] = useState(0)
+
+  useEffect(() => {
+    if (!projectId) return
+    fetch(`/api/aura/context-estimate/${projectId}`)
+      .then(res => res.ok ? res.json() : null)
+      .then(data => {
+        if (data?.systemTokens) setSystemPromptTokens(data.systemTokens)
+        if (data?.contextWindow) setContextWindowSize(data.contextWindow)
+      })
+      .catch(() => {})
+  }, [projectId])
+
+  const contextUsagePercent = useMemo(() => {
+    const messageTokens = chatMessages.reduce((sum, m) => {
+      // Count message content
+      let tokens = Math.ceil(m.content.length / 4)
+      // Count tool calls and their results — these are sent to the model
+      if (m.toolCalls) {
+        for (const tc of m.toolCalls) {
+          tokens += Math.ceil(JSON.stringify(tc.args).length / 4)
+          if (tc.result) tokens += Math.ceil(JSON.stringify(tc.result).length / 4)
+          if (tc.thinking) tokens += Math.ceil(tc.thinking.length / 4)
+        }
+      }
+      // Count sub-agent results
+      if (m.subAgents) {
+        for (const sa of m.subAgents) {
+          tokens += Math.ceil(sa.task.length / 4)
+          if (sa.result) tokens += Math.ceil(sa.result.length / 4)
+        }
+      }
+      return sum + tokens
+    }, 0)
+    const total = systemPromptTokens + messageTokens
+    return Math.min(100, Math.round((total / contextWindowSize) * 100))
+  }, [chatMessages, contextWindowSize, systemPromptTokens])
+
   return {
     graphData,
     indexingStatus,
@@ -1276,6 +1325,7 @@ export function useAura(projectId: string | null) {
     clearChatError,
     activeChatId,
     startNewChat,
+    contextUsagePercent,
   }
 }
 

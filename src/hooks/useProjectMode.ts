@@ -97,12 +97,15 @@ export function useProjectMode() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ url, name: name || undefined }),
       })
-      if (!res.ok) return null
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ error: 'Clone failed' }))
+        throw new Error(err.error || 'Clone failed')
+      }
       const project = await res.json()
       setProjects((prev) => [project, ...prev])
       return project
-    } catch {
-      return null
+    } catch (err: any) {
+      throw err
     }
   }, [])
 

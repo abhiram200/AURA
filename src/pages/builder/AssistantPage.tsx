@@ -35,6 +35,13 @@ export function AssistantPage({ projectId, projectName, workspacePath: _workspac
     setShowConfirm(false)
   }
 
+  const usage = aura.contextUsagePercent
+  const barColor = usage < 60
+    ? (isLight ? '#22c55e' : '#4ade80')
+    : usage < 80
+      ? (isLight ? '#eab308' : '#facc15')
+      : (isLight ? '#ef4444' : '#f87171')
+
   return (
     <div
       className="assistant-page"
@@ -57,6 +64,15 @@ export function AssistantPage({ projectId, projectName, workspacePath: _workspac
           </svg>
           <span>AURA AI</span>
           <span className="assistant-page__project-name">{projectName}</span>
+        </div>
+        <div className="assistant-page__context-bar">
+          <div className="assistant-page__context-bar-track">
+            <div
+              className="assistant-page__context-bar-fill"
+              style={{ width: `${usage}%`, background: `linear-gradient(90deg, ${isLight ? '#4ade80' : '#22c55e'}, ${barColor})` }}
+            />
+          </div>
+          <span className="assistant-page__context-bar-label">{usage}% used</span>
         </div>
         <button className="assistant-page__new-chat-btn" onClick={handleNewChat} title="New chat">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">

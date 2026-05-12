@@ -254,10 +254,18 @@ export function createChatRouter(
               : null
 
             if (existingPath && isGithubUrl(existingPath)) {
-              // GitHub URL — clone the repo and add to builder
-              sendSSE('project_mode_github', { url: existingPath })
-              projectModeGithub = true
-              toolResult = 'The GitHub project is being cloned and added to the project builder. Say "Cloning your GitHub project..." and nothing else. Do not generate project code or output.'
+              // GitHub URL — check if default project path is set first
+              const defaultPath = (settings?.defaultProjectPath as string) || ''
+              if (!defaultPath) {
+                // No default project path — tell the AI and show modal on client
+                sendSSE('project_mode_github_needs_path', { url: existingPath })
+                toolResult = 'The default project path is not set. Tell the user they need to set a default project path in Settings before cloning a GitHub repository. Provide clear instructions: go to Settings, set the Default Project Path to a local directory, then try again. The GitHub URL was: ' + existingPath
+              } else {
+                // Default project path is set — proceed with clone
+                sendSSE('project_mode_github', { url: existingPath })
+                projectModeGithub = true
+                toolResult = 'The GitHub project is being cloned and added to the project builder. Say "Cloning your GitHub project..." and nothing else. Do not generate project code or output.'
+              }
             } else if (existingPath) {
               // Local path — add automatically, no modal needed
               sendSSE('project_mode_existing', { path: existingPath })
@@ -441,7 +449,8 @@ export function createChatRouter(
 
         try {
           const ctxService = new ContextService()
-          const compactionThreshold = Math.floor(settings.contextWindowSize * 1.5)
+          // Reserve 20% of context window for response generation
+          const compactionThreshold = Math.floor(settings.contextWindowSize * 0.8)
           const conv = await conversationService.get(conversationId)
           if (conv) {
             const activePath = ctxService.getActivePath(conv.messages, conv.activeLeafId ?? null)
@@ -450,8 +459,8 @@ export function createChatRouter(
             if (activeTokens > compactionThreshold) {
               const existingSummary = ctxService.findSummaryForBranch(conv.summaries, conv.activeLeafId, conv.messages)
 
-              const recompactThreshold = Math.floor(settings.contextWindowSize * 3)
-              if (!existingSummary || activeTokens > recompactThreshold) {
+              // Re-compact if no summary exists or tokens have grown past threshold again
+              if (!existingSummary || activeTokens > compactionThreshold) {
                 const conversationText = activePath.map((m) => `${m.role}: ${m.content}`).join('\n')
                 const compactionResponse = await ollama.chat({
                   model: conversation.model || settings.defaultModel,

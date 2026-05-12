@@ -9,6 +9,7 @@ import { ModelSelector } from './ModelSelector';
 import { OnboardingModal } from './OnboardingModal';
 import { MemoryNotification } from './MemoryNotification';
 import { ProjectModeModal } from './ProjectModeModal';
+import { GithubClonePathModal } from './GithubClonePathModal';
 import { ProjectModeButton } from './ProjectModeButton';
 import { Tooltip } from '../shared/Tooltip';
 import { useChat, getActivePath, getSiblings } from '../../hooks/useChat';
@@ -50,6 +51,9 @@ export function ChatLayout() {
     openExistingProject,
     createNewProject,
     continueInChat,
+    pendingGithubUrl,
+    dismissGithubPathModal,
+    retryGithubClone,
   } = useChat(settings.defaultModel);
   const { memories, addMemory, updateMemory, deleteMemory, deleteAllMemories, fetchMemories } = useMemory();
   const { skills, addSkill, updateSkill, toggleSkill, deleteSkill, deleteAllSkills, fetchSkills, lockSkill } = useSkills();
@@ -129,6 +133,13 @@ export function ChatLayout() {
   const handleMemoryDismiss = useCallback(() => {
     setMemoryFacts([]);
   }, []);
+
+  const handleGithubPathSet = useCallback(async (path: string) => {
+    await updateSettings({ defaultProjectPath: path });
+    if (pendingGithubUrl) {
+      retryGithubClone(pendingGithubUrl);
+    }
+  }, [updateSettings, pendingGithubUrl, retryGithubClone]);
 
   const handleScrollStateChange = useCallback((showBtn: boolean, scrollFn: () => void) => {
     setShowScrollBtn(showBtn);
@@ -309,6 +320,12 @@ export function ChatLayout() {
         onOpenExisting={openExistingProject}
         onCreateNew={createNewProject}
         onDismiss={continueInChat}
+      />
+      <GithubClonePathModal
+        open={!!pendingGithubUrl}
+        githubUrl={pendingGithubUrl}
+        onPathSet={handleGithubPathSet}
+        onDismiss={dismissGithubPathModal}
       />
     </div>
   );

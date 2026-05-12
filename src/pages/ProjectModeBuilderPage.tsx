@@ -136,7 +136,7 @@ export function ProjectModeBuilderPage() {
     },
     {
       key: 'assistant',
-      label: 'Assistant',
+      label: 'Builder',
       icon: <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 2a8 8 0 0 0-8 8c0 3.4 2.1 6.3 5 7.5V20h6v-2.5c2.9-1.2 5-4.1 5-7.5a8 8 0 0 0-8-8z" /><path d="M9 20h6M10 22h4" /></svg>,
     },
     {

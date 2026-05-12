@@ -1010,5 +1010,30 @@ export function createAuraRouter(
     res.json(existing)
   })
 
+  // GET /api/aura/context-estimate/:projectId — Estimate system prompt token count
+  router.get('/context-estimate/:projectId', async (req, res) => {
+    const { projectId } = req.params
+    const project = await projectService.get(projectId)
+    if (!project) {
+      res.status(404).json({ error: 'Project not found' })
+      return
+    }
+
+    const qs = queryMap.get(projectId)
+    if (!qs || !qs.isLoaded()) {
+      res.json({ systemTokens: 0, contextWindow: (await getAuraConfig()).contextWindow })
+      return
+    }
+
+    const config = await getAuraConfig()
+    const { AuraAgent } = await import('../services/aura/agent.ts')
+    const estimate = AuraAgent.estimateSystemTokens(qs, project.workspacePath, config.ollamaBaseUrl, config.chatModel)
+
+    res.json({
+      systemTokens: estimate,
+      contextWindow: config.contextWindow,
+    })
+  })
+
   return router
 }

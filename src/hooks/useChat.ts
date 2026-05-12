@@ -96,6 +96,7 @@ export function useChat(defaultModel: string = '') {
   const [projectModeSuggested, setProjectModeSuggested] = useState(false)
   const [existingProjectChoice, setExistingProjectChoice] = useState<{ id: string; name: string } | null>(null)
   const [projectModeName, setProjectModeName] = useState<string | null>(null)
+  const [pendingGithubUrl, setPendingGithubUrl] = useState<string | null>(null)
   const lastUserMessageRef = useRef<string>('')
   const lastConversationIdRef = useRef<string | null>(null)
   const [newChatRequested, setNewChatRequested] = useState(false)
@@ -268,6 +269,12 @@ export function useChat(defaultModel: string = '') {
                   if (project) {
                     setExistingProjectChoice(project)
                   }
+                } else if (lastEventType === 'project_mode_github_needs_path') {
+                  // Default project path not set — show modal for user to set it
+                  const githubUrl = (data as { url?: string }).url
+                  if (githubUrl) {
+                    setPendingGithubUrl(githubUrl)
+                  }
                 } else if (lastEventType === 'project_mode_github') {
                   // Clone a GitHub repo and add to the builder
                   const githubUrl = (data as { url?: string }).url
@@ -281,7 +288,21 @@ export function useChat(defaultModel: string = '') {
                       .then(async (res) => {
                         if (!res.ok) {
                           const err = await res.json().catch(() => ({ error: 'Clone failed' }))
-                          console.error('GitHub clone failed:', err.error)
+                          // Show error in the AI message
+                          setActiveConversation((prev) => {
+                            if (!prev) return prev
+                            const msgs = [...prev.messages]
+                            const lastAi = [...msgs].reverse().find(m => m.role === 'assistant')
+                            if (!lastAi) return prev
+                            return {
+                              ...prev,
+                              messages: msgs.map(m =>
+                                m.id === lastAi.id
+                                  ? { ...m, content: m.content + '\n\n⚠️ Clone failed: ' + (err.error || 'Unknown error') }
+                                  : m
+                              ),
+                            }
+                          })
                           return
                         }
                         const project = await res.json()
@@ -890,6 +911,67 @@ export function useChat(defaultModel: string = '') {
     projectModeSuggested,
     projectModeName,
     existingProjectChoice,
+    pendingGithubUrl,
+    dismissGithubPathModal: () => {
+      setPendingGithubUrl(null)
+    },
+    retryGithubClone: async (url: string) => {
+      const convId = lastConversationIdRef.current
+      if (!convId) return
+      setPendingGithubUrl(null)
+      try {
+        const res = await fetch('/api/projects/clone-github', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ url }),
+        })
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({ error: 'Clone failed' }))
+          // Show error in the conversation
+          setActiveConversation((prev) => {
+            if (!prev) return prev
+            const msgs = [...prev.messages]
+            const lastAi = [...msgs].reverse().find(m => m.role === 'assistant')
+            if (!lastAi) return prev
+            return {
+              ...prev,
+              messages: msgs.map(m =>
+                m.id === lastAi.id
+                  ? { ...m, content: m.content + '\n\n⚠️ Clone failed: ' + (err.error || 'Unknown error') }
+                  : m
+              ),
+            }
+          })
+          return
+        }
+        const project = await res.json()
+        fetch(`/api/conversations/${convId}/project`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ projectId: project.id }),
+        }).catch(() => {})
+        setActiveConversation((prev) =>
+          prev ? { ...prev, projectId: project.id } : prev
+        )
+        navigate(`/project-mode/${project.id}`, { state: { conversationId: convId } })
+      } catch {
+        // Network error during retry
+        setActiveConversation((prev) => {
+          if (!prev) return prev
+          const msgs = [...prev.messages]
+          const lastAi = [...msgs].reverse().find(m => m.role === 'assistant')
+          if (!lastAi) return prev
+          return {
+            ...prev,
+            messages: msgs.map(m =>
+              m.id === lastAi.id
+                ? { ...m, content: m.content + '\n\n⚠️ Clone failed: Network error' }
+                : m
+            ),
+          }
+        })
+      }
+    },
     dismissProjectModeSuggestion: () => {
       setProjectModeSuggested(false)
       setExistingProjectChoice(null)
