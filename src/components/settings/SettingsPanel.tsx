@@ -328,10 +328,9 @@ export function SettingsPanel({
                         <label className="settings-modal-label">
                           Context Window
                         </label>
-                        <span className="context-settings__value">{settings.contextWindowSize >= 1024 ? `${(settings.contextWindowSize / 1024).toFixed(settings.contextWindowSize % 1024 === 0 ? 0 : 1)}K` : settings.contextWindowSize}</span>
+                        <span className="context-settings__value">{settings.contextWindowSize >= 1048576 ? `${(settings.contextWindowSize / 1048576).toFixed(settings.contextWindowSize % 1048576 === 0 ? 0 : 1)}M` : settings.contextWindowSize >= 1024 ? `${(settings.contextWindowSize / 1024).toFixed(settings.contextWindowSize % 1024 === 0 ? 0 : 1)}K` : settings.contextWindowSize}</span>
                       </div>
                       <div className="context-settings__slider-row">
-                        <span className="context-settings__tick">8K</span>
                         <input
                           type="range"
                           min="0"
@@ -339,11 +338,23 @@ export function SettingsPanel({
                           value={Math.round(Math.log(settings.contextWindowSize / 8192) / Math.log(1048576 / 8192) * 100)}
                           onChange={(e) => {
                             const t = parseInt(e.target.value, 10) / 100
-                            onSettingsChange({ contextWindowSize: Math.round(8192 * Math.pow(1048576 / 8192, t)) })
+                            const raw = Math.round(8192 * Math.pow(1048576 / 8192, t))
+                            // Snap to nearest marker if within ~10% threshold
+                            const markers = [8192, 16384, 32768, 65536, 131072, 262144, 1048576]
+                            const snapped = markers.find(m => Math.abs(raw - m) / m < 0.1)
+                            onSettingsChange({ contextWindowSize: snapped || raw })
                           }}
                           className="context-settings__range"
                         />
-                        <span className="context-settings__tick">1M</span>
+                      </div>
+                      <div className="context-settings__markers">
+                        <span className="context-settings__marker" style={{ left: '0%' }}>8K</span>
+                        <span className="context-settings__marker" style={{ left: `${Math.round(Math.log(16384 / 8192) / Math.log(1048576 / 8192) * 100)}%` }}>16K</span>
+                        <span className="context-settings__marker" style={{ left: `${Math.round(Math.log(32768 / 8192) / Math.log(1048576 / 8192) * 100)}%` }}>32K</span>
+                        <span className="context-settings__marker" style={{ left: `${Math.round(Math.log(65536 / 8192) / Math.log(1048576 / 8192) * 100)}%` }}>64K</span>
+                        <span className="context-settings__marker" style={{ left: `${Math.round(Math.log(131072 / 8192) / Math.log(1048576 / 8192) * 100)}%` }}>128K</span>
+                        <span className="context-settings__marker" style={{ left: `${Math.round(Math.log(262144 / 8192) / Math.log(1048576 / 8192) * 100)}%` }}>256K</span>
+                        <span className="context-settings__marker" style={{ left: '100%' }}>1M</span>
                       </div>
                     </div>
                   </SettingsModal>

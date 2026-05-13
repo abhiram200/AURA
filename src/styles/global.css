@@ -3005,12 +3005,22 @@ body {
   margin-top: 4px;
 }
 
-.context-settings__tick {
-  font-size: 10px;
+.context-settings__markers {
+  position: relative;
+  height: 16px;
+  font-size: 9px;
   color: var(--text-tertiary);
   font-weight: 500;
-  flex-shrink: 0;
-  min-width: 20px;
+  margin-top: 2px;
+  margin-bottom: 4px;
+}
+
+.context-settings__marker {
+  position: absolute;
+  transform: translateX(-50%);
+  white-space: nowrap;
+  pointer-events: none;
+  user-select: none;
 }
 
 .context-settings__range {
