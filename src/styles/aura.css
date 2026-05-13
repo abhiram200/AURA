@@ -1912,27 +1912,6 @@
   padding: 0 0 4px 0;
 }
 
-.aura-chat__compacting {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 12px 16px;
-  color: var(--text-tertiary);
-  font-size: 13px;
-  font-style: italic;
-}
-
-.aura-chat__compacting-spinner {
-  display: inline-block;
-  width: 14px;
-  height: 14px;
-  border: 2px solid var(--border-color);
-  border-top-color: var(--accent-primary);
-  border-radius: 50%;
-  animation: aura-spin 0.8s linear infinite;
-  flex-shrink: 0;
-}
-
 .aura-chat__error {
   display: flex;
   align-items: center;

@@ -430,7 +430,6 @@ export function useAura(projectId: string | null) {
   const [processDetail, setProcessDetail] = useState<AuraProcessDetail | null>(null)
   const [chatMessages, setChatMessages] = useState<AuraChatMessage[]>([])
   const [isStreaming, setIsStreaming] = useState(false)
-  const [isCompacting, setIsCompacting] = useState(false)
   const [chatError, setChatError] = useState<string | null>(null)
   const [activeChatId, setActiveChatId] = useState<string | null>(null)
 
@@ -1191,22 +1190,6 @@ export function useAura(projectId: string | null) {
                       ? { ...sa, result: data.result, status: 'completed' as const }
                       : sa
                   )
-                } else if (eventType === 'compacting') {
-                  setIsCompacting(true)
-                } else if (eventType === 'compacted') {
-                  setIsCompacting(false)
-                  const newMessages: AuraChatMessage[] = (data.messages as Array<{ id: string; role: string; content: string; timestamp: number }>).map(m => ({
-                    id: m.id,
-                    role: m.role as 'user' | 'assistant',
-                    content: m.content,
-                    timestamp: m.timestamp,
-                  }))
-                  setChatMessages(prev => {
-                    // The server sends compacted summary + kept last 2 messages
-                    // Replace everything except the current streaming turn
-                    const currentTurn = prev.slice(-2)
-                    return [...newMessages, ...currentTurn]
-                  })
                 } else if (eventType === 'error') {
                   msg.content += `\n\n⚠️ Error: ${data.message}`
                 }
@@ -1234,7 +1217,6 @@ export function useAura(projectId: string | null) {
       })
     } finally {
       setIsStreaming(false)
-      setIsCompacting(false)
       saveChat()
     }
   }, [projectId, graphData, selectedNode, nodeContext, chatMessages, saveChat])
@@ -1250,7 +1232,7 @@ export function useAura(projectId: string | null) {
 
   // ── Context Usage ──────────────────────────────────────────────────────────
 
-  const [contextWindowSize, setContextWindowSize] = useState(8192)
+  const [contextWindowSize, setContextWindowSize] = useState(0)
   const [systemPromptTokens, setSystemPromptTokens] = useState(0)
 
   useEffect(() => {
@@ -1265,25 +1247,10 @@ export function useAura(projectId: string | null) {
   }, [projectId])
 
   const contextUsagePercent = useMemo(() => {
+    if (contextWindowSize === 0) return 0
+    // Count user/assistant message content only (no tools, no sub-agents)
     const messageTokens = chatMessages.reduce((sum, m) => {
-      // Count message content
-      let tokens = Math.ceil(m.content.length / 4)
-      // Count tool calls and their results — these are sent to the model
-      if (m.toolCalls) {
-        for (const tc of m.toolCalls) {
-          tokens += Math.ceil(JSON.stringify(tc.args).length / 4)
-          if (tc.result) tokens += Math.ceil(JSON.stringify(tc.result).length / 4)
-          if (tc.thinking) tokens += Math.ceil(tc.thinking.length / 4)
-        }
-      }
-      // Count sub-agent results
-      if (m.subAgents) {
-        for (const sa of m.subAgents) {
-          tokens += Math.ceil(sa.task.length / 4)
-          if (sa.result) tokens += Math.ceil(sa.result.length / 4)
-        }
-      }
-      return sum + tokens
+      return sum + Math.ceil(m.content.length / 4)
     }, 0)
     const total = systemPromptTokens + messageTokens
     return Math.min(100, Math.round((total / contextWindowSize) * 100))
@@ -1319,7 +1286,6 @@ export function useAura(projectId: string | null) {
     ask,
     chatMessages,
     isStreaming,
-    isCompacting,
     chatError,
     clearChat,
     clearChatError,

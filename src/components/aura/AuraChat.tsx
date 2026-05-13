@@ -6,7 +6,6 @@ import type { AuraChatMessage, AuraToolCall, AuraSubAgentInfo } from '../../hook
 interface AuraChatProps {
   messages: AuraChatMessage[]
   isStreaming: boolean
-  isCompacting: boolean
   error: string | null
   onAsk: (prompt: string) => void
   onClearError: () => void
@@ -246,7 +245,7 @@ function ChatMessage({ msg }: { msg: AuraChatMessage }) {
   )
 }
 
-export default function AuraChat({ messages, isStreaming, isCompacting, error, onAsk, onClearError }: AuraChatProps) {
+export default function AuraChat({ messages, isStreaming, error, onAsk, onClearError }: AuraChatProps) {
   const [input, setInput] = useState('')
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLTextAreaElement>(null)
@@ -262,11 +261,11 @@ export default function AuraChat({ messages, isStreaming, isCompacting, error, o
 
   const handleSend = useCallback(() => {
     const trimmed = input.trim()
-    if (!trimmed || isStreaming || isCompacting) return
+    if (!trimmed || isStreaming) return
     onAsk(trimmed)
     setInput('')
     inputRef.current?.focus()
-  }, [input, isStreaming, isCompacting, onAsk])
+  }, [input, isStreaming, onAsk])
 
   const handleKeyDown = useCallback((e: KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Enter' && !e.shiftKey) {
@@ -294,13 +293,7 @@ export default function AuraChat({ messages, isStreaming, isCompacting, error, o
         {messages.map(msg => (
           <ChatMessage key={msg.id} msg={msg} />
         ))}
-        {isCompacting && (
-          <div className="aura-chat__compacting">
-            <span className="aura-chat__compacting-spinner" />
-            <span>Compacting conversation...</span>
-          </div>
-        )}
-        {isStreaming && !isCompacting && messages[messages.length - 1]?.role === 'assistant' && messages[messages.length - 1]?.content !== '' && (
+        {isStreaming && messages[messages.length - 1]?.role === 'assistant' && messages[messages.length - 1]?.content !== '' && (
           <div className="aura-chat__streaming">
             <span className="aura-chat__cursor" />
           </div>
@@ -323,13 +316,13 @@ export default function AuraChat({ messages, isStreaming, isCompacting, error, o
           value={input}
           onChange={handleTextareaChange}
           onKeyDown={handleKeyDown}
-          placeholder={isStreaming ? (isCompacting ? 'Compacting conversation...' : 'Waiting for response...') : 'Ask about your codebase...'}
+          placeholder={isStreaming ? 'Waiting for response...' : 'Ask about your codebase...'}
           rows={1}
         />
         <button
           className="aura-chat__send-btn"
           onClick={handleSend}
-          disabled={isStreaming || isCompacting || !input.trim()}
+          disabled={isStreaming || !input.trim()}
         >
           ↵
         </button>

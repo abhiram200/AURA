@@ -6,8 +6,6 @@ export enum AgentEventType {
   ToolResult = 'tool_result',
   SubAgentStart = 'sub_agent_start',
   SubAgentResult = 'sub_agent_result',
-  Compacting = 'compacting',
-  Compacted = 'compacted',
   Done = 'done',
   Error = 'error',
 }

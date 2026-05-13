@@ -8,12 +8,11 @@ interface AuraAskPageProps {
   ask: (prompt: string) => void
   chatMessages: AuraChatMessage[]
   isStreaming: boolean
-  isCompacting: boolean
   chatError: string | null
   clearChatError: () => void
 }
 
-export function AuraAskPage({ projectName, onBack, ask, chatMessages, isStreaming, isCompacting, chatError, clearChatError }: AuraAskPageProps) {
+export function AuraAskPage({ projectName, onBack, ask, chatMessages, isStreaming, chatError, clearChatError }: AuraAskPageProps) {
   return (
     <div className="aura-ask-page">
       <div className="aura-ask-page__header">
@@ -43,7 +42,6 @@ export function AuraAskPage({ projectName, onBack, ask, chatMessages, isStreamin
         <AuraChat
           messages={chatMessages}
           isStreaming={isStreaming}
-          isCompacting={isCompacting}
           error={chatError}
           onAsk={ask}
           onClearError={clearChatError}

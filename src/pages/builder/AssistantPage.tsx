@@ -84,7 +84,6 @@ export function AssistantPage({ projectId, projectName, workspacePath: _workspac
       <AuraChat
         messages={aura.chatMessages}
         isStreaming={aura.isStreaming}
-        isCompacting={aura.isCompacting}
         error={aura.chatError}
         onAsk={aura.ask}
         onClearError={aura.clearChatError}
