@@ -12,7 +12,7 @@ interface Step {
   key: keyof UserPreferences;
   question: string;
   type: 'select' | 'text';
-  options?: string[];
+  options?: { value: string; label: string }[];
 }
 
 const STEPS: Step[] = [
@@ -20,19 +20,32 @@ const STEPS: Step[] = [
     key: 'responseDetail',
     question: 'How detailed should responses be?',
     type: 'select',
-    options: ['Brief & concise', 'Balanced', 'Thorough & detailed'],
+    options: [
+      { value: 'brief', label: 'Brief & concise' },
+      { value: 'balanced', label: 'Balanced' },
+      { value: 'thorough', label: 'Thorough & detailed' },
+    ],
   },
   {
     key: 'technicalLevel',
     question: 'What is your technical level?',
     type: 'select',
-    options: ['Beginner', 'Intermediate', 'Advanced', 'Expert'],
+    options: [
+      { value: 'beginner', label: 'Beginner' },
+      { value: 'intermediate', label: 'Intermediate' },
+      { value: 'advanced', label: 'Advanced' },
+      { value: 'expert', label: 'Expert' },
+    ],
   },
   {
     key: 'responseFormat',
     question: 'Preferred response format?',
     type: 'select',
-    options: ['Code-first', 'Explanation-first', 'Balanced'],
+    options: [
+      { value: 'code-first', label: 'Code-first' },
+      { value: 'explanation-first', label: 'Explanation-first' },
+      { value: 'balanced', label: 'Balanced' },
+    ],
   },
   {
     key: 'domains',
@@ -43,25 +56,44 @@ const STEPS: Step[] = [
     key: 'personality',
     question: 'What personality style do you prefer?',
     type: 'select',
-    options: ['Friendly & casual', 'Professional & formal', 'Witty & playful', 'Direct & no-nonsense', 'Adaptable'],
+    options: [
+      { value: 'friendly', label: 'Friendly & casual' },
+      { value: 'professional', label: 'Professional & formal' },
+      { value: 'witty', label: 'Witty & playful' },
+      { value: 'direct', label: 'Direct & no-nonsense' },
+      { value: 'adaptable', label: 'Adaptable' },
+    ],
   },
   {
     key: 'proactiveness',
     question: 'How proactive should the AI be?',
     type: 'select',
-    options: ['Answer only what\'s asked', 'Suggest alternatives', 'Actively offer ideas'],
+    options: [
+      { value: 'answer-only', label: 'Answer only what\'s asked' },
+      { value: 'suggest', label: 'Suggest alternatives' },
+      { value: 'proactive', label: 'Actively offer ideas' },
+    ],
   },
   {
     key: 'languageStyle',
     question: 'Preferred language style?',
     type: 'select',
-    options: ['Simple & jargon-free', 'Technical with explanations', 'Technical, skip explanations'],
+    options: [
+      { value: 'simple', label: 'Simple & jargon-free' },
+      { value: 'technical-explained', label: 'Technical with explanations' },
+      { value: 'technical-concise', label: 'Technical, skip explanations' },
+    ],
   },
   {
     key: 'useOfExamples',
     question: 'How should examples be used?',
     type: 'select',
-    options: ['Analogies', 'Code examples', 'Walkthroughs', 'Minimal examples'],
+    options: [
+      { value: 'analogies', label: 'Analogies' },
+      { value: 'code-examples', label: 'Code examples' },
+      { value: 'walkthroughs', label: 'Walkthroughs' },
+      { value: 'minimal', label: 'Minimal examples' },
+    ],
   },
 ];
 
@@ -136,13 +168,13 @@ export function OnboardingModal({ open, onComplete, onSkip }: OnboardingModalPro
             <div className="onboarding-modal__options">
               {currentStep.options.map((option) => (
                 <button
-                  key={option}
+                  key={option.value}
                   className={`onboarding-modal__option ${
-                    preferences[currentStep.key] === option ? 'onboarding-modal__option--selected' : ''
+                    preferences[currentStep.key] === option.value ? 'onboarding-modal__option--selected' : ''
                   }`}
-                  onClick={() => handleSelect(option)}
+                  onClick={() => handleSelect(option.value)}
                 >
-                  {option}
+                  {option.label}
                 </button>
               ))}
             </div>

@@ -22,7 +22,7 @@ import type { UserPreferences } from '../../hooks/useSettings';
 export function ChatLayout() {
   const navigate = useNavigate();
   const location = useLocation();
-  const { settings, models, updateSettings, updatePreferences } = useSettings();
+  const { settings, models, updateSettings, updatePreferences, loading: settingsLoading } = useSettings();
 
   const {
     conversations,
@@ -68,7 +68,7 @@ export function ChatLayout() {
       window.history.replaceState({}, '')
     }
   }, [location.state])
-  const [showOnboarding, setShowOnboarding] = useState(!settings.preferencesSet);
+  const [showOnboarding, setShowOnboarding] = useState(false);
   const [memoryFacts, setMemoryFacts] = useState<string[]>([]);
   const [pendingModel, setPendingModel] = useState<string | null>(null);
   const [focusTrigger, setFocusTrigger] = useState(0);
@@ -91,18 +91,19 @@ export function ChatLayout() {
     return () => mq.removeEventListener('change', handler);
   }, []);
 
-  // Show onboarding only when preferences haven't been set yet
+  // Show onboarding only when preferences haven't been set yet and settings are loaded
   useEffect(() => {
-    setShowOnboarding(!settings.preferencesSet);
-  }, [settings.preferencesSet]);
+    if (!settingsLoading) {
+      setShowOnboarding(!settings.preferencesSet);
+    }
+  }, [settings.preferencesSet, settingsLoading]);
 
   const handleOnboardingComplete = useCallback(
     (preferences: UserPreferences) => {
-      updatePreferences(preferences);
-      updateSettings({ preferencesSet: true });
+      updateSettings({ preferences, preferencesSet: true });
       setShowOnboarding(false);
     },
-    [updatePreferences, updateSettings]
+    [updateSettings]
   );
 
   const handleOnboardingSkip = useCallback(() => {
