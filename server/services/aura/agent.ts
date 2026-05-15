@@ -1845,39 +1845,43 @@ export class AuraAgent {
       let buffer = ''
       const toolCalls: Array<{ name: string; args: Record<string, unknown>; id?: string }> = []
 
-      while (true) {
-        const { done, value } = await reader.read()
-        if (done) break
+      try {
+        while (true) {
+          const { done, value } = await reader.read()
+          if (done) break
 
-        buffer += decoder.decode(value, { stream: true })
-        const lines = buffer.split('\n')
-        buffer = lines.pop() || ''
+          buffer += decoder.decode(value, { stream: true })
+          const lines = buffer.split('\n')
+          buffer = lines.pop() || ''
 
-        for (const line of lines) {
-          if (!line.trim()) continue
-          try {
-            const parsed = JSON.parse(line)
-            if (parsed.message?.content) {
-              fullContent += parsed.message.content
-              eventSink.emit('token', { content: parsed.message.content })
-            }
-            if (parsed.message?.tool_calls) {
-              for (const tc of parsed.message.tool_calls) {
-                let args: Record<string, unknown> = {}
-                try {
-                  args = typeof tc.function.arguments === 'string'
-                    ? JSON.parse(tc.function.arguments)
-                    : tc.function.arguments || {}
-                } catch {
-                  args = {}
-                }
-                toolCalls.push({ name: tc.function.name, args, id: tc.id })
+          for (const line of lines) {
+            if (!line.trim()) continue
+            try {
+              const parsed = JSON.parse(line)
+              if (parsed.message?.content) {
+                fullContent += parsed.message.content
+                eventSink.emit('token', { content: parsed.message.content })
               }
+              if (parsed.message?.tool_calls) {
+                for (const tc of parsed.message.tool_calls) {
+                  let args: Record<string, unknown> = {}
+                  try {
+                    args = typeof tc.function.arguments === 'string'
+                      ? JSON.parse(tc.function.arguments)
+                      : tc.function.arguments || {}
+                  } catch {
+                    args = {}
+                  }
+                  toolCalls.push({ name: tc.function.name, args, id: tc.id })
+                }
+              }
+            } catch {
+              // Skip malformed lines
             }
-          } catch {
-            // Skip malformed lines
           }
         }
+      } finally {
+        reader.releaseLock()
       }
 
       return { content: fullContent, toolCalls }
