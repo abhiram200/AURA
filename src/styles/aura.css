@@ -557,6 +557,7 @@
 .aura-panel__kind-badge[data-kind="Function"] { background-color: #4ec9b0; }
 .aura-panel__kind-badge[data-kind="Class"] { background-color: #e8a855; }
 .aura-panel__kind-badge[data-kind="Interface"] { background-color: #b57edc; }
+.aura-panel__kind-badge[data-kind="TypeAlias"] { background-color: #9b7edc; }
 .aura-panel__kind-badge[data-kind="Method"] { background-color: #f5d76e; color: #1a1a2e; }
 .aura-panel__kind-badge[data-kind="Variable"] { background-color: #f48fb1; }
 .aura-panel__kind-badge[data-kind="File"] { background-color: #5b8def; }

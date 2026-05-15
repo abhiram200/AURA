@@ -190,6 +190,14 @@ export class AuraParser {
         symbols, contains, seenIds, exportedNames,
       )
 
+      // Extract type aliases (e.g. export type Category = 'personal' | 'work' | ...)
+      this.extractWithQuery(
+        language, tree, filePath,
+        '(type_alias_declaration name: (type_identifier) @name)',
+        AuraNodeKind.TypeAlias,
+        symbols, contains, seenIds, exportedNames,
+      )
+
       // Extract methods
       this.extractWithQuery(
         language, tree, filePath,

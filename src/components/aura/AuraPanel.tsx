@@ -7,6 +7,7 @@ const KIND_COLORS: Record<string, string> = {
   Function: '#4ec9b0',
   Class: '#e8a855',
   Interface: '#b57edc',
+  TypeAlias: '#9b7edc',
   Method: '#f5d76e',
   Variable: '#f48fb1',
   File: '#5b8def',

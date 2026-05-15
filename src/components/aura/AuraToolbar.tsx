@@ -3,7 +3,7 @@ import type { AuraNodeData, AuraSearchResult } from '../../hooks/useAura'
 
 // ── Constants ──────────────────────────────────────────────────────────────────
 
-const NODE_KINDS = ['File', 'Folder', 'Function', 'Class', 'Interface', 'Method', 'Variable'] as const
+const NODE_KINDS = ['File', 'Folder', 'Function', 'Class', 'Interface', 'TypeAlias', 'Method', 'Variable'] as const
 const EDGE_TYPES = ['IMPORTS', 'CALLS', 'EXTENDS', 'IMPLEMENTS', 'CONTAINS', 'DEPENDS_ON', 'HAS_METHOD', 'HAS_PROPERTY', 'TYPEOF', 'TYPE_ALIAS', 'FLOWS_TO'] as const
 
 const KIND_COLORS: Record<string, string> = {

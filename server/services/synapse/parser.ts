@@ -143,6 +143,14 @@ export class SynapseParser {
         symbols, contains, seenIds,
       )
 
+      // Extract type aliases
+      this.extractWithQuery(
+        language, tree, filePath,
+        '(type_alias_declaration name: (type_identifier) @name)',
+        SynapseNodeKind.TypeAlias,
+        symbols, contains, seenIds,
+      )
+
       // Extract methods
       this.extractWithQuery(
         language, tree, filePath,

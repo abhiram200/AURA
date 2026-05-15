@@ -874,28 +874,19 @@ export class AuraIndexer {
   }
 
   private pruneDisconnectedNodes(): void {
-    // Remove file nodes that have no edges at all — they clutter the graph
-    // without contributing to dependency analysis (e.g., postcss.config.cjs).
-    // Keep edges even if their target isn't a node — they reference external
-    // packages (react, framer-motion) or assets (./logo.svg) which is useful info.
+    // Remove file nodes that have no edges at all AND no symbol children.
+    // Files that export types/interfaces may have no import edges yet, but
+    // they have CONTAINS edges to their symbols — those should be kept.
+    // Only prune truly empty files (e.g., postcss.config.cjs with no exports we track).
     const connectedNodes = new Set<string>()
     for (const edge of this.graph.edges) {
       connectedNodes.add(edge.source)
       connectedNodes.add(edge.target)
     }
 
-    // Also keep file nodes that contain symbol children (they're connected via CONTAINS)
-    const filesWithChildren = new Set<string>()
-    for (const edge of this.graph.edges) {
-      if (edge.type === AuraEdgeType.CONTAINS) {
-        filesWithChildren.add(edge.source)
-      }
-    }
-
     this.graph.nodes = this.graph.nodes.filter(node => {
       if (node.kind !== AuraNodeKind.File) return true
       if (connectedNodes.has(node.id)) return true
-      if (filesWithChildren.has(node.id)) return true
       return false
     })
   }

@@ -4,6 +4,7 @@ export enum SynapseNodeKind {
   Function = 'Function',
   Class = 'Class',
   Interface = 'Interface',
+  TypeAlias = 'TypeAlias',
   Method = 'Method',
   Variable = 'Variable',
 }
