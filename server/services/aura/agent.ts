@@ -355,7 +355,7 @@ You MUST follow these rules. Skipping git commits is a critical error.
 - **Commit messages**: Use conventional commit format — \`feat:\`, \`fix:\`, \`refactor:\`, \`chore:\`, \`docs:\`
 - **You are already in the project root.** Do NOT prefix commands with \`cd\`. Just run: \`git add -A && git commit -m "feat: add user model"\`
 - **Never force push, reset --hard, or delete main/master branches**
-- **Stay on the feature branch.** Do NOT merge to main unless the user explicitly says "merge", "ship it", or "looks good".
+- **Stay on the feature branch.** Do NOT merge to main unless the user explicitly says "merge", "ship it", or "looks good". When the user starts a completely new feature, the system will automatically merge the current branch into main and create a new branch — you don't need to handle this.
 - **If \`git add -A\` stages nothing** (no changes to commit), skip the commit and continue — this means the todo was already committed or no files changed.
 
 ## How to Investigate
@@ -1425,14 +1425,45 @@ export class AuraAgent {
       slug = prompt.slice(0, 40).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')
     }
 
-    // Auto-branch for build tasks (only when no plan was resumed and still on main/master)
-    if (!activePlan && isBuildTask && currentBranch && (currentBranch === 'main' || currentBranch === 'master')) {
-      try {
-        const branchName = `aura/${slug}`
-        await execFileAsync('git', ['checkout', '-b', branchName], { cwd: this.projectPath })
-        currentBranch = branchName
-        gitContext += `Created feature branch: ${branchName}\n`
-      } catch { /* branch creation failed, continue anyway */ }
+    // Auto-branch for build tasks
+    if (!activePlan && isBuildTask && currentBranch) {
+      if (currentBranch.startsWith('aura/')) {
+        // Already on a feature branch — this is a NEW build task (not continuing the old one).
+        // Merge the current feature branch into main, delete it, then create a new branch.
+        const previousBranch = currentBranch
+        try {
+          // Stage and commit any uncommitted changes on the current branch
+          await execFileAsync('git', ['add', '-A'], { cwd: this.projectPath })
+          const { stdout: statusStdout } = await execFileAsync('git', ['status', '--porcelain'], { cwd: this.projectPath })
+          if (statusStdout.trim()) {
+            await execFileAsync('git', ['commit', '-m', 'chore: save work before starting new feature'], { cwd: this.projectPath })
+          }
+
+          // Switch to main and fast-forward merge the feature branch
+          await execFileAsync('git', ['checkout', currentBranch === 'master' ? 'master' : 'main'], { cwd: this.projectPath })
+          await execFileAsync('git', ['merge', previousBranch, '--ff-only'], { cwd: this.projectPath })
+          // Delete the merged feature branch
+          await execFileAsync('git', ['branch', '-d', previousBranch], { cwd: this.projectPath })
+          currentBranch = 'main'
+          gitContext += `Merged feature branch ${previousBranch} into main and deleted it.\n`
+        } catch (mergeErr) {
+          // If fast-forward merge fails (diverged), stay on the feature branch
+          // and try to get back to it. Don't force anything.
+          try { await execFileAsync('git', ['checkout', previousBranch], { cwd: this.projectPath }) } catch { /* best effort */ }
+          gitContext += `Could not fast-forward merge ${previousBranch} into main (branches may have diverged). Staying on ${previousBranch}.\n`
+          currentBranch = previousBranch
+        }
+      }
+
+      // Now on main/master — create a new feature branch
+      if (currentBranch === 'main' || currentBranch === 'master') {
+        try {
+          const branchName = `aura/${slug}`
+          await execFileAsync('git', ['checkout', '-b', branchName], { cwd: this.projectPath })
+          currentBranch = branchName
+          gitContext += `Created feature branch: ${branchName}\n`
+        } catch { /* branch creation failed, continue anyway */ }
+      }
     }
 
     const systemPrompt = buildSystemPrompt(skillContent, contextSection, isGreenfield || undefined, gitContext || undefined, planResume || undefined)
