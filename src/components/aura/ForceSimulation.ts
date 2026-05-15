@@ -8,6 +8,7 @@ export const NODE_COLORS: Record<string, string> = {
   Function: '#3fb950',
   Class: '#d29922',
   Interface: '#bc8cff',
+  TypeAlias: '#a78bfa',
   Method: '#f0883e',
   Variable: '#f778ba',
   Route: '#ff6b6b',

@@ -1023,7 +1023,7 @@ function defineAgentTools(qs: AuraQueryService, projectPath: string): AgentTool[
 
     {
       name: 'execute',
-      description: 'Run a shell command in the project directory. Use this to test fixes (run build, lint, test commands), check git status, install packages, or verify changes. Returns stdout, stderr, and exit code. Commands run with the project directory as the working directory.',
+      description: 'Run a shell command in the project directory. You are already in the project root — do NOT prefix commands with `cd`. Just run the command directly (e.g. `npm run build`, not `cd /path && npm run build`). Use this to test fixes, check git status, install packages, or verify changes. Returns stdout, stderr, and exit code.',
       parameters: {
         type: 'object',
         properties: {
