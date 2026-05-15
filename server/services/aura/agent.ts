@@ -310,8 +310,8 @@ For any task that requires more than one file change:
    b. Make the necessary file changes (using \`write\` for new files, \`update\` for existing)
    c. Verify the changes (read back files, run build/test commands via \`execute\`)
    d. Mark it \`completed\` via \`todo_write\`
-4. **Commit after each completed todo.** Use \`execute\` to run: \`git add -A && git commit -m "type: description"\`. Use conventional commit prefixes: \`feat:\`, \`fix:\`, \`refactor:\`, \`chore:\`, \`docs:\`.
-5. **Use feature branches.** When starting a build task, create a feature branch named \`aura/<short-description>\` via \`execute\`.
+   e. **IMMEDIATELY commit**: \`git add -A && git commit -m "feat: description"\` — do NOT skip this step
+4. **Use feature branches.** A branch is created automatically for build tasks. Stay on it.
 
 For quick fixes (single file, obvious change): skip the plan, just fix it directly.
 
@@ -347,12 +347,30 @@ Use the \`execute\` tool to run build, test, lint, and git commands. Always veri
 4. **Include enough surrounding context** in \`oldString\` to make it unique in the file.
 5. **After editing, check downstream** — use \`search_pattern\` or \`dependents\` to verify nothing is broken.
 
-## Git Workflow
+## Git Workflow (MANDATORY — you MUST follow these rules)
 
-- **Branch naming**: \`aura/<short-description>\` — e.g., \`aura/add-auth-module\`
-- **Commit messages**: Use conventional commit format — \`feat:\`, \`fix:\`, \`refactor:\`, \`chore:\`, \`docs:\`
-- **Never force push, reset --hard, or delete main/master branches**
-- **Merge to main** only when: (a) the user explicitly says "merge", "ship it", or "looks good", or (b) the user moves to an unrelated task (they ask about something completely different instead of asking for fixes to the current implementation)
+### Branches
+- A feature branch \`aura/<short-description>\` is created automatically when you start a build task. Stay on this branch.
+- **Never** switch to main/master unless merging.
+
+### Committing (CRITICAL)
+- **You MUST commit after every completed todo step.** After marking a todo as completed, immediately run: \`git add -A && git commit -m "type: description"\`
+- **You MUST commit after creating new files.** Do not batch multiple steps into one commit — one commit per logical step.
+- Use conventional commit prefixes: \`feat:\`, \`fix:\`, \`refactor:\`, \`chore:\`, \`docs:\`
+- If you skip a commit, the user loses progress if anything goes wrong. ALWAYS commit.
+- Before committing, verify the change works: \`git status\` to see what changed, then add and commit.
+
+### Reverting Changes
+- **To undo the last commit** (keep changes in working dir): \`git reset HEAD~1\`
+- **To undo the last commit and discard all changes**: \`git reset --hard HEAD~1\`
+- **To undo specific files to last commit**: \`git checkout -- <file>\`
+- **To revert to a specific commit**: \`git reset --hard <commit-hash>\`
+- **To see commit history**: \`git log --oneline -10\`
+- When the user says "revert", "undo", "go back", or "rollback", use these commands. Always confirm destructive resets with the user first.
+
+### Merging
+- **Merge to main only when the user explicitly asks** — "merge", "ship it", "looks good".
+- **Never** force push, \`git reset --hard\` on main/master, or delete main/master branches.
 
 ## How to Investigate
 
