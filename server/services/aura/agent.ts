@@ -310,8 +310,8 @@ For any task that requires more than one file change:
    b. Make the necessary file changes (using \`write\` for new files, \`update\` for existing)
    c. Verify the changes (read back files, run build/test commands via \`execute\`)
    d. Mark it \`completed\` via \`todo_write\`
-   e. **IMMEDIATELY commit**: \`git add -A && git commit -m "feat: description"\` — do NOT skip this step
-4. **Use feature branches.** A branch is created automatically for build tasks. Stay on it.
+   e. **Commit immediately** — run \`git add -A && git commit -m "type: description"\` via \`execute\`. This is MANDATORY. Do NOT skip this step. Every completed todo MUST result in a git commit. Use conventional commit prefixes: \`feat:\`, \`fix:\`, \`refactor:\`, \`chore:\`, \`docs:\`.
+4. **Use feature branches.** When starting a build task, a feature branch will be created automatically. Stay on that branch for the entire build.
 
 For quick fixes (single file, obvious change): skip the plan, just fix it directly.
 
@@ -347,30 +347,16 @@ Use the \`execute\` tool to run build, test, lint, and git commands. Always veri
 4. **Include enough surrounding context** in \`oldString\` to make it unique in the file.
 5. **After editing, check downstream** — use \`search_pattern\` or \`dependents\` to verify nothing is broken.
 
-## Git Workflow (MANDATORY — you MUST follow these rules)
+## Git Workflow — MANDATORY
 
-### Branches
-- A feature branch \`aura/<short-description>\` is created automatically when you start a build task. Stay on this branch.
-- **Never** switch to main/master unless merging.
+You MUST follow these rules. Skipping git commits is a critical error.
 
-### Committing (CRITICAL)
-- **You MUST commit after every completed todo step.** After marking a todo as completed, immediately run: \`git add -A && git commit -m "type: description"\`
-- **You MUST commit after creating new files.** Do not batch multiple steps into one commit — one commit per logical step.
-- Use conventional commit prefixes: \`feat:\`, \`fix:\`, \`refactor:\`, \`chore:\`, \`docs:\`
-- If you skip a commit, the user loses progress if anything goes wrong. ALWAYS commit.
-- Before committing, verify the change works: \`git status\` to see what changed, then add and commit.
-
-### Reverting Changes
-- **To undo the last commit** (keep changes in working dir): \`git reset HEAD~1\`
-- **To undo the last commit and discard all changes**: \`git reset --hard HEAD~1\`
-- **To undo specific files to last commit**: \`git checkout -- <file>\`
-- **To revert to a specific commit**: \`git reset --hard <commit-hash>\`
-- **To see commit history**: \`git log --oneline -10\`
-- When the user says "revert", "undo", "go back", or "rollback", use these commands. Always confirm destructive resets with the user first.
-
-### Merging
-- **Merge to main only when the user explicitly asks** — "merge", "ship it", "looks good".
-- **Never** force push, \`git reset --hard\` on main/master, or delete main/master branches.
+- **Every completed todo gets a commit.** After marking a todo \`completed\`, you MUST run \`git add -A && git commit -m "type: description"\`. No exceptions.
+- **Commit messages**: Use conventional commit format — \`feat:\`, \`fix:\`, \`refactor:\`, \`chore:\`, \`docs:\`
+- **You are already in the project root.** Do NOT prefix commands with \`cd\`. Just run: \`git add -A && git commit -m "feat: add user model"\`
+- **Never force push, reset --hard, or delete main/master branches**
+- **Stay on the feature branch.** Do NOT merge to main unless the user explicitly says "merge", "ship it", or "looks good".
+- **If \`git add -A\` stages nothing** (no changes to commit), skip the commit and continue — this means the todo was already committed or no files changed.
 
 ## How to Investigate
 
@@ -1687,6 +1673,18 @@ export class AuraAgent {
             await planService.savePlan(this.projectPath, activePlan)
           }
         } catch { /* todo persistence is best-effort */ }
+
+        // If a todo was just marked completed, nudge the model to commit
+        const newlyCompleted = todoList.filter(
+          (t, idx) => t.status === 'completed' && previousTodoList[idx]?.status !== 'completed',
+        )
+        if (newlyCompleted.length > 0) {
+          const subjects = newlyCompleted.map(t => t.subject).join(', ')
+          messages.push({
+            role: 'user',
+            content: `Todo completed: "${subjects}". You MUST commit this now. Run: git add -A && git commit -m "feat: ${subjects.toLowerCase().replace(/[^a-z0-9]+/g, '-').slice(0, 60)}"`,
+          })
+        }
       }
 
       // Handle ask_user — pause for user response
@@ -1845,43 +1843,39 @@ export class AuraAgent {
       let buffer = ''
       const toolCalls: Array<{ name: string; args: Record<string, unknown>; id?: string }> = []
 
-      try {
-        while (true) {
-          const { done, value } = await reader.read()
-          if (done) break
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
 
-          buffer += decoder.decode(value, { stream: true })
-          const lines = buffer.split('\n')
-          buffer = lines.pop() || ''
+        buffer += decoder.decode(value, { stream: true })
+        const lines = buffer.split('\n')
+        buffer = lines.pop() || ''
 
-          for (const line of lines) {
-            if (!line.trim()) continue
-            try {
-              const parsed = JSON.parse(line)
-              if (parsed.message?.content) {
-                fullContent += parsed.message.content
-                eventSink.emit('token', { content: parsed.message.content })
-              }
-              if (parsed.message?.tool_calls) {
-                for (const tc of parsed.message.tool_calls) {
-                  let args: Record<string, unknown> = {}
-                  try {
-                    args = typeof tc.function.arguments === 'string'
-                      ? JSON.parse(tc.function.arguments)
-                      : tc.function.arguments || {}
-                  } catch {
-                    args = {}
-                  }
-                  toolCalls.push({ name: tc.function.name, args, id: tc.id })
-                }
-              }
-            } catch {
-              // Skip malformed lines
+        for (const line of lines) {
+          if (!line.trim()) continue
+          try {
+            const parsed = JSON.parse(line)
+            if (parsed.message?.content) {
+              fullContent += parsed.message.content
+              eventSink.emit('token', { content: parsed.message.content })
             }
+            if (parsed.message?.tool_calls) {
+              for (const tc of parsed.message.tool_calls) {
+                let args: Record<string, unknown> = {}
+                try {
+                  args = typeof tc.function.arguments === 'string'
+                    ? JSON.parse(tc.function.arguments)
+                    : tc.function.arguments || {}
+                } catch {
+                  args = {}
+                }
+                toolCalls.push({ name: tc.function.name, args, id: tc.id })
+              }
+            }
+          } catch {
+            // Skip malformed lines
           }
         }
-      } finally {
-        reader.releaseLock()
       }
 
       return { content: fullContent, toolCalls }
