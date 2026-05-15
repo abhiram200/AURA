@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect, useCallback, type KeyboardEvent } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
-import type { AuraChatMessage, AuraToolCall, AuraSubAgentInfo } from '../../hooks/useAura'
+import type { AuraChatMessage, AuraToolCall, AuraSubAgentInfo, AuraTodoItem, AuraApprovalRequest } from '../../hooks/useAura'
 
 interface AuraChatProps {
   messages: AuraChatMessage[]
@@ -9,6 +9,8 @@ interface AuraChatProps {
   error: string | null
   onAsk: (prompt: string) => void
   onClearError: () => void
+  pendingApproval: AuraApprovalRequest | null
+  onRespondToApproval: (approvalId: string, approved: boolean, feedback?: string) => void
 }
 
 function StatusDot({ status }: { status: 'running' | 'completed' | 'error' }) {
@@ -65,21 +67,29 @@ function ToolCallSection({ tc }: { tc: AuraToolCall }) {
   )
 }
 
+const SUB_AGENT_TYPE_LABELS: Record<string, string> = {
+  explore: 'Explorer',
+  research: 'Researcher',
+  fix: 'Fixer',
+  plan: 'Planner',
+}
+
 function SubAgentSection({ sa }: { sa: AuraSubAgentInfo }) {
   const statusClass = sa.status === 'completed' ? 'aura-chat__status-text--done'
     : sa.status === 'running' ? 'aura-chat__status-text--running'
     : 'aura-chat__status-text--error'
+  const typeLabel = SUB_AGENT_TYPE_LABELS[sa.type || 'explore'] || 'Agent'
   return (
     <details className="aura-chat__sub-agent">
       <summary className="aura-chat__sub-agent-header">
         <StatusDot status={sa.status} />
         <span className={`aura-chat__sub-agent-task ${statusClass}`}>
-          Agent({sa.task})
+          {typeLabel}({sa.task})
         </span>
       </summary>
       {sa.result && (
         <div className="aura-chat__sub-agent-result">
-          <pre>{sa.result.slice(0, 2000)}</pre>
+          <pre>{sa.result}</pre>
         </div>
       )}
     </details>
@@ -117,6 +127,37 @@ function SubAgentsGroup({ subAgents }: { subAgents: AuraSubAgentInfo[] }) {
       <div className="aura-chat__sub-agents-group-list">
         {subAgents.map((sa, i) => (
           <SubAgentSection key={`${sa.taskId}-${i}`} sa={sa} />
+        ))}
+      </div>
+    </details>
+  )
+}
+
+function TodoListSection({ todos }: { todos: AuraTodoItem[] }) {
+  const completed = todos.filter(t => t.status === 'completed').length
+  const total = todos.length
+  const progressPercent = total > 0 ? Math.round((completed / total) * 100) : 0
+  const allDone = completed === total
+
+  return (
+    <details className="aura-chat__todo-list" open={!allDone}>
+      <summary className="aura-chat__todo-list-header">
+        <StatusDot status={allDone ? 'completed' : 'running'} />
+        <span className="aura-chat__todo-list-label">
+          Build Progress: {completed}/{total}
+        </span>
+        <div className="aura-chat__todo-progress-bar">
+          <div className="aura-chat__todo-progress-fill" style={{ width: `${progressPercent}%` }} />
+        </div>
+      </summary>
+      <div className="aura-chat__todo-items">
+        {todos.map(todo => (
+          <div key={todo.id} className={`aura-chat__todo-item aura-chat__todo-item--${todo.status}`}>
+            <span className="aura-chat__todo-status">
+              {todo.status === 'completed' ? '✓' : todo.status === 'in_progress' ? '▶' : '○'}
+            </span>
+            <span className="aura-chat__todo-subject">{todo.subject}</span>
+          </div>
         ))}
       </div>
     </details>
@@ -189,6 +230,95 @@ function ToolCallsGroup({ toolCalls }: { toolCalls: AuraToolCall[] }) {
   )
 }
 
+function ApprovalCard({ request, onRespond }: { request: AuraApprovalRequest; onRespond: (approved: boolean, feedback?: string) => void }) {
+  const [editText, setEditText] = useState('')
+  const [showEdit, setShowEdit] = useState(false)
+
+  if (request.type === 'command') {
+    return (
+      <div className="aura-chat__approval-card">
+        <div className="aura-chat__approval-type">Command Approval</div>
+        <div className="aura-chat__approval-details">
+          <div className="aura-chat__approval-label">Command:</div>
+          <pre className="aura-chat__approval-code">{request.command}</pre>
+          {request.cwd && (
+            <div className="aura-chat__approval-label">Working directory: <code>{request.cwd}</code></div>
+          )}
+        </div>
+        <div className="aura-chat__approval-actions">
+          <button className="aura-chat__approval-btn aura-chat__approval-btn--approve" onClick={() => onRespond(true)}>Approve</button>
+          <button className="aura-chat__approval-btn aura-chat__approval-btn--deny" onClick={() => onRespond(false)}>Deny</button>
+        </div>
+      </div>
+    )
+  }
+
+  if (request.type === 'plan') {
+    return (
+      <div className="aura-chat__approval-card">
+        <div className="aura-chat__approval-type">Plan Review</div>
+        <div className="aura-chat__approval-details">
+          <ReactMarkdown remarkPlugins={[remarkGfm]} components={{
+            code({ className, children }) {
+              const isBlock = className?.startsWith('language-') || String(children).includes('\n')
+              if (isBlock) return <CodeBlock className={className}>{children}</CodeBlock>
+              return <code className="aura-chat__inline-code">{children}</code>
+            },
+            pre({ children }) { return <>{children}</> },
+          }}>
+            {request.planMarkdown || ''}
+          </ReactMarkdown>
+        </div>
+        {!showEdit ? (
+          <div className="aura-chat__approval-actions">
+            <button className="aura-chat__approval-btn aura-chat__approval-btn--approve" onClick={() => onRespond(true)}>Accept Plan</button>
+            <button className="aura-chat__approval-btn aura-chat__approval-btn--edit" onClick={() => setShowEdit(true)}>Suggest Edits</button>
+          </div>
+        ) : (
+          <div className="aura-chat__approval-edit">
+            <textarea
+              className="aura-chat__approval-feedback"
+              value={editText}
+              onChange={e => setEditText(e.target.value)}
+              placeholder="Describe your suggested changes to the plan..."
+              rows={4}
+            />
+            <div className="aura-chat__approval-actions">
+              <button className="aura-chat__approval-btn aura-chat__approval-btn--approve" onClick={() => onRespond(true, editText)}>Accept with Edits</button>
+              <button className="aura-chat__approval-btn aura-chat__approval-btn--deny" onClick={() => onRespond(false, editText)}>Reject with Edits</button>
+              <button className="aura-chat__approval-btn" onClick={() => setShowEdit(false)}>Cancel</button>
+            </div>
+          </div>
+        )}
+      </div>
+    )
+  }
+
+  if (request.type === 'question') {
+    return (
+      <div className="aura-chat__approval-card">
+        <div className="aura-chat__approval-type">Question</div>
+        <div className="aura-chat__approval-details">
+          <p>{request.question}</p>
+        </div>
+        <div className="aura-chat__approval-actions">
+          {(request.options || []).map((option, idx) => (
+            <button
+              key={idx}
+              className="aura-chat__approval-btn aura-chat__approval-btn--option"
+              onClick={() => onRespond(true, option)}
+            >
+              {option}
+            </button>
+          ))}
+        </div>
+      </div>
+    )
+  }
+
+  return null
+}
+
 function ChatMessage({ msg }: { msg: AuraChatMessage }) {
   const isUser = msg.role === 'user'
   const [copied, setCopied] = useState(false)
@@ -207,6 +337,9 @@ function ChatMessage({ msg }: { msg: AuraChatMessage }) {
       )}
       {!isUser && msg.subAgents && msg.subAgents.length > 0 && (
         <SubAgentsGroup subAgents={msg.subAgents} />
+      )}
+      {!isUser && msg.todos && msg.todos.length > 0 && (
+        <TodoListSection todos={msg.todos} />
       )}
       <div className="aura-chat__message-content">
         {isUser ? (
@@ -245,14 +378,14 @@ function ChatMessage({ msg }: { msg: AuraChatMessage }) {
   )
 }
 
-export default function AuraChat({ messages, isStreaming, error, onAsk, onClearError }: AuraChatProps) {
+export default function AuraChat({ messages, isStreaming, error, onAsk, onClearError, pendingApproval, onRespondToApproval }: AuraChatProps) {
   const [input, setInput] = useState('')
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLTextAreaElement>(null)
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }, [messages])
+  }, [messages, pendingApproval])
 
   // Auto-focus input on mount
   useEffect(() => {
@@ -284,9 +417,9 @@ export default function AuraChat({ messages, isStreaming, error, onAsk, onClearE
         {messages.length === 0 && (
           <div className="aura-chat__empty">
             <span className="aura-chat__empty-icon">&gt;_</span>
-            <p>Ask a question about your codebase</p>
+            <p>Ask me to build, fix, or investigate your codebase</p>
             <p className="aura-chat__empty-hint">
-              Try: "How does the indexer work?" or "What breaks if I change X?"
+              Try: "Build an auth module" or "How does the indexer work?"
             </p>
           </div>
         )}
@@ -297,6 +430,12 @@ export default function AuraChat({ messages, isStreaming, error, onAsk, onClearE
           <div className="aura-chat__streaming">
             <span className="aura-chat__cursor" />
           </div>
+        )}
+        {pendingApproval && (
+          <ApprovalCard
+            request={pendingApproval}
+            onRespond={(approved, feedback) => onRespondToApproval(pendingApproval.id, approved, feedback)}
+          />
         )}
         <div ref={messagesEndRef} />
       </div>
@@ -316,7 +455,7 @@ export default function AuraChat({ messages, isStreaming, error, onAsk, onClearE
           value={input}
           onChange={handleTextareaChange}
           onKeyDown={handleKeyDown}
-          placeholder={isStreaming ? 'Waiting for response...' : 'Ask about your codebase...'}
+          placeholder={isStreaming ? 'Building...' : 'Ask me to build, fix, or investigate...'}
           rows={1}
         />
         <button

@@ -87,6 +87,8 @@ export function AssistantPage({ projectId, projectName, workspacePath: _workspac
         error={aura.chatError}
         onAsk={aura.ask}
         onClearError={aura.clearChatError}
+        pendingApproval={aura.pendingApproval}
+        onRespondToApproval={aura.respondToApproval}
       />
       {showConfirm && (
         <div className="assistant-confirm-overlay" onClick={() => setShowConfirm(false)}>

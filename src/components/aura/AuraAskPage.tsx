@@ -1,4 +1,4 @@
-import type { AuraChatMessage } from '../../hooks/useAura'
+import type { AuraChatMessage, AuraApprovalRequest } from '../../hooks/useAura'
 import AuraChat from './AuraChat'
 
 interface AuraAskPageProps {
@@ -10,9 +10,11 @@ interface AuraAskPageProps {
   isStreaming: boolean
   chatError: string | null
   clearChatError: () => void
+  pendingApproval: AuraApprovalRequest | null
+  onRespondToApproval: (approvalId: string, approved: boolean, feedback?: string) => void
 }
 
-export function AuraAskPage({ projectName, onBack, ask, chatMessages, isStreaming, chatError, clearChatError }: AuraAskPageProps) {
+export function AuraAskPage({ projectName, onBack, ask, chatMessages, isStreaming, chatError, clearChatError, pendingApproval, onRespondToApproval }: AuraAskPageProps) {
   return (
     <div className="aura-ask-page">
       <div className="aura-ask-page__header">
@@ -45,6 +47,8 @@ export function AuraAskPage({ projectName, onBack, ask, chatMessages, isStreamin
           error={chatError}
           onAsk={ask}
           onClearError={clearChatError}
+          pendingApproval={pendingApproval}
+          onRespondToApproval={onRespondToApproval}
         />
       </div>
     </div>

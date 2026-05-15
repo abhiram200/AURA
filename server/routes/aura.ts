@@ -17,6 +17,8 @@ import { installSkills, listAvailableSkills } from '../services/skill-installer.
 import { AuraChatService } from '../services/aura-chat.ts'
 import type { AuraChatSession } from '../services/aura-chat.ts'
 import type { GitDiffScope } from '../services/aura/types.ts'
+import { globalApprovalManagers } from '../services/aura/agent.ts'
+import { PlanPersistenceService } from '../services/aura/plan-persistence.ts'
 
 const groupQueryService = new GroupQueryService()
 const chatService = new AuraChatService()
@@ -1033,6 +1035,50 @@ export function createAuraRouter(
       systemTokens: estimate,
       contextWindow: config.contextWindow,
     })
+  })
+
+  // GET /api/aura/plans/:projectId — List active plans
+  router.get('/plans/:projectId', async (req, res) => {
+    const { projectId } = req.params
+    const project = await projectService.get(projectId)
+    if (!project) {
+      res.status(404).json({ error: 'Project not found' })
+      return
+    }
+    const planService = new PlanPersistenceService()
+    const plans = await planService.listPlans(project.workspacePath)
+    res.json({ plans })
+  })
+
+  // POST /api/aura/approve/:projectId — Resolve a pending approval request
+  router.post('/approve/:projectId', async (req, res) => {
+    const { projectId } = req.params
+    const { approvalId, approved, feedback } = req.body as { approvalId: string; approved: boolean; feedback?: string }
+
+    if (!approvalId) {
+      res.status(400).json({ error: 'approvalId is required' })
+      return
+    }
+
+    const project = await projectService.get(projectId)
+    if (!project) {
+      res.status(404).json({ error: 'Project not found' })
+      return
+    }
+
+    const am = globalApprovalManagers.get(project.workspacePath)
+    if (!am) {
+      res.status(404).json({ error: 'No pending approvals for this project' })
+      return
+    }
+
+    const resolved = am.resolve(approvalId, { approved, feedback })
+    if (!resolved) {
+      res.status(404).json({ error: 'Approval request not found or expired' })
+      return
+    }
+
+    res.json({ status: 'ok' })
   })
 
   return router

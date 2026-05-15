@@ -1893,6 +1893,91 @@
   overflow-y: auto;
 }
 
+.aura-chat__todo-list {
+  margin: 8px 0;
+  border: 1px solid var(--assistant-border, #1a1a1a);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.aura-chat__todo-list summary {
+  cursor: pointer;
+  list-style: none;
+  padding: 8px 12px;
+  background: var(--assistant-code-bg, #111);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: #888;
+}
+
+.aura-chat__todo-list summary::-webkit-details-marker {
+  display: none;
+}
+
+.aura-chat__todo-list summary::before {
+  content: '▸';
+  color: #555;
+  font-size: 10px;
+  transition: transform 0.15s;
+}
+
+.aura-chat__todo-list[open] summary::before {
+  transform: rotate(90deg);
+}
+
+.aura-chat__todo-list-label {
+  color: #888;
+}
+
+.aura-chat__todo-progress-bar {
+  flex: 1;
+  height: 4px;
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.aura-chat__todo-progress-fill {
+  height: 100%;
+  background: var(--accent-primary);
+  transition: width 0.3s ease;
+  border-radius: 2px;
+}
+
+.aura-chat__todo-items {
+  padding: 4px 0;
+}
+
+.aura-chat__todo-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 12px;
+  font-size: 13px;
+}
+
+.aura-chat__todo-item--completed {
+  opacity: 0.6;
+  text-decoration: line-through;
+}
+
+.aura-chat__todo-item--in_progress {
+  color: var(--accent-primary);
+  font-weight: 500;
+}
+
+.aura-chat__todo-status {
+  width: 16px;
+  text-align: center;
+  flex-shrink: 0;
+}
+
+.aura-chat__todo-subject {
+  flex: 1;
+}
+
 .aura-chat__cursor {
   display: inline-block;
   width: 8px;
@@ -2037,4 +2122,206 @@
 
 .aura-panel__impact-file-path--clickable:hover {
   text-decoration: underline;
+}
+
+/* ── Approval Card ─────────────────────────────────────────────────────────────── */
+
+.aura-chat__approval-card {
+  background: #111820;
+  border: 1px solid #2a3a4a;
+  border-radius: 8px;
+  margin: 12px 0;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.aura-chat__approval-type {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.8px;
+  color: #58a6ff;
+  padding: 2px 8px;
+  background: rgba(88, 166, 255, 0.1);
+  border-radius: 4px;
+  display: inline-block;
+  align-self: flex-start;
+}
+
+.aura-chat__approval-details {
+  font-size: 13px;
+  color: #c9d1d9;
+  line-height: 1.6;
+  max-height: 50vh;
+  overflow-y: auto;
+}
+
+.aura-chat__approval-details p {
+  margin: 0 0 8px;
+}
+
+.aura-chat__approval-label {
+  font-size: 11px;
+  color: #8b949e;
+  margin-bottom: 4px;
+}
+
+.aura-chat__approval-label code {
+  color: #c9d1d9;
+  font-family: 'Fira Code', 'Cascadia Code', monospace;
+  font-size: 11px;
+}
+
+.aura-chat__approval-code {
+  background: #0d1117;
+  border: 1px solid #21262d;
+  border-radius: 6px;
+  padding: 10px 12px;
+  font-family: 'Fira Code', 'Cascadia Code', monospace;
+  font-size: 13px;
+  color: #e6edf3;
+  overflow-x: auto;
+  margin: 8px 0;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+.aura-chat__approval-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.aura-chat__approval-btn {
+  padding: 8px 16px;
+  border-radius: 6px;
+  border: 1px solid #30363d;
+  background: #161b22;
+  color: #c9d1d9;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.2s, border-color 0.2s, box-shadow 0.2s;
+  font-family: inherit;
+}
+
+.aura-chat__approval-btn:hover {
+  border-color: #484f58;
+  background: #21262d;
+}
+
+.aura-chat__approval-btn--approve {
+  background: rgba(63, 185, 80, 0.15);
+  border-color: #3fb950;
+  color: #3fb950;
+}
+
+.aura-chat__approval-btn--approve:hover {
+  background: rgba(63, 185, 80, 0.25);
+  box-shadow: 0 0 8px rgba(63, 185, 80, 0.3);
+}
+
+.aura-chat__approval-btn--deny {
+  background: rgba(255, 68, 68, 0.1);
+  border-color: #ff4444;
+  color: #ff4444;
+}
+
+.aura-chat__approval-btn--deny:hover {
+  background: rgba(255, 68, 68, 0.2);
+  box-shadow: 0 0 8px rgba(255, 68, 68, 0.3);
+}
+
+.aura-chat__approval-btn--edit {
+  background: rgba(88, 166, 255, 0.1);
+  border-color: #58a6ff;
+  color: #58a6ff;
+}
+
+.aura-chat__approval-btn--edit:hover {
+  background: rgba(88, 166, 255, 0.2);
+  box-shadow: 0 0 8px rgba(88, 166, 255, 0.3);
+}
+
+.aura-chat__approval-btn--option {
+  background: rgba(88, 166, 255, 0.08);
+  border-color: #2a5a8a;
+  color: #79c0ff;
+}
+
+.aura-chat__approval-btn--option:hover {
+  background: rgba(88, 166, 255, 0.18);
+  border-color: #58a6ff;
+  box-shadow: 0 0 8px rgba(88, 166, 255, 0.2);
+}
+
+.aura-chat__approval-edit {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.aura-chat__approval-feedback {
+  width: 100%;
+  padding: 10px 12px;
+  background: #0d1117;
+  border: 1px solid #21262d;
+  border-radius: 6px;
+  color: #c9d1d9;
+  font-family: 'Fira Code', 'Cascadia Code', monospace;
+  font-size: 13px;
+  resize: vertical;
+  min-height: 80px;
+  outline: none;
+  transition: border-color 0.2s;
+}
+
+.aura-chat__approval-feedback:focus {
+  border-color: #58a6ff;
+  box-shadow: 0 0 0 2px rgba(88, 166, 255, 0.15);
+}
+
+.aura-chat__approval-feedback::placeholder {
+  color: #484f58;
+}
+
+.aura-chat__approval-details h1,
+.aura-chat__approval-details h2,
+.aura-chat__approval-details h3,
+.aura-chat__approval-details h4 {
+  color: #e6edf3;
+  margin: 12px 0 6px;
+}
+
+.aura-chat__approval-details ul,
+.aura-chat__approval-details ol {
+  padding-left: 20px;
+  margin: 4px 0;
+}
+
+.aura-chat__approval-details li {
+  margin-bottom: 4px;
+}
+
+.aura-chat__approval-details code {
+  font-family: 'Fira Code', 'Cascadia Code', monospace;
+  font-size: 12px;
+  background: rgba(88, 166, 255, 0.1);
+  padding: 1px 5px;
+  border-radius: 3px;
+  color: #79c0ff;
+}
+
+.aura-chat__approval-details pre {
+  background: #0d1117;
+  border: 1px solid #21262d;
+  border-radius: 6px;
+  padding: 10px 12px;
+  overflow-x: auto;
+}
+
+.aura-chat__approval-details strong {
+  color: #e6edf3;
 }

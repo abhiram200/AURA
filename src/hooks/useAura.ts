@@ -397,8 +397,27 @@ export interface AuraToolCall {
 export interface AuraSubAgentInfo {
   taskId: string
   task: string
+  type?: string
   status: 'running' | 'completed'
   result?: string
+}
+
+export interface AuraTodoItem {
+  id: string
+  subject: string
+  description: string
+  status: 'pending' | 'in_progress' | 'completed'
+  blockedBy?: string[]
+}
+
+export interface AuraApprovalRequest {
+  id: string
+  type: 'command' | 'plan' | 'question'
+  command?: string
+  cwd?: string
+  planMarkdown?: string
+  question?: string
+  options?: string[]
 }
 
 export interface AuraChatMessage {
@@ -407,6 +426,7 @@ export interface AuraChatMessage {
   content: string
   toolCalls?: AuraToolCall[]
   subAgents?: AuraSubAgentInfo[]
+  todos?: AuraTodoItem[]
   timestamp: number
 }
 
@@ -432,6 +452,7 @@ export function useAura(projectId: string | null) {
   const [isStreaming, setIsStreaming] = useState(false)
   const [chatError, setChatError] = useState<string | null>(null)
   const [activeChatId, setActiveChatId] = useState<string | null>(null)
+  const [pendingApproval, setPendingApproval] = useState<AuraApprovalRequest | null>(null)
 
   const chatMessagesRef = useRef<AuraChatMessage[]>(chatMessages)
   const activeChatIdRef = useRef<string | null>(activeChatId)
@@ -1182,6 +1203,7 @@ export function useAura(projectId: string | null) {
                   msg.subAgents = [...(msg.subAgents || []), {
                     taskId: data.taskId,
                     task: data.task,
+                    type: data.type || 'explore',
                     status: 'running' as const,
                   }]
                 } else if (eventType === 'sub_agent_result') {
@@ -1190,6 +1212,10 @@ export function useAura(projectId: string | null) {
                       ? { ...sa, result: data.result, status: 'completed' as const }
                       : sa
                   )
+                } else if (eventType === 'todo_update') {
+                  msg.todos = data.todos || []
+                } else if (eventType === 'approval_request') {
+                  setPendingApproval(data as AuraApprovalRequest)
                 } else if (eventType === 'error') {
                   msg.content += `\n\n⚠️ Error: ${data.message}`
                 }
@@ -1229,6 +1255,20 @@ export function useAura(projectId: string | null) {
   const clearChatError = useCallback(() => {
     setChatError(null)
   }, [])
+
+  const respondToApproval = useCallback(async (approvalId: string, approved: boolean, feedback?: string) => {
+    setPendingApproval(null)
+    if (!projectId) return
+    try {
+      await fetch(`/api/aura/approve/${projectId}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ approvalId, approved, feedback }),
+      })
+    } catch {
+      // Approval response failed — the timeout on the server side will handle it
+    }
+  }, [projectId])
 
   // ── Context Usage ──────────────────────────────────────────────────────────
 
@@ -1292,6 +1332,8 @@ export function useAura(projectId: string | null) {
     activeChatId,
     startNewChat,
     contextUsagePercent,
+    pendingApproval,
+    respondToApproval,
   }
 }
 

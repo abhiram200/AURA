@@ -6,6 +6,9 @@ export enum AgentEventType {
   ToolResult = 'tool_result',
   SubAgentStart = 'sub_agent_start',
   SubAgentResult = 'sub_agent_result',
+  TodoUpdate = 'todo_update',
+  ApprovalRequest = 'approval_request',
+  PlanCompleted = 'plan_completed',
   Done = 'done',
   Error = 'error',
 }
