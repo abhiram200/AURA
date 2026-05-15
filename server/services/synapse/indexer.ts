@@ -1,6 +1,7 @@
 import path from 'path'
 import fs from 'fs/promises'
 import fsSync from 'fs'
+import ignore from 'ignore'
 import { SynapseParser } from './parser.ts'
 import {
   SynapseNodeKind,
@@ -175,7 +176,7 @@ export class SynapseIndexer {
 
   // --- Private methods ---
 
-  private async walkDir(currentPath: string, files: string[], parentGitignore: string[] = []): Promise<void> {
+  private async walkDir(currentPath: string, files: string[], parentIg: ReturnType<typeof ignore> | null = null, relativeDir: string = ''): Promise<void> {
     let entries: fsSync.Dirent[]
     try {
       entries = await fs.readdir(currentPath, { withFileTypes: true })
@@ -183,60 +184,41 @@ export class SynapseIndexer {
       return
     }
 
-    // Merge parent gitignore patterns with any local .gitignore
-    const localGitignore = await this.loadGitignore(currentPath)
-    const gitignorePatterns = [...parentGitignore, ...localGitignore]
+    // Build the ignore instance for this directory: inherit parent, then add local .gitignore
+    let ig = parentIg
+    const localIg = await this.loadGitignore(currentPath)
+    if (localIg) {
+      ig = ig ? ig.add(localIg) : localIg
+    }
 
     for (const entry of entries) {
       const entryPath = path.join(currentPath, entry.name)
+      const entryRelative = relativeDir ? `${relativeDir}/${entry.name}` : entry.name
+
+      // Check hard-coded ignore list first
+      if (entry.isDirectory() && this.parser.shouldIgnore(entry.name)) continue
+
+      // Check gitignore using relative path (supports path-based patterns like src/secrets/)
+      if (ig && ig.ignores(entryRelative)) continue
 
       if (entry.isDirectory()) {
-        if (this.parser.shouldIgnore(entry.name)) continue
-        if (this.isGitignored(entry.name, gitignorePatterns)) continue
-        await this.walkDir(entryPath, files, gitignorePatterns)
+        await this.walkDir(entryPath, files, ig, entryRelative)
       } else if (entry.isFile()) {
-        if (this.parser.isParsable(entryPath) && !this.isGitignored(entry.name, gitignorePatterns)) {
+        if (this.parser.isParsable(entryPath)) {
           files.push(entryPath)
         }
       }
     }
   }
 
-  private async loadGitignore(dirPath: string): Promise<string[]> {
+  private async loadGitignore(dirPath: string): Promise<ReturnType<typeof ignore> | null> {
     const gitignorePath = path.join(dirPath, '.gitignore')
     try {
       const content = await fs.readFile(gitignorePath, 'utf-8')
-      return content
-        .split('\n')
-        .map(line => line.trim())
-        .filter(line => line.length > 0 && !line.startsWith('#'))
+      return ignore().add(content)
     } catch {
-      return []
+      return null
     }
-  }
-
-  private isGitignored(name: string, patterns: string[]): boolean {
-    for (const pattern of patterns) {
-      const cleanPattern = pattern.replace(/\/$/, '')
-      // Exact match
-      if (cleanPattern === name) return true
-      // Pattern starts with * — e.g. *.log matches foo.log
-      if (cleanPattern.startsWith('*') && !cleanPattern.includes('*'.slice(1))) {
-        const suffix = cleanPattern.slice(1)
-        if (name.endsWith(suffix)) return true
-      }
-      // Pattern ends with * — e.g. dist* matches dist-out
-      if (cleanPattern.endsWith('*') && cleanPattern.indexOf('*') === cleanPattern.length - 1) {
-        const prefix = cleanPattern.slice(0, -1)
-        if (name.startsWith(prefix)) return true
-      }
-      // Glob pattern with * in the middle — e.g. *.generated.ts
-      if (cleanPattern.includes('*')) {
-        const regex = new RegExp('^' + cleanPattern.replace(/\./g, '\\.').replace(/\*/g, '.*') + '$')
-        if (regex.test(name)) return true
-      }
-    }
-    return false
   }
 
   private resolveImports(): void {

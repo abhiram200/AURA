@@ -1,4 +1,7 @@
 import chokidar, { type FSWatcher } from 'chokidar'
+import fs from 'fs/promises'
+import path from 'path'
+import ignore from 'ignore'
 import { AuraParser } from './parser.ts'
 
 export class AuraWatcher {
@@ -13,24 +16,37 @@ export class AuraWatcher {
     const parser = new AuraParser()
     await parser.init()
 
-    // Build a set of parsable extensions for filtering
-    const parsableExtensions = new Set<string>()
-    for (const ext of ['.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs']) {
-      parsableExtensions.add(ext)
+    // Build .gitignore-based ignore filter for the watcher
+    const ig = await this.loadGitignore(projectPath)
+    const alwaysIgnored = new Set([
+      'node_modules', 'dist', 'build', '.git', '.aura',
+      'coverage', '.next', 'out', '.cache',
+    ])
+
+    const isIgnored = (filePath: string): boolean => {
+      const rel = path.relative(projectPath, filePath).replace(/\\/g, '/')
+      if (!rel || rel === '') return false
+
+      // Always-ignore hardcoded dirs
+      const parts = rel.split('/')
+      if (parts.some(p => alwaysIgnored.has(p))) return true
+
+      // Check .gitignore
+      if (ig && ig.ignores(rel)) return true
+
+      return false
     }
 
     this.watcher = chokidar.watch(projectPath, {
-      ignored: [
-        '**/node_modules/**',
-        '**/dist/**',
-        '**/build/**',
-        '**/.git/**',
-        '**/.aura/**',
-        '**/coverage/**',
-        '**/.next/**',
-        '**/out/**',
-        '**/.cache/**',
-      ],
+      ignored: (filePath: string) => {
+        // Only check parsable files — skip everything else
+        if (!parser.isParsable(filePath)) {
+          // Allow directories through so chokidar can walk into them,
+          // but skip known-ignored directories at the directory level
+          return isIgnored(filePath)
+        }
+        return isIgnored(filePath)
+      },
       persistent: true,
       ignoreInitial: true,
       awaitWriteFinish: {
@@ -80,5 +96,15 @@ export class AuraWatcher {
       this.watcher = null
     }
     this.changedFiles.clear()
+  }
+
+  private async loadGitignore(projectPath: string): Promise<ReturnType<typeof ignore> | null> {
+    const gitignorePath = path.join(projectPath, '.gitignore')
+    try {
+      const content = await fs.readFile(gitignorePath, 'utf-8')
+      return ignore().add(content)
+    } catch {
+      return null
+    }
   }
 }
