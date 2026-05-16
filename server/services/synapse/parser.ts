@@ -31,6 +31,7 @@ const IGNORED_DIRS = new Set([
   '__pycache__',
   '.terraform',
   '.synapse',
+  '.aura',
   'out',
   '.cache',
   '.vscode',

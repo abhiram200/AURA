@@ -17,7 +17,12 @@ export class AuraWatcher {
     await parser.init()
 
     // Build .gitignore-based ignore filter for the watcher
-    const ig = await this.loadGitignore(projectPath)
+    // Start with base patterns that are always excluded
+    const ig = ignore().add('.aura').add('.git')
+    const projectIg = await this.loadGitignore(projectPath)
+    if (projectIg) {
+      ig.add(projectIg)
+    }
     const alwaysIgnored = new Set([
       'node_modules', 'dist', 'build', '.git', '.aura',
       'coverage', '.next', 'out', '.cache',

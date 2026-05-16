@@ -40,7 +40,9 @@ export class SynapseIndexer {
 
   async scan(): Promise<string[]> {
     const files: string[] = []
-    await this.walkDir(this.projectPath, files)
+    // Base ignore patterns — always excluded regardless of .gitignore
+    const baseIg = ignore().add('.aura').add('.synapse').add('.git')
+    await this.walkDir(this.projectPath, files, baseIg)
     return files.sort()
   }
 
