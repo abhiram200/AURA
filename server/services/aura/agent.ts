@@ -336,7 +336,7 @@ Do NOT use sub-agents for simple single-focus questions — call tools directly 
 
 ## Running Commands
 
-Use the \`execute\` tool to run build, test, lint, and git commands. Always verify changes by:
+Use the \`execute\` tool to run build, test, and lint commands — NEVER use it for git operations. Always verify changes by:
 1. Running relevant build/test commands after editing files
 2. Reading the modified files back to confirm correctness
 3. If a fix fails, try a different approach — never repeat the same edit
@@ -1046,11 +1046,11 @@ function defineAgentTools(qs: AuraQueryService, projectPath: string): AgentTool[
 
     {
       name: 'execute',
-      description: 'Run a shell command in the project directory. You are already in the project root — do NOT prefix commands with `cd`. Just run the command directly (e.g. `npm run build`, not `cd /path && npm run build`). Use this to test fixes, check git status, install packages, or verify changes. Returns stdout, stderr, and exit code.',
+      description: 'Run a shell command in the project directory. You are already in the project root — do NOT prefix commands with `cd`. Just run the command directly (e.g. `npm run build`, not `cd /path && npm run build`). Use this to test fixes, install packages, or verify changes. Do NOT use this for git operations — use the `git` tool instead. Returns stdout, stderr, and exit code.',
       parameters: {
         type: 'object',
         properties: {
-          command: { type: 'string', description: 'Shell command to run, e.g. "npm run build", "npx tsc --noEmit", "git diff", "npm test"' },
+          command: { type: 'string', description: 'Shell command to run, e.g. "npm run build", "npx tsc --noEmit", "npm test". Do NOT use for git commands — use the `git` tool instead.' },
           timeout: { type: 'number', description: 'Timeout in seconds (default: 30, max: 120)' },
         },
         required: ['command'],
@@ -1065,6 +1065,11 @@ function defineAgentTools(qs: AuraQueryService, projectPath: string): AgentTool[
           if (pattern.test(command)) {
             return { error: `Command blocked for safety: "${command}". This pattern matches a potentially destructive operation.` }
           }
+        }
+
+        // Block git commands — must use the dedicated `git` tool instead
+        if (/^git\s/i.test(command.trim())) {
+          return { error: `Git commands must use the dedicated "git" tool, not "execute". Use the git tool for all version control operations.` }
         }
 
         // NOTE: Commands matching NEEDS_APPROVAL_PATTERNS are checked in the agent loop
