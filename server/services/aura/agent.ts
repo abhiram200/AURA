@@ -304,8 +304,9 @@ ${greenfieldNote}${gitNote}
 
 For any task that requires more than one file change:
 1. **Plan first.** Dispatch a \`plan\` sub-agent to analyze the codebase and produce a step-by-step implementation plan.
-2. **Create a todo list.** After receiving the plan, immediately call \`todo_write\` to create a structured task list. Break the plan into discrete, ordered steps.
-3. **Work through todos sequentially.** For each todo:
+2. **Create a feature branch.** Use the \`git\` tool to create a branch for this build: \`git checkout -b aura/short-description\`
+3. **Create a todo list.** After receiving the plan, immediately call \`todo_write\` to create a structured task list. Break the plan into discrete, ordered steps.
+4. **Work through todos sequentially.** For each todo:
    a. Mark it \`in_progress\` via \`todo_write\`
    b. Make the necessary file changes (using \`write\` for new files, \`update\` for existing)
    c. **Verify and commit** — this is a single combined step:
@@ -313,7 +314,6 @@ For any task that requires more than one file change:
       ii. Read modified files back via \`read_file\` to confirm correctness
       iii. Commit via the \`git\` tool: first \`git add -A\`, then \`git commit -m "type: description"\`
    d. Mark it \`completed\` via \`todo_write\`
-4. **Use feature branches.** When starting a build task, create a feature branch: \`git checkout -b aura/short-description\`. Stay on that branch for the entire build.
 
 For quick fixes (single file, obvious change): skip the plan, just fix it directly.
 
@@ -351,14 +351,31 @@ Use the \`execute\` tool to run build, test, lint, and git commands. Always veri
 
 ## Git Workflow
 
-Use the \`git\` tool for all version control operations. Key rules:
+Use the \`git\` tool for all version control operations. Follow this lifecycle for every build task:
 
-- **Verify then commit.** After verifying each todo's changes, commit them: \`git add -A\` then \`git commit -m "type: description"\`. This is part of the build-verify-commit cycle — do not skip it.
-- **Feature branches.** Create a branch for each build task: \`git checkout -b aura/short-description\`. Stay on that branch for the entire build.
-- **Merge to main** only when the user explicitly says "merge", "ship it", or "looks good".
+### Branch Lifecycle
+
+1. **Start a build** → Create a feature branch from main: \`git checkout -b aura/short-description\`
+2. **Work on the build** → Stay on that branch. Commit after each verified todo.
+3. **User asks for fixes/edits** → Stay on the same branch. Keep committing.
+4. **User says "merge", "ship it", or "looks good"** → Merge the feature branch into main and delete it:
+   - Switch to main, merge the feature branch, delete the feature branch
+5. **User starts a completely new build** → This means the previous feature is done. Before creating a new branch:
+   - Switch to main, merge the current feature branch (fast-forward), delete it
+   - Then create the new feature branch from main
+6. **Resuming a saved plan** → If the system prompt says "Active plan on branch aura/X", checkout that branch to continue where you left off.
+
+### Commit Discipline
+
+- **Verify then commit.** After each todo: run build/test commands, read back modified files, then commit.
 - **Commit messages**: Use conventional commit format — \`feat:\`, \`fix:\`, \`refactor:\`, \`chore:\`, \`docs:\`
+- **If staging is empty** (no changes to commit), skip the commit — the todo was already committed or no files changed.
+
+### Rules
+
 - **Never force push, reset --hard, or delete main/master branches**
-- **If \`git add -A\` stages nothing**, skip the commit and continue — the todo was already committed or no files changed.
+- **Never leave uncommitted work** when switching branches — commit or stash first
+- **Keep feature branches short-lived** — merge and delete them once the feature is done
 
 ## How to Investigate
 
