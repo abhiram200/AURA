@@ -1,4 +1,4 @@
-import express, { Router } from 'express'
+import express, { Router, type Request, type Response, type NextFunction } from 'express'
 import path from 'path'
 import fs from 'fs/promises'
 import type { ProjectService } from '../services/project.ts'
@@ -22,6 +22,13 @@ import { PlanPersistenceService } from '../services/aura/plan-persistence.ts'
 
 const groupQueryService = new GroupQueryService()
 const chatService = new AuraChatService()
+
+// Wrap async route handlers to catch promise rejections and forward to Express error handler
+function asyncHandler(fn: (req: Request, res: Response, next: NextFunction) => Promise<void>) {
+  return (req: Request, res: Response, next: NextFunction) => {
+    Promise.resolve(fn(req, res, next)).catch(next)
+  }
+}
 
 function matchesGlobSimple(str: string, glob: string): boolean {
   const re = glob

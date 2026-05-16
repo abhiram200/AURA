@@ -213,6 +213,16 @@ async function start() {
   })
 }
 
+// Catch unhandled errors to prevent server crashes
+process.on('unhandledRejection', (reason) => {
+  console.error('UNHANDLED REJECTION:', reason)
+})
+
+process.on('uncaughtException', (err) => {
+  console.error('UNCAUGHT EXCEPTION:', err)
+  // Don't exit — keep the server alive
+})
+
 start().catch((err) => {
   console.error('Failed to start server:', err)
   process.exit(1)
