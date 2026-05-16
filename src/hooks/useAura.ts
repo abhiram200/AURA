@@ -414,6 +414,8 @@ export interface AuraApprovalRequest {
   id: string
   type: 'command' | 'plan' | 'question'
   command?: string
+  description?: string
+  riskLevel?: 'high' | 'medium'
   cwd?: string
   planMarkdown?: string
   question?: string

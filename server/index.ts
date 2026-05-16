@@ -32,7 +32,7 @@ const DATA_DIR = join(process.cwd(), 'data')
 async function start() {
   const app = express()
   app.use(cors())
-  app.use(express.json())
+  app.use(express.json({ limit: '10mb' }))
 
   const store = new FileStore(DATA_DIR)
   await store.init()
@@ -149,7 +149,9 @@ async function start() {
     terminalService.spawn(projectId, ws).then((id) => {
       sessionId = id
     }).catch((err) => {
-      ws.send(JSON.stringify({ type: 'error', message: err.message }))
+      if (ws.readyState === ws.OPEN) {
+        ws.send(JSON.stringify({ type: 'error', message: err.message }))
+      }
       ws.close()
     })
 

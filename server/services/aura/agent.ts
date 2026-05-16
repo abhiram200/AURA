@@ -165,24 +165,36 @@ const TOOL_ACCESS: Record<SubAgentType, string[]> = {
   plan: ['search', 'context', 'dependents', 'dependencies', 'context_manifest', 'context_folder', 'read_file', 'search_pattern', 'route_map', 'processes', 'search_web', 'get_graph'],
 }
 
-// Commands that are too dangerous to allow via execute
-const BLOCKED_COMMAND_PATTERNS = [
-  /\brm\s+-rf\s+\/\b/i,
-  /\brm\s+-rf\s+~\b/i,
-  /\bformat\s+[a-z]:/i,
-  /\bdel\s+\/s\b/i,
-  /\bshutdown\b/i,
-  /\breboot\b/i,
-  /\bmkfs\b/i,
-  /\bdd\s+if=/i,
-  /\b>\s*\/dev\//i,
-  /\bcurl\s+.*\|\s*(ba)?sh\b/i,
-  /\bwget\s+.*\|\s*(ba)?sh\b/i,
-  /\bgit\s+push\s+.*--force\b/i,
-  /\bgit\s+reset\s+--hard\b/i,
-  /\bgit\s+clean\s+-f\b/i,
-  /\bgit\s+branch\s+-[dD]\s+main\b/i,
-  /\bgit\s+branch\s+-[dD]\s+master\b/i,
+// Commands that require user approval before execution, with human-readable descriptions
+// These are routed through the approval system instead of being permanently blocked.
+const DANGEROUS_COMMAND_DESCRIPTIONS: Array<{ pattern: RegExp; description: string; riskLevel: 'high' | 'medium' }> = [
+  { pattern: /\brm\s+-rf\s+\/\b/i, description: 'Recursively delete the root filesystem', riskLevel: 'high' },
+  { pattern: /\brm\s+-rf\s+~\b/i, description: 'Recursively delete the home directory', riskLevel: 'high' },
+  { pattern: /\bformat\s+[a-z]:/i, description: 'Format a disk drive', riskLevel: 'high' },
+  { pattern: /\bdel\s+\/s\b/i, description: 'Recursively delete all files matching a pattern', riskLevel: 'high' },
+  { pattern: /\bshutdown\b/i, description: 'Shut down the system', riskLevel: 'high' },
+  { pattern: /\breboot\b/i, description: 'Reboot the system', riskLevel: 'high' },
+  { pattern: /\bmkfs\b/i, description: 'Create a filesystem (formats a partition)', riskLevel: 'high' },
+  { pattern: /\bdd\s+if=/i, description: 'Low-level disk write (can destroy data)', riskLevel: 'high' },
+  { pattern: /\b>\s*\/dev\//i, description: 'Redirect output to a device file (can corrupt data)', riskLevel: 'high' },
+  { pattern: /\bcurl\s+.*\|\s*(ba)?sh\b/i, description: 'Download and execute a remote script (security risk)', riskLevel: 'high' },
+  { pattern: /\bwget\s+.*\|\s*(ba)?sh\b/i, description: 'Download and execute a remote script (security risk)', riskLevel: 'high' },
+  { pattern: /\bgit\s+push\s+.*--force\b/i, description: 'Force push to remote, which may overwrite remote history', riskLevel: 'high' },
+  { pattern: /\bgit\s+reset\s+--hard\b/i, description: 'Discard all uncommitted changes permanently', riskLevel: 'high' },
+  { pattern: /\bgit\s+clean\s+-f\b/i, description: 'Delete untracked files permanently', riskLevel: 'medium' },
+  { pattern: /\bgit\s+branch\s+-[dD]\s+main\b/i, description: 'Delete the main branch', riskLevel: 'high' },
+  { pattern: /\bgit\s+branch\s+-[dD]\s+master\b/i, description: 'Delete the master branch', riskLevel: 'high' },
+  { pattern: /\brm\s+-r\b/i, description: 'Recursively delete a directory', riskLevel: 'medium' },
+  { pattern: /\brm\s+-rf\b/i, description: 'Force-recursively delete a directory', riskLevel: 'medium' },
+  { pattern: /\bgit\s+push\b/i, description: 'Push commits to remote repository', riskLevel: 'medium' },
+  { pattern: /\bgit\s+checkout\s+--\s*\./i, description: 'Discard all uncommitted changes in the working directory', riskLevel: 'medium' },
+  { pattern: /\bgit\s+restore\s+--staged\b/i, description: 'Unstage all changes (git restore --staged)', riskLevel: 'medium' },
+  { pattern: /\bnpm\s+install\b/i, description: 'Install npm packages (modifies package.json and node_modules)', riskLevel: 'medium' },
+  { pattern: /\byarn\s+add\b/i, description: 'Add a yarn package (modifies package.json)', riskLevel: 'medium' },
+  { pattern: /\bpip\s+install\b/i, description: 'Install a Python package', riskLevel: 'medium' },
+  { pattern: /\bcargo\s+add\b/i, description: 'Add a Rust crate dependency', riskLevel: 'medium' },
+  { pattern: /\bgit\s+merge\b/i, description: 'Merge a branch into the current branch', riskLevel: 'medium' },
+  { pattern: /\bgit\s+rebase\b/i, description: 'Rebase the current branch onto another branch', riskLevel: 'medium' },
 ]
 
 // ── Approval system ────────────────────────────────────────────────────────
@@ -197,6 +209,8 @@ interface ApprovalRequest {
   id: string
   type: 'command' | 'plan' | 'question'
   command?: string
+  description?: string
+  riskLevel?: 'high' | 'medium'
   cwd?: string
   planMarkdown?: string
   question?: string
@@ -210,19 +224,7 @@ interface PlanResumeContext {
   nextTask: string | null
 }
 
-const NEEDS_APPROVAL_PATTERNS = [
-  /\brm\s+-r\b/i,
-  /\brm\s+-rf\b/i,
-  /\bgit\s+push\b/i,
-  /\bgit\s+checkout\s+--\s*\./i,
-  /\bgit\s+restore\s+--staged\b/i,
-  /\bnpm\s+install\b/i,
-  /\byarn\s+add\b/i,
-  /\bpip\s+install\b/i,
-  /\bcargo\s+add\b/i,
-  /\bgit\s+merge\b/i,
-  /\bgit\s+rebase\b/i,
-]
+// All approval patterns are now in DANGEROUS_COMMAND_DESCRIPTIONS above
 
 class ApprovalManager {
   private pending: Map<string, { resolve: (result: ApprovalResult) => void; timeout: NodeJS.Timeout }> = new Map()
@@ -371,9 +373,27 @@ Use the \`git\` tool for all version control operations. Follow this lifecycle f
 - **Commit messages**: Use conventional commit format — \`feat:\`, \`fix:\`, \`refactor:\`, \`chore:\`, \`docs:\`
 - **If staging is empty** (no changes to commit), skip the commit — the todo was already committed or no files changed.
 
+### Reverting Changes
+
+Use the \`git\` tool to undo changes. Pick the right approach:
+
+- **Discard uncommitted changes in working directory**: \`git checkout -- .\` (discards all) or \`git checkout -- <file>\` (specific file)
+- **Unstage staged changes**: \`git restore --staged .\` or \`git reset HEAD\`
+- **Undo the last commit but keep changes**: \`git reset HEAD~1\` (changes become unstaged, ready to re-edit)
+- **Undo the last commit and keep changes staged**: \`git reset --soft HEAD~1\`
+- **Undo the last N commits**: \`git reset HEAD~N\` (replace N with the number)
+- **Revert a specific commit (safe, creates new commit)**: \`git revert <hash>\` — use this when you want to undo a commit that's already been pushed or shared
+- **Discard everything back to a specific commit**: \`git reset <hash>\` — unstages all commits after that hash but keeps changes in working directory
+
+**Rules for reverting:**
+- Prefer \`git revert <hash>\` for shared/pushed commits — it's safe and preserves history
+- Use \`git reset HEAD~1\` for local-only commits you want to redo
+- NEVER use \`git reset --hard\` or \`git push --force\` without user approval — these are destructive and will trigger a confirmation prompt
+- After reverting, run \`git status\` and \`git log --oneline -5\` to confirm the state
+
 ### Rules
 
-- **Never force push, reset --hard, or delete main/master branches**
+- **Never force push, reset --hard, or delete main/master branches without user approval** — these will trigger a confirmation prompt
 - **Never leave uncommitted work** when switching branches — commit or stash first
 - **Keep feature branches short-lived** — merge and delete them once the feature is done
 
@@ -1060,19 +1080,16 @@ function defineAgentTools(qs: AuraQueryService, projectPath: string): AgentTool[
         const timeoutSeconds = Math.min(120, (args.timeout as number | undefined) ?? 30)
         const timeoutMs = timeoutSeconds * 1000
 
-        // Block dangerous commands outright
-        for (const pattern of BLOCKED_COMMAND_PATTERNS) {
-          if (pattern.test(command)) {
-            return { error: `Command blocked for safety: "${command}". This pattern matches a potentially destructive operation.` }
-          }
-        }
-
-        // Block git commands — must use the dedicated `git` tool instead
+        // Route git commands to the dedicated git tool
         if (/^git\s/i.test(command.trim())) {
           return { error: `Git commands must use the dedicated "git" tool, not "execute". Use the git tool for all version control operations.` }
         }
 
-        // NOTE: Commands matching NEEDS_APPROVAL_PATTERNS are checked in the agent loop
+        // NOTE: Dangerous commands (DANGEROUS_COMMAND_DESCRIPTIONS) are checked in the agent loop
+        // (after tool_call is emitted but before execution), not here, because we need
+        // access to the ApprovalManager and eventSink which aren't available in tool execute.
+
+        // NOTE: Commands matching DANGEROUS_COMMAND_DESCRIPTIONS are checked in the agent loop
         // (after tool_call is emitted but before execution), not here, because we need
         // access to the ApprovalManager and eventSink which aren't available in tool execute.
 
@@ -1127,13 +1144,8 @@ function defineAgentTools(qs: AuraQueryService, projectPath: string): AgentTool[
           return { error: `Unknown git subcommand: "${subcommand}". Valid subcommands: ${validSubcommands.join(', ')}` }
         }
 
-        // Block dangerous commands outright
-        const fullCommand = `git ${gitArgs}`
-        for (const pattern of BLOCKED_COMMAND_PATTERNS) {
-          if (pattern.test(fullCommand)) {
-            return { error: `Git command blocked for safety: "${fullCommand}". This pattern matches a potentially destructive operation.` }
-          }
-        }
+        // NOTE: Dangerous git commands (force push, reset --hard, etc.) are checked in the agent loop
+        // via DANGEROUS_COMMAND_DESCRIPTIONS — they route to the approval system instead of being hard-blocked.
 
         try {
           const { stdout, stderr } = await execFileAsync(fullCommand, [], {
@@ -1749,14 +1761,14 @@ export class AuraAgent {
         // Check if this is an execute command that needs approval
         if (tc.name === 'execute') {
           const command = (tc.args as { command?: string }).command || ''
-          for (const pattern of NEEDS_APPROVAL_PATTERNS) {
+          for (const { pattern, description, riskLevel } of DANGEROUS_COMMAND_DESCRIPTIONS) {
             if (pattern.test(command)) {
               const approvalId = `exec_${Date.now()}_${i}`
               const approval = await this.approvalManager.requestApproval(
                 approvalId,
                 eventSink,
                 'command',
-                { command, cwd: this.projectPath },
+                { command, description, riskLevel, cwd: this.projectPath },
               )
               if (!approval.approved) {
                 const denyMsg = `Command denied by user: "${command}". ${approval.reason || ''}`
@@ -1781,14 +1793,14 @@ export class AuraAgent {
         if (tc.name === 'git') {
           const gitArgs = (tc.args as { args?: string }).args || ''
           const fullGitCommand = `git ${gitArgs}`
-          for (const pattern of NEEDS_APPROVAL_PATTERNS) {
+          for (const { pattern, description, riskLevel } of DANGEROUS_COMMAND_DESCRIPTIONS) {
             if (pattern.test(fullGitCommand)) {
               const approvalId = `git_${Date.now()}_${i}`
               const approval = await this.approvalManager.requestApproval(
                 approvalId,
                 eventSink,
                 'command',
-                { command: fullGitCommand, cwd: this.projectPath },
+                { command: fullGitCommand, description, riskLevel, cwd: this.projectPath },
               )
               if (!approval.approved) {
                 const denyMsg = `Git command denied by user: "${fullGitCommand}". ${approval.reason || ''}`

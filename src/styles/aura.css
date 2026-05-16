@@ -2147,8 +2147,42 @@
   padding: 2px 8px;
   background: rgba(88, 166, 255, 0.1);
   border-radius: 4px;
-  display: inline-block;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
   align-self: flex-start;
+}
+
+.aura-chat__approval-risk {
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: none;
+  letter-spacing: 0.3px;
+  padding: 2px 6px;
+  border-radius: 3px;
+}
+
+.aura-chat__approval-risk--high {
+  color: #ff6b6b;
+  background: rgba(255, 68, 68, 0.12);
+  border: 1px solid rgba(255, 68, 68, 0.25);
+}
+
+.aura-chat__approval-risk--medium {
+  color: #e2c08d;
+  background: rgba(226, 192, 141, 0.1);
+  border: 1px solid rgba(226, 192, 141, 0.2);
+}
+
+.aura-chat__approval-description {
+  font-size: 13px;
+  color: #e6edf3;
+  background: rgba(226, 192, 141, 0.08);
+  border-left: 3px solid #e2c08d;
+  padding: 8px 12px;
+  margin-bottom: 8px;
+  border-radius: 0 4px 4px 0;
+  line-height: 1.5;
 }
 
 .aura-chat__approval-details {

@@ -235,10 +235,21 @@ function ApprovalCard({ request, onRespond }: { request: AuraApprovalRequest; on
   const [showEdit, setShowEdit] = useState(false)
 
   if (request.type === 'command') {
+    const riskClass = request.riskLevel === 'high' ? 'aura-chat__approval-risk--high' : 'aura-chat__approval-risk--medium'
     return (
       <div className="aura-chat__approval-card">
-        <div className="aura-chat__approval-type">Command Approval</div>
+        <div className="aura-chat__approval-type">
+          Command Approval
+          {request.riskLevel && (
+            <span className={`aura-chat__approval-risk ${riskClass}`}>
+              {request.riskLevel === 'high' ? '⚠ High Risk' : '⚡ Medium Risk'}
+            </span>
+          )}
+        </div>
         <div className="aura-chat__approval-details">
+          {request.description && (
+            <div className="aura-chat__approval-description">{request.description}</div>
+          )}
           <div className="aura-chat__approval-label">Command:</div>
           <pre className="aura-chat__approval-code">{request.command}</pre>
           {request.cwd && (
