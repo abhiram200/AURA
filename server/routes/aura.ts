@@ -1,4 +1,4 @@
-import { Router } from 'express'
+import express, { Router } from 'express'
 import path from 'path'
 import fs from 'fs/promises'
 import type { ProjectService } from '../services/project.ts'
@@ -117,7 +117,12 @@ export function createAuraRouter(
       res.status(404).json({ error: 'Graph not available. Start indexing first.' })
       return
     }
-    res.json(qs.getGraph())
+    try {
+      res.json(qs.getGraph())
+    } catch (err) {
+      console.error(`Error fetching graph for project ${projectId}:`, err)
+      res.status(500).json({ error: 'Failed to fetch graph' })
+    }
   })
 
   // POST /api/aura/search/:projectId — Search nodes
@@ -135,8 +140,13 @@ export function createAuraRouter(
       return
     }
 
-    const results = await qs.search(query, { limit: limit ?? 50, kinds, mode: (mode as any) ?? 'hybrid' })
-    res.json({ results })
+    try {
+      const results = await qs.search(query, { limit: limit ?? 50, kinds, mode: (mode as any) ?? 'hybrid' })
+      res.json({ results })
+    } catch (err) {
+      console.error(`Error searching for "${query}" in project ${projectId}:`, err)
+      res.status(500).json({ error: 'Search failed' })
+    }
   })
 
   // POST /api/aura/context/:projectId — 360° context
@@ -154,12 +164,17 @@ export function createAuraRouter(
       return
     }
 
-    const ctx = qs.context(nodeId)
-    if (!ctx) {
-      res.status(404).json({ error: 'Node not found' })
-      return
+    try {
+      const ctx = qs.context(nodeId)
+      if (!ctx) {
+        res.status(404).json({ error: 'Node not found' })
+        return
+      }
+      res.json(ctx)
+    } catch (err) {
+      console.error(`Error fetching context for node ${nodeId}:`, err)
+      res.status(500).json({ error: 'Failed to fetch node context' })
     }
-    res.json(ctx)
   })
 
   // POST /api/aura/impact/:projectId — Impact analysis
@@ -177,12 +192,17 @@ export function createAuraRouter(
       return
     }
 
-    const result = qs.impact(targetId)
-    if (!result) {
-      res.status(404).json({ error: 'Target node not found' })
-      return
+    try {
+      const result = qs.impact(targetId)
+      if (!result) {
+        res.status(404).json({ error: 'Target node not found' })
+        return
+      }
+      res.json(result)
+    } catch (err) {
+      console.error(`Error computing impact for node ${targetId}:`, err)
+      res.status(500).json({ error: 'Failed to compute impact analysis' })
     }
-    res.json(result)
   })
 
   // POST /api/aura/incremental-index/:projectId — Trigger incremental indexing
@@ -1079,6 +1099,12 @@ export function createAuraRouter(
     }
 
     res.json({ status: 'ok' })
+  })
+
+  // Global error handler — catches unhandled errors from any route above
+  router.use((err: Error, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
+    console.error('AURA route error:', err)
+    res.status(500).json({ error: err.message || 'Internal server error' })
   })
 
   return router

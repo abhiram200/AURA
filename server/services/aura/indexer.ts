@@ -212,9 +212,6 @@ export class AuraIndexer {
       }
       this.processTracer.dispose()
 
-      // Release source cache — no longer needed after API analysis and process tracing
-      this.sourceCache.clear()
-
       // Phase: search indexing
       this.updateStatus('searchIndexing', 0, filePaths.length, filePaths.length, this.graph.nodes.length, this.graph.edges.length, 'Building search index...')
       this.bm25Engine = new BM25SearchEngine()
@@ -1226,9 +1223,8 @@ export class AuraIndexer {
         const hash = crypto.createHash('sha256').update(content).digest('hex')
         this.fileHashes[relativePath] = { hash, mtime: stat.mtimeMs }
       } catch {
-        // File may have been deleted — clean up sourceCache and hash
+        // File may have been deleted
         delete this.fileHashes[relativePath]
-        this.sourceCache.delete(relativePath)
       }
     }
 

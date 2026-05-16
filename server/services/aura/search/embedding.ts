@@ -179,7 +179,6 @@ export class EmbeddingService {
   removeNodes(nodeIds: Set<string>): void {
     for (const id of nodeIds) {
       this.embeddings.delete(id)
-      this.nodeMap.delete(id)
     }
   }
 

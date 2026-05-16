@@ -456,7 +456,6 @@ export function useAura(projectId: string | null) {
 
   const chatMessagesRef = useRef<AuraChatMessage[]>(chatMessages)
   const activeChatIdRef = useRef<string | null>(activeChatId)
-  const streamAbortRef = useRef<AbortController | null>(null)
   chatMessagesRef.current = chatMessages
   activeChatIdRef.current = activeChatId
 
@@ -1064,9 +1063,6 @@ export function useAura(projectId: string | null) {
   useEffect(() => {
     return () => {
       clearAllPolling()
-      // Abort any in-flight SSE stream
-      streamAbortRef.current?.abort()
-      streamAbortRef.current = null
     }
   }, [clearAllPolling])
 
@@ -1085,11 +1081,6 @@ export function useAura(projectId: string | null) {
 
   const ask = useCallback(async (prompt: string) => {
     if (!projectId) return
-
-    // Abort any previous stream
-    streamAbortRef.current?.abort()
-    const abortController = new AbortController()
-    streamAbortRef.current = abortController
 
     const userMsg: AuraChatMessage = {
       id: crypto.randomUUID(),
@@ -1143,7 +1134,6 @@ export function useAura(projectId: string | null) {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ prompt, context, priorMessages }),
-        signal: abortController.signal,
       })
 
       if (!res.ok) {
@@ -1242,8 +1232,6 @@ export function useAura(projectId: string | null) {
         }
       }
     } catch (err) {
-      // Don't update state if the request was aborted (e.g. component unmounted or new ask)
-      if (err instanceof DOMException && err.name === 'AbortError') return
       setChatError(err instanceof Error ? err.message : 'Ask failed')
       setChatMessages(prev => {
         const updated = [...prev]
@@ -1254,10 +1242,6 @@ export function useAura(projectId: string | null) {
         return updated
       })
     } finally {
-      // Clear the abort ref if this is still the current stream
-      if (streamAbortRef.current === abortController) {
-        streamAbortRef.current = null
-      }
       setIsStreaming(false)
       saveChat()
     }
@@ -1293,26 +1277,14 @@ export function useAura(projectId: string | null) {
 
   useEffect(() => {
     if (!projectId) return
-    const controller = new AbortController()
-    fetch(`/api/aura/context-estimate/${projectId}`, { signal: controller.signal })
+    fetch(`/api/aura/context-estimate/${projectId}`)
       .then(res => res.ok ? res.json() : null)
       .then(data => {
         if (data?.systemTokens) setSystemPromptTokens(data.systemTokens)
         if (data?.contextWindow) setContextWindowSize(data.contextWindow)
       })
       .catch(() => {})
-    return () => { controller.abort() }
   }, [projectId])
-
-  // ── Trim chat messages to prevent unbounded memory growth ───────────────
-  const MAX_CHAT_MESSAGES = 200
-
-  useEffect(() => {
-    if (chatMessages.length > MAX_CHAT_MESSAGES) {
-      // Keep the most recent messages, dropping older ones
-      setChatMessages(prev => prev.slice(-MAX_CHAT_MESSAGES))
-    }
-  }, [chatMessages.length])
 
   const contextUsagePercent = useMemo(() => {
     if (contextWindowSize === 0) return 0
