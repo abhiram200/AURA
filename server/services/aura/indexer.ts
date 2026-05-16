@@ -312,6 +312,9 @@ export class AuraIndexer {
     const auraDir = path.join(this.projectPath, '.aura')
     await fs.mkdir(auraDir, { recursive: true })
 
+    // Ensure .aura/ is in .gitignore
+    await this.ensureGitignore()
+
     const graphPath = path.join(auraDir, 'graph.json')
     await fs.writeFile(graphPath, JSON.stringify(this.graph, null, 2), 'utf-8')
 
@@ -941,6 +944,23 @@ export class AuraIndexer {
       return content.trim()
     } catch {
       return null
+    }
+  }
+
+  private async ensureGitignore(): Promise<void> {
+    const gitignorePath = path.join(this.projectPath, '.gitignore')
+    const entries = ['.aura/', '.synapse/']
+    let content = ''
+    try {
+      content = await fs.readFile(gitignorePath, 'utf-8')
+    } catch {
+      // No .gitignore yet
+    }
+    const lines = content ? content.split(/\r?\n/) : []
+    const needsAppend = entries.filter(e => !lines.includes(e) && !lines.includes(e.replace('/', '')))
+    if (needsAppend.length > 0) {
+      const addition = (content && !content.endsWith('\n') ? '\n' : '') + '\n# AI tools\n' + needsAppend.join('\n') + '\n'
+      await fs.writeFile(gitignorePath, content + addition, 'utf-8')
     }
   }
 

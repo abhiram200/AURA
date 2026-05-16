@@ -245,7 +245,11 @@ export class WorkspaceService {
         else if (index === '?' && work === '?') display = 'U'
         else if (index === 'M' || work === 'M') display = 'M'
         else display = index !== ' ' ? index : work
-        if (display && display !== ' ') statusMap[normalizedPath] = display
+        if (display && display !== ' ') {
+          // Filter out internal AURA/Synapse directories from git status
+          if (normalizedPath.startsWith('.aura/') || normalizedPath.startsWith('.synapse/')) continue
+          statusMap[normalizedPath] = display
+        }
       }
       return statusMap
     } catch {
