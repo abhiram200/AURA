@@ -293,7 +293,7 @@ async function loadSkills(skillNames: string[]): Promise<string> {
 
 function buildSystemPrompt(skillContent: string, contextSection?: string, isGreenfield?: boolean, gitContext?: string, planResume?: PlanResumeContext): string {
   const greenfieldNote = isGreenfield
-    ? '\nThis is a NEW project with no existing code. You are building from scratch.\n\n**IMPORTANT: Your FIRST action must be to create a proper `.gitignore` file for this project type.** Overwrite the placeholder .gitignore with appropriate entries (e.g., node_modules/, dist/, .env for Node.js; __pycache__/, .venv/, *.pyc for Python; etc.). Then commit it using `execute`: `git add .gitignore && git commit -m "chore: add .gitignore"`.\n\nAfter the .gitignore, proceed with creating the project structure (package.json, tsconfig, source files, etc.) and installing dependencies.\n'
+    ? '\nThis is a NEW project with no existing code. You are building from scratch.\n\n**IMPORTANT: Your FIRST actions must be:**\n1. Initialize git: `git init`\n2. Create a proper `.gitignore` file with appropriate entries (e.g., node_modules/, dist/, .env for Node.js; __pycache__/, .venv/, *.pyc for Python; etc.)\n3. Commit: `git add -A` then `git commit -m "chore: initial commit"`\n4. Create a feature branch: `git checkout -b aura/<short-description>`\n\nThen proceed with creating the project structure (package.json, tsconfig, source files, etc.) and installing dependencies.\n'
     : '\nThis is an existing codebase. Use your investigation tools to understand it before making changes.\n'
 
   const gitNote = gitContext ? `\n${gitContext}\n` : ''
@@ -308,10 +308,12 @@ For any task that requires more than one file change:
 3. **Work through todos sequentially.** For each todo:
    a. Mark it \`in_progress\` via \`todo_write\`
    b. Make the necessary file changes (using \`write\` for new files, \`update\` for existing)
-   c. Verify the changes (read back files, run build/test commands via \`execute\`)
+   c. **Verify and commit** — this is a single combined step:
+      i. Run build/test commands via \`execute\` to verify changes compile and pass tests
+      ii. Read modified files back via \`read_file\` to confirm correctness
+      iii. Commit via the \`git\` tool: first \`git add -A\`, then \`git commit -m "type: description"\`
    d. Mark it \`completed\` via \`todo_write\`
-   e. **Commit immediately** — run \`git add -A && git commit -m "type: description"\` via \`execute\`. This is MANDATORY. Do NOT skip this step. Every completed todo MUST result in a git commit. Use conventional commit prefixes: \`feat:\`, \`fix:\`, \`refactor:\`, \`chore:\`, \`docs:\`.
-4. **Use feature branches.** When starting a build task, a feature branch will be created automatically. Stay on that branch for the entire build.
+4. **Use feature branches.** When starting a build task, create a feature branch: \`git checkout -b aura/short-description\`. Stay on that branch for the entire build.
 
 For quick fixes (single file, obvious change): skip the plan, just fix it directly.
 
@@ -347,16 +349,16 @@ Use the \`execute\` tool to run build, test, lint, and git commands. Always veri
 4. **Include enough surrounding context** in \`oldString\` to make it unique in the file.
 5. **After editing, check downstream** — use \`search_pattern\` or \`dependents\` to verify nothing is broken.
 
-## Git Workflow — MANDATORY
+## Git Workflow
 
-You MUST follow these rules. Skipping git commits is a critical error.
+Use the \`git\` tool for all version control operations. Key rules:
 
-- **Every completed todo gets a commit.** After marking a todo \`completed\`, you MUST run \`git add -A && git commit -m "type: description"\`. No exceptions.
+- **Verify then commit.** After verifying each todo's changes, commit them: \`git add -A\` then \`git commit -m "type: description"\`. This is part of the build-verify-commit cycle — do not skip it.
+- **Feature branches.** Create a branch for each build task: \`git checkout -b aura/short-description\`. Stay on that branch for the entire build.
+- **Merge to main** only when the user explicitly says "merge", "ship it", or "looks good".
 - **Commit messages**: Use conventional commit format — \`feat:\`, \`fix:\`, \`refactor:\`, \`chore:\`, \`docs:\`
-- **You are already in the project root.** Do NOT prefix commands with \`cd\`. Just run: \`git add -A && git commit -m "feat: add user model"\`
 - **Never force push, reset --hard, or delete main/master branches**
-- **Stay on the feature branch.** Do NOT merge to main unless the user explicitly says "merge", "ship it", or "looks good". When the user starts a completely new feature, the system will automatically merge the current branch into main and create a new branch — you don't need to handle this.
-- **If \`git add -A\` stages nothing** (no changes to commit), skip the commit and continue — this means the todo was already committed or no files changed.
+- **If \`git add -A\` stages nothing**, skip the commit and continue — the todo was already committed or no files changed.
 
 ## How to Investigate
 
@@ -1082,6 +1084,62 @@ function defineAgentTools(qs: AuraQueryService, projectPath: string): AgentTool[
       },
     },
 
+    // ── Version Control Tool ──────────────────────────────────────────────────
+
+    {
+      name: 'git',
+      description: 'Execute git commands for version control. Use this for ALL git operations — staging changes, committing, branching, merging, checking status, viewing logs, etc. You are already in the project root so do not prefix with `cd`. After verifying each todo\'s changes (running build/test commands via `execute`), you MUST commit: `git add -A` then `git commit -m "type: description"`. Commit messages use conventional format: `feat:`, `fix:`, `refactor:`, `chore:`, `docs:`.',
+      parameters: {
+        type: 'object',
+        properties: {
+          args: { type: 'string', description: 'Git subcommand and arguments, e.g. "add -A", "commit -m feat: add auth", "checkout -b aura/add-auth", "status", "log --oneline -5", "diff", "branch"' },
+        },
+        required: ['args'],
+      },
+      execute: async (args) => {
+        const gitArgs = (args.args as string).trim()
+        const subcommand = gitArgs.split(/\s+/)[0]
+
+        const validSubcommands = ['add', 'branch', 'checkout', 'commit', 'diff', 'fetch', 'init', 'log', 'merge', 'pull', 'push', 'rebase', 'remote', 'reset', 'restore', 'revert', 'show', 'stash', 'status', 'switch', 'tag', 'worktree', 'reflog', 'blame', 'grep', 'ls-files', 'config']
+        if (!validSubcommands.includes(subcommand)) {
+          return { error: `Unknown git subcommand: "${subcommand}". Valid subcommands: ${validSubcommands.join(', ')}` }
+        }
+
+        // Block dangerous commands outright
+        const fullCommand = `git ${gitArgs}`
+        for (const pattern of BLOCKED_COMMAND_PATTERNS) {
+          if (pattern.test(fullCommand)) {
+            return { error: `Git command blocked for safety: "${fullCommand}". This pattern matches a potentially destructive operation.` }
+          }
+        }
+
+        try {
+          const { stdout, stderr } = await execFileAsync(fullCommand, [], {
+            cwd: projectPath,
+            shell: true,
+            timeout: 30000,
+            maxBuffer: 1024 * 1024,
+          })
+
+          return {
+            exitCode: 0,
+            stdout: (stdout || '').trim(),
+            stderr: (stderr || '').trim(),
+          }
+        } catch (err) {
+          const execErr = err as { stdout?: string; stderr?: string; code?: string; killed?: boolean; signal?: string }
+          if (execErr.killed) {
+            return { exitCode: -1, stdout: (execErr.stdout || '').trim(), stderr: 'Command timed out after 30s', timedOut: true }
+          }
+          return {
+            exitCode: typeof execErr.code === 'number' ? execErr.code : 1,
+            stdout: (execErr.stdout || '').trim(),
+            stderr: (execErr.stderr || '').trim() || (err instanceof Error ? err.message : String(err)),
+          }
+        }
+      },
+    },
+
     // ── Web Research Tools ─────────────────────────────────────────────────
 
     {
@@ -1346,49 +1404,18 @@ export class AuraAgent {
       gitContext += 'Git is not available or this is not a git repository. Skip git operations.\n'
     }
 
-    // If greenfield and no git repo, initialize git (but don't make initial commit — the LLM will create .gitignore first)
-    if (isGreenfield) {
-      try {
-        await execFileAsync('git', ['--version'])
-        try {
-          await execFileAsync('git', ['rev-parse', '--git-dir'], { cwd: this.projectPath })
-        } catch {
-          await execFileAsync('git', ['init'], { cwd: this.projectPath })
-          // Create a placeholder initial commit so branching works
-          // The LLM will create .gitignore as its first action and commit it
-          const gitignorePlaceholder = path.join(this.projectPath, '.gitignore')
-          await fs.writeFile(gitignorePlaceholder, '# Placeholder — will be replaced by LLM-generated .gitignore\n', 'utf-8')
-          await execFileAsync('git', ['add', '.gitignore'], { cwd: this.projectPath })
-          await execFileAsync('git', ['commit', '-m', 'chore: initial commit (placeholder .gitignore)'], { cwd: this.projectPath })
-          gitContext = 'Initialized a new git repository. IMPORTANT: Your FIRST action must be to overwrite .gitignore with a proper .gitignore for this project type (e.g., Node.js, Python, Rust, etc.), then commit it.\n'
-          currentBranch = 'main'
-        }
-      } catch { /* git not available */ }
-    }
-
-    // ── Plan resumption & branch logic ─────────────────────────────────────────
-    // Order matters: load plan FIRST, then decide whether to create or checkout a branch.
+    // ── Plan resumption ────────────────────────────────────────────────────────
     const planService = new PlanPersistenceService()
     let planResume: PlanResumeContext | null = null
     let activePlan: SavedPlan | null = null
-    const isBuildTask = skills.includes('aura-building')
-
-    // Clean up stale plan files (branches that no longer exist)
-    try {
-      const { stdout: branchList } = await execFileAsync('git', ['branch', '--list', 'aura/*'], { cwd: this.projectPath })
-      const existingBranches = branchList.trim().split('\n').map(b => b.trim()).filter(Boolean)
-      await planService.cleanupStalePlans(this.projectPath, existingBranches)
-    } catch { /* best-effort cleanup */ }
+    let slug = prompt.slice(0, 40).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')
 
     // Try to load an existing active plan (finds by branch, then falls back to ANY plan with pending todos)
     try {
       activePlan = await planService.loadActivePlan(this.projectPath, currentBranch)
     } catch { /* plan resume is best-effort */ }
 
-    // Determine the slug and branch strategy
-    let slug: string
     if (activePlan) {
-      // Resuming an existing plan — use its slug and branch
       slug = activePlan.slug
       const pendingTodos = activePlan.todos.filter(t => t.status !== 'completed')
       if (pendingTodos.length > 0) {
@@ -1398,71 +1425,12 @@ export class AuraAgent {
           todos: activePlan.todos,
           nextTask: pendingTodos[0].subject,
         }
-        // If we're on main/master, checkout the plan's existing branch
         if (currentBranch === 'main' || currentBranch === 'master') {
-          const targetBranch = activePlan.branchName
-          try {
-            // Check if the branch already exists
-            const { stdout: branches } = await execFileAsync('git', ['branch', '--list', targetBranch], { cwd: this.projectPath })
-            if (branches.trim()) {
-              // Branch exists — checkout it
-              await execFileAsync('git', ['checkout', targetBranch], { cwd: this.projectPath })
-            } else {
-              // Branch doesn't exist — create it
-              await execFileAsync('git', ['checkout', '-b', targetBranch], { cwd: this.projectPath })
-            }
-            currentBranch = targetBranch
-            gitContext += `Resuming on branch: ${targetBranch}\n`
-          } catch { /* branch checkout failed, continue on current branch */ }
+          gitContext += `Active plan "${activePlan.slug}" is on branch ${activePlan.branchName}. Use \`git checkout ${activePlan.branchName}\` to resume.\n`
         }
       } else {
-        // All todos completed but plan file still exists — clean up
         await planService.deletePlan(this.projectPath, activePlan.slug)
         activePlan = null
-      }
-    } else {
-      // No active plan — derive slug from prompt for new plan
-      slug = prompt.slice(0, 40).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')
-    }
-
-    // Auto-branch for build tasks
-    if (!activePlan && isBuildTask && currentBranch) {
-      if (currentBranch.startsWith('aura/')) {
-        // Already on a feature branch — this is a NEW build task (not continuing the old one).
-        // Merge the current feature branch into main, delete it, then create a new branch.
-        const previousBranch = currentBranch
-        try {
-          // Stage and commit any uncommitted changes on the current branch
-          await execFileAsync('git', ['add', '-A'], { cwd: this.projectPath })
-          const { stdout: statusStdout } = await execFileAsync('git', ['status', '--porcelain'], { cwd: this.projectPath })
-          if (statusStdout.trim()) {
-            await execFileAsync('git', ['commit', '-m', 'chore: save work before starting new feature'], { cwd: this.projectPath })
-          }
-
-          // Switch to main and fast-forward merge the feature branch
-          await execFileAsync('git', ['checkout', currentBranch === 'master' ? 'master' : 'main'], { cwd: this.projectPath })
-          await execFileAsync('git', ['merge', previousBranch, '--ff-only'], { cwd: this.projectPath })
-          // Delete the merged feature branch
-          await execFileAsync('git', ['branch', '-d', previousBranch], { cwd: this.projectPath })
-          currentBranch = 'main'
-          gitContext += `Merged feature branch ${previousBranch} into main and deleted it.\n`
-        } catch (mergeErr) {
-          // If fast-forward merge fails (diverged), stay on the feature branch
-          // and try to get back to it. Don't force anything.
-          try { await execFileAsync('git', ['checkout', previousBranch], { cwd: this.projectPath }) } catch { /* best effort */ }
-          gitContext += `Could not fast-forward merge ${previousBranch} into main (branches may have diverged). Staying on ${previousBranch}.\n`
-          currentBranch = previousBranch
-        }
-      }
-
-      // Now on main/master — create a new feature branch
-      if (currentBranch === 'main' || currentBranch === 'master') {
-        try {
-          const branchName = `aura/${slug}`
-          await execFileAsync('git', ['checkout', '-b', branchName], { cwd: this.projectPath })
-          currentBranch = branchName
-          gitContext += `Created feature branch: ${branchName}\n`
-        } catch { /* branch creation failed, continue anyway */ }
       }
     }
 
@@ -1520,7 +1488,6 @@ export class AuraAgent {
     const maxIterations = 500
     const recentToolCalls: string[] = []  // Track tool call signatures for deduplication
     let todoList: AuraTodoItem[] = planResume ? [...planResume.todos] : []
-    let previousTodoList: AuraTodoItem[] = []
     for (let i = 0; i < maxIterations; i++) {
       if (this.abortController.signal.aborted) {
         eventSink.emit('done', {})
@@ -1664,7 +1631,6 @@ export class AuraAgent {
           try { todos = JSON.parse(todos) } catch { todos = [] }
         }
         if (!Array.isArray(todos)) todos = []
-        previousTodoList = todoList
         todoList = todos as AuraTodoItem[]
         eventSink.emit('todo_update', { todos: todoList })
         messages.push({
@@ -1704,18 +1670,6 @@ export class AuraAgent {
             await planService.savePlan(this.projectPath, activePlan)
           }
         } catch { /* todo persistence is best-effort */ }
-
-        // If a todo was just marked completed, nudge the model to commit
-        const newlyCompleted = todoList.filter(
-          (t, idx) => t.status === 'completed' && previousTodoList[idx]?.status !== 'completed',
-        )
-        if (newlyCompleted.length > 0) {
-          const subjects = newlyCompleted.map(t => t.subject).join(', ')
-          messages.push({
-            role: 'user',
-            content: `Todo completed: "${subjects}". You MUST commit this now. Run: git add -A && git commit -m "feat: ${subjects.toLowerCase().replace(/[^a-z0-9]+/g, '-').slice(0, 60)}"`,
-          })
-        }
       }
 
       // Handle ask_user — pause for user response
@@ -1792,6 +1746,37 @@ export class AuraAgent {
                   name: tc.name,
                 })
                 // Skip execution for this tool call
+                tc = null as any
+                break
+              }
+              break // Only need to match one pattern
+            }
+          }
+          if (tc === null) continue
+        }
+
+        // Check if this is a git command that needs approval
+        if (tc.name === 'git') {
+          const gitArgs = (tc.args as { args?: string }).args || ''
+          const fullGitCommand = `git ${gitArgs}`
+          for (const pattern of NEEDS_APPROVAL_PATTERNS) {
+            if (pattern.test(fullGitCommand)) {
+              const approvalId = `git_${Date.now()}_${i}`
+              const approval = await this.approvalManager.requestApproval(
+                approvalId,
+                eventSink,
+                'command',
+                { command: fullGitCommand, cwd: this.projectPath },
+              )
+              if (!approval.approved) {
+                const denyMsg = `Git command denied by user: "${fullGitCommand}". ${approval.reason || ''}`
+                eventSink.emit('tool_result', { name: tc.name, error: denyMsg, tool_call_id: `${tc.id || `${tc.name}_${i}`}` })
+                messages.push({
+                  role: 'tool',
+                  content: JSON.stringify({ error: denyMsg }),
+                  tool_call_id: `${tc.id || `${tc.name}_${i}`}`,
+                  name: tc.name,
+                })
                 tc = null as any
                 break
               }
