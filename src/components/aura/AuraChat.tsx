@@ -2,6 +2,7 @@ import { useState, useRef, useEffect, useCallback, type KeyboardEvent } from 're
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import type { AuraChatMessage, AuraToolCall, AuraSubAgentInfo, AuraTodoItem, AuraApprovalRequest } from '../../hooks/useAura'
+import type { ManagedShellState } from '../../hooks/useManagedShells'
 import { ShellBlock } from './ShellBlock'
 
 interface AuraChatProps {
@@ -13,6 +14,7 @@ interface AuraChatProps {
   pendingApproval: AuraApprovalRequest | null
   onRespondToApproval: (approvalId: string, approved: boolean, feedback?: string) => void
   onViewShell?: (shellId: string) => void
+  liveShells?: Map<string, ManagedShellState>
 }
 
 function StatusDot({ status }: { status: 'running' | 'completed' | 'error' }) {
@@ -332,7 +334,7 @@ function ApprovalCard({ request, onRespond }: { request: AuraApprovalRequest; on
   return null
 }
 
-function ChatMessage({ msg, onViewShell }: { msg: AuraChatMessage; onViewShell?: (shellId: string) => void }) {
+function ChatMessage({ msg, onViewShell, liveShells }: { msg: AuraChatMessage; onViewShell?: (shellId: string) => void; liveShells?: Map<string, ManagedShellState> }) {
   const isUser = msg.role === 'user'
   const [copied, setCopied] = useState(false)
 
@@ -355,7 +357,7 @@ function ChatMessage({ msg, onViewShell }: { msg: AuraChatMessage; onViewShell?:
         <TodoListSection todos={msg.todos} />
       )}
       {!isUser && msg.shells && msg.shells.length > 0 && (
-        <ShellBlock shells={msg.shells} onViewShell={onViewShell} />
+        <ShellBlock shells={msg.shells} liveShells={liveShells} onViewShell={onViewShell} />
       )}
       <div className="aura-chat__message-content">
         {isUser ? (
@@ -394,7 +396,7 @@ function ChatMessage({ msg, onViewShell }: { msg: AuraChatMessage; onViewShell?:
   )
 }
 
-export default function AuraChat({ messages, isStreaming, error, onAsk, onClearError, pendingApproval, onRespondToApproval, onViewShell }: AuraChatProps) {
+export default function AuraChat({ messages, isStreaming, error, onAsk, onClearError, pendingApproval, onRespondToApproval, onViewShell, liveShells }: AuraChatProps) {
   const [input, setInput] = useState('')
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLTextAreaElement>(null)
@@ -440,7 +442,7 @@ export default function AuraChat({ messages, isStreaming, error, onAsk, onClearE
           </div>
         )}
         {messages.map(msg => (
-          <ChatMessage key={msg.id} msg={msg} onViewShell={onViewShell} />
+          <ChatMessage key={msg.id} msg={msg} onViewShell={onViewShell} liveShells={liveShells} />
         ))}
         {isStreaming && messages[messages.length - 1]?.role === 'assistant' && messages[messages.length - 1]?.content !== '' && (
           <div className="aura-chat__streaming">

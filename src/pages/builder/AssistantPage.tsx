@@ -109,6 +109,7 @@ export function AssistantPage({ projectId, projectName, workspacePath: _workspac
         pendingApproval={aura.pendingApproval}
         onRespondToApproval={aura.respondToApproval}
         onViewShell={managedShells.setViewingShell}
+        liveShells={managedShells.shells}
       />
       {managedShells.viewingShell && (() => {
         const shell = managedShells.shells.get(managedShells.viewingShell)

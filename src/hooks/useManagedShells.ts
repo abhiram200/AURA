@@ -124,12 +124,22 @@ export function useManagedShells(projectId: string | null) {
 
   const terminateShell = useCallback(async (shellId: string) => {
     if (!projectId) return
+    // Optimistically update UI state
+    setShells(prev => {
+      const next = new Map(prev)
+      const shell = next.get(shellId)
+      if (shell) {
+        next.set(shellId, { ...shell, status: 'killed', exitCode: -1 })
+      }
+      return next
+    })
     try {
       await fetch(`/api/managed-shells/${projectId}/${shellId}/terminate`, { method: 'POST' })
     } catch {
-      // Terminate failed
+      // Terminate failed — revert on error by fetching fresh state
+      fetchShells()
     }
-  }, [projectId])
+  }, [projectId, fetchShells])
 
   // Fetch full output from REST API for a specific shell (used when opening terminal)
   const fetchShellOutput = useCallback(async (shellId: string) => {

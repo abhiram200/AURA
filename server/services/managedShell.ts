@@ -1,5 +1,5 @@
 // server/services/managedShell.ts
-import { spawn as childSpawn, type ChildProcess } from 'child_process'
+import { spawn as childSpawn, type ChildProcess, execSync } from 'child_process'
 import { platform } from 'os'
 import { createRequire } from 'module'
 import { mkdirSync, appendFileSync, unlinkSync, existsSync } from 'fs'
@@ -8,6 +8,26 @@ import type { ProjectService } from './project.ts'
 import { EventEmitter } from 'events'
 
 const nodeRequire = createRequire(import.meta.url)
+
+const isWindows = platform() === 'win32'
+
+// Kill an entire process tree (parent + all descendants).
+// On Windows, child_process.kill() only kills the direct parent,
+// orphaning child processes (e.g., npm run dev survives killing cmd.exe).
+function killProcessTree(pid: number): void {
+  try {
+    if (isWindows) {
+      // /T kills the process tree, /F forces termination
+      execSync(`taskkill /pid ${pid} /T /F`, { stdio: 'ignore', windowsHide: true })
+    } else {
+      // On Unix, kill the process group (negative PID)
+      try { process.kill(-pid, 'SIGKILL') } catch { /* group may not exist */ }
+    }
+  } catch {
+    // Process may have already exited — try a simple kill as fallback
+    try { process.kill(pid, 'SIGKILL') } catch { /* already dead */ }
+  }
+}
 
 export type ManagedShellStatus = 'running' | 'completed' | 'failed' | 'killed'
 
@@ -227,10 +247,15 @@ export class ManagedShellService extends EventEmitter {
     const shell = this.shells.get(shellId)
     if (!shell || shell.status !== 'running') return false
 
+    const pid = shell.pid
     if (shell.pty) {
       try { shell.pty.kill() } catch { /* already exited */ }
+      // Kill the entire process tree to prevent orphaned child processes
+      if (pid) killProcessTree(pid)
     } else if (shell.process) {
-      shell.process.kill()
+      // Kill the process tree, not just the parent shell
+      if (pid) killProcessTree(pid)
+      else shell.process.kill()
     }
 
     shell.status = 'killed'
