@@ -90,8 +90,12 @@ export function useManagedShells(projectId: string | null) {
         const next = new Map(prev)
         const shell = next.get(data.shellId as string)
         if (shell) {
-          const status: ManagedShellStatus = data.exitCode === 0 ? 'completed' : 'failed'
-          next.set(data.shellId as string, { ...shell, status, exitCode: data.exitCode as number })
+          const exitCode = data.exitCode as number
+          let status: ManagedShellStatus
+          if (exitCode === 0) status = 'completed'
+          else if (exitCode === -1) status = 'killed'
+          else status = 'failed'
+          next.set(data.shellId as string, { ...shell, status, exitCode })
         }
         return next
       })

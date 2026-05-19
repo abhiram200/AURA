@@ -136,6 +136,11 @@ export class ManagedShellService extends EventEmitter {
         })
 
         ptyProcess.onExit(({ exitCode }: { exitCode: number }) => {
+          // Don't overwrite 'killed' status if terminate() already marked it
+          if (shell.status === 'killed') {
+            this.emit('event', { type: 'shell_exited', shellId: id, exitCode: -1, name } as ShellEvent)
+            return
+          }
           shell.status = exitCode === 0 ? 'completed' : 'failed'
           shell.exitCode = exitCode
           shell.finishedAt = Date.now()
@@ -192,6 +197,11 @@ export class ManagedShellService extends EventEmitter {
     })
 
     child.on('exit', (code) => {
+      // Don't overwrite 'killed' status if terminate() already marked it
+      if (shell.status === 'killed') {
+        this.emit('event', { type: 'shell_exited', shellId: shell.id, exitCode: -1, name: shell.name } as ShellEvent)
+        return
+      }
       shell.status = code === 0 ? 'completed' : 'failed'
       shell.exitCode = code ?? 0
       shell.finishedAt = Date.now()
@@ -199,6 +209,7 @@ export class ManagedShellService extends EventEmitter {
     })
 
     child.on('error', (err) => {
+      if (shell.status === 'killed') return
       const errMsg = `\r\n\x1b[31m[Shell error: ${err.message}]\x1b[0m\r\n`
       this.appendToOutput(shell, errMsg)
       try { appendFileSync(shell.logPath, errMsg) } catch { /* non-fatal */ }
@@ -247,20 +258,25 @@ export class ManagedShellService extends EventEmitter {
     const shell = this.shells.get(shellId)
     if (!shell || shell.status !== 'running') return false
 
-    const pid = shell.pid
-    if (shell.pty) {
-      try { shell.pty.kill() } catch { /* already exited */ }
-      // Kill the entire process tree to prevent orphaned child processes
-      if (pid) killProcessTree(pid)
-    } else if (shell.process) {
-      // Kill the process tree, not just the parent shell
-      if (pid) killProcessTree(pid)
-      else shell.process.kill()
-    }
-
+    // Mark as killed FIRST to prevent onExit handlers from overwriting status
     shell.status = 'killed'
     shell.exitCode = -1
     shell.finishedAt = Date.now()
+
+    // Kill the entire process tree before killing the parent,
+    // so child processes (npm run dev, etc.) don't become orphaned.
+    const pid = shell.pid
+    if (pid) {
+      killProcessTree(pid)
+    }
+
+    // Now clean up the parent process / PTY
+    if (shell.pty) {
+      try { shell.pty.kill() } catch { /* already exited */ }
+    } else if (shell.process) {
+      try { shell.process.kill() } catch { /* already exited */ }
+    }
+
     this.emit('event', { type: 'shell_terminated', shellId, name: shell.name } as ShellEvent)
     return true
   }
