@@ -19,6 +19,8 @@ import type { AuraChatSession } from '../services/aura-chat.ts'
 import type { GitDiffScope } from '../services/aura/types.ts'
 import { globalApprovalManagers } from '../services/aura/agent.ts'
 import { PlanPersistenceService } from '../services/aura/plan-persistence.ts'
+import type { ManagedShellService } from '../services/managedShell.ts'
+import { AgentEventType } from '../services/aura/sse.ts'
 
 const groupQueryService = new GroupQueryService()
 const chatService = new AuraChatService()
@@ -48,6 +50,7 @@ export function createAuraRouter(
   groupService: GroupService,
   dataDir: string,
   store: FileStore,
+  managedShellService: ManagedShellService,
 ): Router {
   const router = Router()
 
@@ -943,7 +946,7 @@ export function createAuraRouter(
 
     const { AuraAgent } = await import('../services/aura/agent.ts')
     const config = await getAuraConfig()
-    const agent = new AuraAgent(qs, project.workspacePath, config.ollamaBaseUrl, config.chatModel, config.contextWindow)
+    const agent = new AuraAgent(qs, project.workspacePath, config.ollamaBaseUrl, config.chatModel, config.contextWindow, managedShellService, projectId)
 
     // JSON mode — collect all SSE events and return a single response
     if (mode === 'json') {
@@ -973,9 +976,24 @@ export function createAuraRouter(
 
     const eventSink = new SSEEventSink(res)
 
+    // Forward managed shell events to the SSE stream
+    const onShellEvent = (event: import('../services/managedShell.ts').ShellEvent) => {
+      if (event.type === 'shell_spawned') {
+        eventSink.emit(AgentEventType.ShellSpawned, { shellId: event.shellId, name: event.name, command: event.command })
+      } else if (event.type === 'shell_output') {
+        eventSink.emit(AgentEventType.ShellOutput, { shellId: event.shellId, data: event.data })
+      } else if (event.type === 'shell_exited') {
+        eventSink.emit(AgentEventType.ShellExited, { shellId: event.shellId, exitCode: event.exitCode, name: event.name })
+      } else if (event.type === 'shell_terminated') {
+        eventSink.emit(AgentEventType.ShellTerminated, { shellId: event.shellId, name: event.name })
+      }
+    }
+    managedShellService.on('event', onShellEvent)
+
     // Handle client disconnect
     let aborted = false
     req.on('close', () => {
+      managedShellService.off('event', onShellEvent)
       aborted = true
       agent.abort()
     })
@@ -984,7 +1002,7 @@ export function createAuraRouter(
       await agent.run(prompt, eventSink, context, priorMessages)
     } catch (err) {
       if (!aborted) {
-        eventSink.emit('error', { message: err instanceof Error ? err.message : 'Agent failed' })
+        eventSink.emit(AgentEventType.Error, { message: err instanceof Error ? err.message : 'Agent failed' })
       }
     } finally {
       eventSink.close()

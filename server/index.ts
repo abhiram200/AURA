@@ -23,6 +23,8 @@ import { AuraQueryService } from './services/aura/graph.ts'
 import { AuraWatcherManager } from './services/aura/watcher-manager.ts'
 import { WorkspaceService } from './services/workspace.ts'
 import { TerminalService } from './services/terminal.ts'
+import { ManagedShellService } from './services/managedShell.ts'
+import { createManagedShellRouter } from './routes/managedShell.ts'
 import { WebSocketServer } from 'ws'
 
 const PORT = parseInt(process.env.PORT ?? '3001', 10)
@@ -82,6 +84,7 @@ async function start() {
   const groupService = new GroupService(DATA_DIR)
   const workspaceService = new WorkspaceService(projectService)
   const terminalService = new TerminalService(projectService)
+  const managedShellService = new ManagedShellService(projectService)
   const auraIndexers = new Map<string, AuraIndexer>()
   const auraQueries = new Map<string, AuraQueryService>()
   const auraWatcherManager = new AuraWatcherManager()
@@ -96,7 +99,8 @@ async function start() {
   app.use('/api/projects', createProjectsRouter(projectService, ollama, store))
   app.use('/api/workspace', createWorkspaceRouter(workspaceService))
   app.use('/api/settings', createSettingsRouter(store))
-  app.use('/api/aura', createAuraRouter(projectService, auraIndexers, auraQueries, auraWatcherManager, groupService, DATA_DIR, store))
+  app.use('/api/aura', createAuraRouter(projectService, auraIndexers, auraQueries, auraWatcherManager, groupService, DATA_DIR, store, managedShellService))
+  app.use('/api/managed-shells', createManagedShellRouter(managedShellService))
 
   app.get('/api/health', async (_req, res) => {
     let ollama = false
