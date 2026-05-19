@@ -1,7 +1,11 @@
 import { useState, useEffect } from 'react'
 import type { useAura } from '../../hooks/useAura'
 import { useTheme } from '../../hooks/useTheme'
+import { useManagedShells } from '../../hooks/useManagedShells'
 import AuraChat from '../../components/aura/AuraChat'
+import { ManagedShellBadge } from '../../components/aura/ManagedShellBadge'
+import { ManagedTerminalPanel } from '../../components/aura/ManagedTerminalPanel'
+import '../../styles/managed-shell.css'
 
 interface AssistantPageProps {
   projectId: string
@@ -17,6 +21,7 @@ export function AssistantPage({ projectId, projectName, workspacePath: _workspac
   const { theme } = useTheme()
   const isLight = theme === 'light'
   const [showConfirm, setShowConfirm] = useState(false)
+  const managedShells = useManagedShells(projectId)
 
   const handleNewChat = () => {
     const skip = localStorage.getItem(SKIP_KEY(projectId)) === 'true'
@@ -74,6 +79,13 @@ export function AssistantPage({ projectId, projectName, workspacePath: _workspac
           </div>
           <span className="assistant-page__context-bar-label">{usage}% used</span>
         </div>
+        <ManagedShellBadge
+          activeShells={managedShells.activeShells}
+          allShells={managedShells.allShells}
+          onViewShell={managedShells.setViewingShell}
+          onTerminateShell={managedShells.terminateShell}
+          onDismissShell={managedShells.dismissShell}
+        />
         <button className="assistant-page__new-chat-btn" onClick={handleNewChat} title="New chat">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
             <line x1="12" y1="5" x2="12" y2="19" />
@@ -85,11 +97,24 @@ export function AssistantPage({ projectId, projectName, workspacePath: _workspac
         messages={aura.chatMessages}
         isStreaming={aura.isStreaming}
         error={aura.chatError}
-        onAsk={aura.ask}
+        onAsk={(prompt) => aura.ask(prompt, managedShells.handleShellEvent)}
         onClearError={aura.clearChatError}
         pendingApproval={aura.pendingApproval}
         onRespondToApproval={aura.respondToApproval}
+        onViewShell={managedShells.setViewingShell}
       />
+      {managedShells.viewingShell && (() => {
+        const shell = managedShells.shells.get(managedShells.viewingShell)
+        if (!shell) return null
+        return (
+          <ManagedTerminalPanel
+            shell={shell}
+            onDismiss={managedShells.dismissShell}
+            onTerminate={managedShells.terminateShell}
+            isLight={theme === 'light'}
+          />
+        )
+      })()}
       {showConfirm && (
         <div className="assistant-confirm-overlay" onClick={() => setShowConfirm(false)}>
           <div className="assistant-confirm-dialog" onClick={e => e.stopPropagation()}>
