@@ -23,6 +23,13 @@ export function AssistantPage({ projectId, projectName, workspacePath: _workspac
   const [showConfirm, setShowConfirm] = useState(false)
   const managedShells = useManagedShells(projectId)
 
+  // When viewing a shell, fetch its full output from the REST API
+  useEffect(() => {
+    if (managedShells.viewingShell) {
+      managedShells.fetchShellOutput(managedShells.viewingShell)
+    }
+  }, [managedShells.viewingShell]) // eslint-disable-line react-hooks/exhaustive-deps
+
   const handleNewChat = () => {
     const skip = localStorage.getItem(SKIP_KEY(projectId)) === 'true'
     if (skip || aura.chatMessages.length === 0) {
@@ -111,6 +118,7 @@ export function AssistantPage({ projectId, projectName, workspacePath: _workspac
             shell={shell}
             onDismiss={managedShells.dismissShell}
             onTerminate={managedShells.terminateShell}
+            onClose={managedShells.closeShellPanel}
             isLight={theme === 'light'}
           />
         )

@@ -257,23 +257,52 @@
   border-color: #9ca3af;
 }
 
-/* Managed Terminal Panel — full terminal view */
-.mtp {
+/* Managed Terminal Panel — popup overlay */
+.mtp-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.6);
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  animation: mtp-fade-in 0.15s ease-out;
+}
+
+@keyframes mtp-fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.mtp-popup {
   display: flex;
   flex-direction: column;
-  border: 1px solid var(--assistant-border, rgba(255,255,255,0.1));
-  border-radius: 8px;
+  border: 1px solid var(--assistant-border, rgba(255,255,255,0.15));
+  border-radius: 10px;
   overflow: hidden;
   background: #1e1e2e;
-  margin: 8px 0;
+  width: 720px;
+  max-width: 90vw;
+  max-height: 80vh;
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.5);
+  animation: mtp-scale-in 0.15s ease-out;
+}
+
+@keyframes mtp-scale-in {
+  from { transform: scale(0.97); opacity: 0; }
+  to { transform: scale(1); opacity: 1; }
 }
 
 .mtp__header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 6px 12px;
-  background: rgba(255,255,255,0.03);
+  padding: 8px 14px;
+  background: rgba(255,255,255,0.04);
   border-bottom: 1px solid var(--assistant-border, rgba(255,255,255,0.1));
 }
 
@@ -285,13 +314,13 @@
 
 .mtp__name {
   font-weight: 600;
-  font-size: 13px;
+  font-size: 14px;
   color: var(--assistant-fg, #e0e0e0);
 }
 
 .mtp__status {
   font-size: 11px;
-  padding: 1px 6px;
+  padding: 2px 8px;
   border-radius: 4px;
 }
 
@@ -318,11 +347,12 @@
 .mtp__header-right {
   display: flex;
   gap: 6px;
+  align-items: center;
 }
 
 .mtp__btn {
-  padding: 3px 10px;
-  border-radius: 4px;
+  padding: 4px 12px;
+  border-radius: 5px;
   border: 1px solid var(--assistant-border, rgba(255,255,255,0.15));
   background: transparent;
   color: var(--assistant-muted, #888);
@@ -344,16 +374,30 @@
   border-color: #9ca3af;
 }
 
+.mtp__btn--close {
+  padding: 4px 8px;
+  font-size: 16px;
+  line-height: 1;
+  border: none;
+  border-radius: 4px;
+  color: var(--assistant-muted, #888);
+}
+
+.mtp__btn--close:hover {
+  background: rgba(255,255,255,0.1);
+  color: var(--assistant-fg, #e0e0e0);
+}
+
 .mtp__command {
   font-family: 'Cascadia Code', 'Fira Code', monospace;
   font-size: 11px;
-  padding: 4px 12px;
-  background: rgba(0,0,0,0.2);
-  color: var(--assistant-muted, #888);
+  padding: 5px 14px;
+  background: rgba(0,0,0,0.25);
+  color: var(--assistant-muted, #999);
   border-bottom: 1px solid var(--assistant-border, rgba(255,255,255,0.05));
 }
 
 .mtp__terminal {
-  height: 300px;
-  padding: 4px;
+  height: 400px;
+  padding: 4px 8px;
 }

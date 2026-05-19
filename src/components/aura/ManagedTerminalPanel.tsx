@@ -9,10 +9,11 @@ interface ManagedTerminalPanelProps {
   shell: ManagedShellState
   onDismiss: (shellId: string) => void
   onTerminate: (shellId: string) => void
+  onClose: () => void
   isLight: boolean
 }
 
-export function ManagedTerminalPanel({ shell, onDismiss, onTerminate, isLight }: ManagedTerminalPanelProps) {
+export function ManagedTerminalPanel({ shell, onDismiss, onTerminate, onClose, isLight }: ManagedTerminalPanelProps) {
   const termRef = useRef<HTMLDivElement>(null)
   const xtermRef = useRef<Terminal | null>(null)
   const fitRef = useRef<FitAddon | null>(null)
@@ -38,7 +39,10 @@ export function ManagedTerminalPanel({ shell, onDismiss, onTerminate, isLight }:
     term.loadAddon(webLinksAddon)
 
     term.open(termRef.current)
-    fitAddon.fit()
+    // Delay fit to allow the modal to render
+    requestAnimationFrame(() => {
+      fitAddon.fit()
+    })
 
     xtermRef.current = term
     fitRef.current = fitAddon
@@ -75,6 +79,11 @@ export function ManagedTerminalPanel({ shell, onDismiss, onTerminate, isLight }:
     return () => window.removeEventListener('resize', handleResize)
   }, [])
 
+  // Stop click from propagating to overlay backdrop
+  const handlePanelClick = (e: React.MouseEvent) => {
+    e.stopPropagation()
+  }
+
   const statusLabel = shell.status === 'running' ? 'Running'
     : shell.status === 'completed' ? `Completed (exit ${shell.exitCode})`
     : shell.status === 'failed' ? `Failed (exit ${shell.exitCode})`
@@ -86,27 +95,32 @@ export function ManagedTerminalPanel({ shell, onDismiss, onTerminate, isLight }:
     : 'mtp__status--killed'
 
   return (
-    <div className="mtp">
-      <div className="mtp__header">
-        <div className="mtp__header-left">
-          <span className="mtp__name">{shell.name}</span>
-          <span className={`mtp__status ${statusClass}`}>{statusLabel}</span>
-        </div>
-        <div className="mtp__header-right">
-          {shell.status === 'running' && (
-            <button className="mtp__btn mtp__btn--terminate" onClick={() => onTerminate(shell.id)}>
-              Terminate
+    <div className="mtp-overlay" onClick={onClose}>
+      <div className="mtp-popup" onClick={handlePanelClick}>
+        <div className="mtp__header">
+          <div className="mtp__header-left">
+            <span className="mtp__name">{shell.name}</span>
+            <span className={`mtp__status ${statusClass}`}>{statusLabel}</span>
+          </div>
+          <div className="mtp__header-right">
+            {shell.status === 'running' && (
+              <button className="mtp__btn mtp__btn--terminate" onClick={() => onTerminate(shell.id)}>
+                Terminate
+              </button>
+            )}
+            {shell.status !== 'running' && (
+              <button className="mtp__btn mtp__btn--dismiss" onClick={() => onDismiss(shell.id)}>
+                Dismiss
+              </button>
+            )}
+            <button className="mtp__btn mtp__btn--close" onClick={onClose} title="Close">
+              ✕
             </button>
-          )}
-          {shell.status !== 'running' && (
-            <button className="mtp__btn mtp__btn--dismiss" onClick={() => onDismiss(shell.id)}>
-              Dismiss
-            </button>
-          )}
+          </div>
         </div>
+        <div className="mtp__command">{shell.command}</div>
+        <div className="mtp__terminal" ref={termRef} />
       </div>
-      <div className="mtp__command">{shell.command}</div>
-      <div className="mtp__terminal" ref={termRef} />
     </div>
   )
 }

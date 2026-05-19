@@ -131,6 +131,32 @@ export function useManagedShells(projectId: string | null) {
     }
   }, [projectId])
 
+  // Fetch full output from REST API for a specific shell (used when opening terminal)
+  const fetchShellOutput = useCallback(async (shellId: string) => {
+    if (!projectId) return
+    try {
+      const res = await fetch(`/api/managed-shells/${projectId}/${shellId}/output`)
+      if (!res.ok) return
+      const data = await res.json()
+      if (data.recentOutput) {
+        setShells(prev => {
+          const next = new Map(prev)
+          const shell = next.get(shellId)
+          if (shell) {
+            next.set(shellId, { ...shell, output: data.recentOutput })
+          }
+          return next
+        })
+      }
+    } catch {
+      // Fetch failed silently
+    }
+  }, [projectId])
+
+  const closeShellPanel = useCallback(() => {
+    setViewingShell(null)
+  }, [])
+
   const activeShells = [...shells.values()].filter(s => s.status === 'running')
   const allShells = [...shells.values()]
 
@@ -143,6 +169,8 @@ export function useManagedShells(projectId: string | null) {
     handleShellEvent,
     dismissShell,
     terminateShell,
+    fetchShellOutput,
+    closeShellPanel,
     fetchShells,
   }
 }
