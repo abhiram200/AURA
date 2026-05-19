@@ -88,10 +88,8 @@ export function AssistantPage({ projectId, projectName, workspacePath: _workspac
         </div>
         <ManagedShellBadge
           activeShells={managedShells.activeShells}
-          allShells={managedShells.allShells}
           onViewShell={managedShells.setViewingShell}
           onTerminateShell={managedShells.terminateShell}
-          onDismissShell={managedShells.dismissShell}
         />
         <button className="assistant-page__new-chat-btn" onClick={handleNewChat} title="New chat">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">

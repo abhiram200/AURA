@@ -253,10 +253,6 @@
   color: #ef4444;
 }
 
-.ms-badge__shell-btn--dismiss:hover {
-  border-color: #9ca3af;
-}
-
 /* Managed Terminal Panel — popup overlay */
 .mtp-overlay {
   position: fixed;

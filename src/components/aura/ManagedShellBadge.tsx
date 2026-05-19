@@ -3,10 +3,8 @@ import type { ManagedShellState } from '../../hooks/useManagedShells'
 
 interface ManagedShellBadgeProps {
   activeShells: ManagedShellState[]
-  allShells: ManagedShellState[]
   onViewShell: (shellId: string) => void
   onTerminateShell: (shellId: string) => void
-  onDismissShell: (shellId: string) => void
 }
 
 function ShellStatusIcon({ status }: { status: ManagedShellState['status'] }) {
@@ -16,7 +14,7 @@ function ShellStatusIcon({ status }: { status: ManagedShellState['status'] }) {
   return <span className="ms-badge__status ms-badge__status--killed">⊘</span>
 }
 
-export function ManagedShellBadge({ activeShells, allShells, onViewShell, onTerminateShell, onDismissShell }: ManagedShellBadgeProps) {
+export function ManagedShellBadge({ activeShells, onViewShell, onTerminateShell }: ManagedShellBadgeProps) {
   const [open, setOpen] = useState(false)
   const dropdownRef = useRef<HTMLDivElement>(null)
 
@@ -31,12 +29,12 @@ export function ManagedShellBadge({ activeShells, allShells, onViewShell, onTerm
     return () => document.removeEventListener('mousedown', handleClickOutside)
   }, [open])
 
-  if (allShells.length === 0) return null
+  if (activeShells.length === 0) return null
 
   return (
     <div className="ms-badge" ref={dropdownRef}>
       <button
-        className={`ms-badge__trigger ${activeShells.length > 0 ? 'ms-badge__trigger--active' : ''}`}
+        className="ms-badge__trigger ms-badge__trigger--active"
         onClick={() => setOpen(!open)}
         title={`${activeShells.length} active shell${activeShells.length !== 1 ? 's' : ''}`}
       >
@@ -44,48 +42,29 @@ export function ManagedShellBadge({ activeShells, allShells, onViewShell, onTerm
           <polyline points="4 17 10 11 4 5" />
           <line x1="12" y1="19" x2="20" y2="19" />
         </svg>
-        {activeShells.length > 0 && (
-          <span className="ms-badge__count">{activeShells.length}</span>
-        )}
+        <span className="ms-badge__count">{activeShells.length}</span>
       </button>
       {open && (
         <div className="ms-badge__dropdown">
           <div className="ms-badge__dropdown-header">
-            Background Shells
+            Active Shells
           </div>
-          {allShells.length === 0 ? (
-            <div className="ms-badge__empty">No shells</div>
-          ) : (
-            allShells.map(shell => (
-              <div key={shell.id} className={`ms-badge__shell-item ms-badge__shell-item--${shell.status}`}>
-                <ShellStatusIcon status={shell.status} />
-                <div className="ms-badge__shell-info" onClick={() => { onViewShell(shell.id); setOpen(false) }}>
-                  <span className="ms-badge__shell-name">{shell.name}</span>
-                  <span className="ms-badge__shell-command">{shell.command}</span>
-                </div>
-                <div className="ms-badge__shell-actions">
-                  {shell.status === 'running' && (
-                    <button
-                      className="ms-badge__shell-btn ms-badge__shell-btn--terminate"
-                      onClick={(e) => { e.stopPropagation(); onTerminateShell(shell.id) }}
-                      title="Terminate"
-                    >
-                      ■
-                    </button>
-                  )}
-                  {shell.status !== 'running' && (
-                    <button
-                      className="ms-badge__shell-btn ms-badge__shell-btn--dismiss"
-                      onClick={(e) => { e.stopPropagation(); onDismissShell(shell.id) }}
-                      title="Dismiss"
-                    >
-                      ×
-                    </button>
-                  )}
-                </div>
+          {activeShells.map(shell => (
+            <div key={shell.id} className={`ms-badge__shell-item ms-badge__shell-item--${shell.status}`}>
+              <ShellStatusIcon status={shell.status} />
+              <div className="ms-badge__shell-info" onClick={() => { onViewShell(shell.id); setOpen(false) }}>
+                <span className="ms-badge__shell-name">{shell.name}</span>
+                <span className="ms-badge__shell-command">{shell.command}</span>
               </div>
-            ))
-          )}
+              <button
+                className="ms-badge__shell-btn ms-badge__shell-btn--terminate"
+                onClick={(e) => { e.stopPropagation(); onTerminateShell(shell.id) }}
+                title="Terminate"
+              >
+                ■
+              </button>
+            </div>
+          ))}
         </div>
       )}
     </div>

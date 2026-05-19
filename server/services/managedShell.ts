@@ -15,17 +15,49 @@ const isWindows = platform() === 'win32'
 // On Windows, child_process.kill() only kills the direct parent,
 // orphaning child processes (e.g., npm run dev survives killing cmd.exe).
 function killProcessTree(pid: number): void {
-  try {
-    if (isWindows) {
-      // /T kills the process tree, /F forces termination
-      execSync(`taskkill /pid ${pid} /T /F`, { stdio: 'ignore', windowsHide: true })
-    } else {
-      // On Unix, kill the process group (negative PID)
-      try { process.kill(-pid, 'SIGKILL') } catch { /* group may not exist */ }
+  if (isWindows) {
+    // Step 1: Kill the process tree using taskkill
+    try {
+      execSync(`taskkill /pid ${pid} /T /F`, { stdio: 'pipe', windowsHide: true, timeout: 5000 })
+      console.log(`[ManagedShell] taskkill /T /F succeeded for PID ${pid}`)
+    } catch (err: any) {
+      console.error(`[ManagedShell] taskkill /T /F failed for PID ${pid}:`, err?.message || err)
+      // Step 2: If taskkill /T failed, try killing just the process and its direct children
+      try {
+        // Find child processes and kill them individually
+        const wmicOut = execSync(
+          `wmic process where "ParentProcessId=${pid}" get ProcessId /format:list`,
+          { stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true, timeout: 5000, encoding: 'utf-8' }
+        )
+        const childPids = wmicOut.split('\n')
+          .map((l: string) => l.replace('ProcessId=', '').trim())
+          .filter((l: string) => /^\d+$/.test(l))
+        for (const cpid of childPids) {
+          try {
+            execSync(`taskkill /pid ${cpid} /F`, { stdio: 'ignore', windowsHide: true })
+            console.log(`[ManagedShell] Killed child PID ${cpid}`)
+          } catch { /* child already dead */ }
+        }
+      } catch {
+        console.error(`[ManagedShell] wmic enumeration failed for PID ${pid}`)
+      }
+      // Step 3: Kill the parent itself
+      try {
+        process.kill(pid)
+        console.log(`[ManagedShell] process.kill succeeded for PID ${pid}`)
+      } catch {
+        console.error(`[ManagedShell] process.kill also failed for PID ${pid} — process may already be dead`)
+      }
     }
-  } catch {
-    // Process may have already exited — try a simple kill as fallback
-    try { process.kill(pid, 'SIGKILL') } catch { /* already dead */ }
+  } else {
+    // On Unix, kill the process group (negative PID)
+    try {
+      process.kill(-pid, 'SIGKILL')
+      console.log(`[ManagedShell] Killed process group ${-pid}`)
+    } catch (err: any) {
+      console.error(`[ManagedShell] process.kill(-${pid}) failed:`, err?.message || err)
+      try { process.kill(pid, 'SIGKILL') } catch { /* already dead */ }
+    }
   }
 }
 
@@ -256,7 +288,12 @@ export class ManagedShellService extends EventEmitter {
 
   terminate(shellId: string): boolean {
     const shell = this.shells.get(shellId)
-    if (!shell || shell.status !== 'running') return false
+    if (!shell || shell.status !== 'running') {
+      console.log(`[ManagedShell] Cannot terminate ${shellId}: status=${shell?.status ?? 'not found'}`)
+      return false
+    }
+
+    console.log(`[ManagedShell] Terminating ${shellId} (name=${shell.name}, pid=${shell.pid}, pty=${!!shell.pty})`)
 
     // Mark as killed FIRST to prevent onExit handlers from overwriting status
     shell.status = 'killed'
@@ -272,12 +309,23 @@ export class ManagedShellService extends EventEmitter {
 
     // Now clean up the parent process / PTY
     if (shell.pty) {
-      try { shell.pty.kill() } catch { /* already exited */ }
+      try {
+        shell.pty.kill()
+        console.log(`[ManagedShell] PTY kill succeeded for ${shellId}`)
+      } catch (err: any) {
+        console.log(`[ManagedShell] PTY kill threw (expected if process already dead):`, err?.message || err)
+      }
     } else if (shell.process) {
-      try { shell.process.kill() } catch { /* already exited */ }
+      try {
+        shell.process.kill()
+        console.log(`[ManagedShell] process.kill succeeded for ${shellId}`)
+      } catch (err: any) {
+        console.log(`[ManagedShell] process.kill threw (expected if process already dead):`, err?.message || err)
+      }
     }
 
     this.emit('event', { type: 'shell_terminated', shellId, name: shell.name } as ShellEvent)
+    console.log(`[ManagedShell] Shell ${shellId} terminated`)
     return true
   }
 
