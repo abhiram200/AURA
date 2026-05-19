@@ -422,6 +422,14 @@ export interface AuraApprovalRequest {
   options?: string[]
 }
 
+export interface AuraShellEvent {
+  shellId: string
+  name: string
+  command: string
+  status: 'running' | 'completed' | 'failed' | 'killed'
+  exitCode: number | null
+}
+
 export interface AuraChatMessage {
   id: string
   role: 'user' | 'assistant'
@@ -429,6 +437,7 @@ export interface AuraChatMessage {
   toolCalls?: AuraToolCall[]
   subAgents?: AuraSubAgentInfo[]
   todos?: AuraTodoItem[]
+  shells?: AuraShellEvent[]
   timestamp: number
 }
 
@@ -1081,7 +1090,7 @@ export function useAura(projectId: string | null) {
 
   // ── Ask (AI Agent) ──────────────────────────────────────────────────────────
 
-  const ask = useCallback(async (prompt: string) => {
+  const ask = useCallback(async (prompt: string, onShellEvent?: (eventType: string, data: Record<string, unknown>) => void) => {
     if (!projectId) return
 
     const userMsg: AuraChatMessage = {
@@ -1218,6 +1227,31 @@ export function useAura(projectId: string | null) {
                   msg.todos = data.todos || []
                 } else if (eventType === 'approval_request') {
                   setPendingApproval(data as AuraApprovalRequest)
+                } else if (eventType === 'shell_spawned') {
+                  msg.shells = [...(msg.shells || []), {
+                    shellId: data.shellId,
+                    name: data.name,
+                    command: data.command,
+                    status: 'running' as const,
+                    exitCode: null,
+                  }]
+                  if (onShellEvent) onShellEvent('shell_spawned', data)
+                } else if (eventType === 'shell_exited') {
+                  msg.shells = (msg.shells || []).map((s: AuraShellEvent) =>
+                    s.shellId === data.shellId
+                      ? { ...s, status: data.exitCode === 0 ? 'completed' as const : 'failed' as const, exitCode: data.exitCode as number }
+                      : s
+                  )
+                  if (onShellEvent) onShellEvent('shell_exited', data)
+                } else if (eventType === 'shell_terminated') {
+                  msg.shells = (msg.shells || []).map((s: AuraShellEvent) =>
+                    s.shellId === data.shellId
+                      ? { ...s, status: 'killed' as const, exitCode: -1 }
+                      : s
+                  )
+                  if (onShellEvent) onShellEvent('shell_terminated', data)
+                } else if (eventType === 'shell_output') {
+                  if (onShellEvent) onShellEvent('shell_output', data)
                 } else if (eventType === 'error') {
                   msg.content += `\n\n⚠️ Error: ${data.message}`
                 }
