@@ -33,7 +33,7 @@ Four new tools in `server/services/aura/agent.ts` `defineAgentTools()`:
 | Tool | Parameters | Returns | Description |
 |------|-----------|---------|-------------|
 | `shell_spawn` | `{ name: string, command: string, cwd?: string }` | `{ shellId, name, status }` | Spawn a background shell with a descriptive name |
-| `shell_read` | `{ shellId: string, tailLines?: number }` | `{ status, exitCode, recentOutput, fullLogPath }` | Check shell output and status |
+| `shell_read` | `{ shellId: string, tailLines?: number }` | `{ status, exitCode, recentOutput, outputTruncated?, fullLogPath? }` | Check shell output and status. `fullLogPath` is included only when `outputTruncated` is true — the AI can then use `read_file` on that path for the complete output |
 | `shell_terminate` | `{ shellId: string }` | `{ success }` | Kill a running shell |
 | `shell_list` | `{}` | `{ shells: [{ id, name, command, status, exitCode }] }` | List all managed shells |
 
@@ -63,7 +63,7 @@ New routes in `server/routes/aura.ts` or a new `server/routes/managedShell.ts`:
 
 - Each shell writes output to `.aura/shells/{shellId}.log` in the project directory
 - The log file is created on spawn, appended to as output arrives, and kept until the shell is dismissed
-- `shell_read` tool can reference the full log file for complete output beyond the 1MB ring buffer
+- `shell_read` returns the in-memory ring buffer (last 1MB). When output is truncated by the ring buffer, the response includes `outputTruncated: true` and `fullLogPath` (absolute path to the log file). The AI can then use its existing `read_file` tool on that path for complete output
 - Log files are cleaned up when a shell is dismissed from the UI
 
 ### System Prompt Updates
