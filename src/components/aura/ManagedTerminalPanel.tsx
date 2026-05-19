@@ -1,0 +1,112 @@
+import { useEffect, useRef } from 'react'
+import { Terminal } from '@xterm/xterm'
+import { FitAddon } from '@xterm/addon-fit'
+import { WebLinksAddon } from '@xterm/addon-web-links'
+import type { ManagedShellState } from '../../hooks/useManagedShells'
+import '@xterm/xterm/css/xterm.css'
+
+interface ManagedTerminalPanelProps {
+  shell: ManagedShellState
+  onDismiss: (shellId: string) => void
+  onTerminate: (shellId: string) => void
+  isLight: boolean
+}
+
+export function ManagedTerminalPanel({ shell, onDismiss, onTerminate, isLight }: ManagedTerminalPanelProps) {
+  const termRef = useRef<HTMLDivElement>(null)
+  const xtermRef = useRef<Terminal | null>(null)
+  const fitRef = useRef<FitAddon | null>(null)
+
+  useEffect(() => {
+    if (!termRef.current || xtermRef.current) return
+
+    const term = new Terminal({
+      theme: isLight
+        ? { background: '#fafafa', foreground: '#383a42', cursor: '#526fff', selectionBackground: '#add6ff' }
+        : { background: '#1e1e2e', foreground: '#cdd6f4', cursor: '#f5e0dc', selectionBackground: '#45475a' },
+      fontFamily: "'Cascadia Code', 'Fira Code', 'JetBrains Mono', monospace",
+      fontSize: 13,
+      cursorBlink: false,
+      disableStdin: true,
+      convertEol: true,
+      scrollback: 10000,
+    })
+
+    const fitAddon = new FitAddon()
+    const webLinksAddon = new WebLinksAddon()
+    term.loadAddon(fitAddon)
+    term.loadAddon(webLinksAddon)
+
+    term.open(termRef.current)
+    fitAddon.fit()
+
+    xtermRef.current = term
+    fitRef.current = fitAddon
+
+    if (shell.output) {
+      term.write(shell.output)
+    }
+
+    return () => {
+      term.dispose()
+      xtermRef.current = null
+      fitRef.current = null
+    }
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+
+  const lastOutputLengthRef = useRef(shell.output.length)
+  useEffect(() => {
+    const term = xtermRef.current
+    if (!term) return
+
+    const newOutput = shell.output.slice(lastOutputLengthRef.current)
+    if (newOutput) {
+      term.write(newOutput)
+    }
+    lastOutputLengthRef.current = shell.output.length
+  }, [shell.output])
+
+  useEffect(() => {
+    const handleResize = () => {
+      fitRef.current?.fit()
+    }
+    window.addEventListener('resize', handleResize)
+    handleResize()
+    return () => window.removeEventListener('resize', handleResize)
+  }, [])
+
+  const statusLabel = shell.status === 'running' ? 'Running'
+    : shell.status === 'completed' ? `Completed (exit ${shell.exitCode})`
+    : shell.status === 'failed' ? `Failed (exit ${shell.exitCode})`
+    : 'Terminated'
+
+  const statusClass = shell.status === 'running' ? 'mtp__status--running'
+    : shell.status === 'completed' ? 'mtp__status--completed'
+    : shell.status === 'failed' ? 'mtp__status--failed'
+    : 'mtp__status--killed'
+
+  return (
+    <div className="mtp">
+      <div className="mtp__header">
+        <div className="mtp__header-left">
+          <span className="mtp__name">{shell.name}</span>
+          <span className={`mtp__status ${statusClass}`}>{statusLabel}</span>
+        </div>
+        <div className="mtp__header-right">
+          {shell.status === 'running' && (
+            <button className="mtp__btn mtp__btn--terminate" onClick={() => onTerminate(shell.id)}>
+              Terminate
+            </button>
+          )}
+          {shell.status !== 'running' && (
+            <button className="mtp__btn mtp__btn--dismiss" onClick={() => onDismiss(shell.id)}>
+              Dismiss
+            </button>
+          )}
+        </div>
+      </div>
+      <div className="mtp__command">{shell.command}</div>
+      <div className="mtp__terminal" ref={termRef} />
+    </div>
+  )
+}
