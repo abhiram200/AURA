@@ -11,6 +11,10 @@ export enum AgentEventType {
   PlanCompleted = 'plan_completed',
   Done = 'done',
   Error = 'error',
+  ShellSpawned = 'shell_spawned',
+  ShellOutput = 'shell_output',
+  ShellExited = 'shell_exited',
+  ShellTerminated = 'shell_terminated',
 }
 
 export interface AgentEventSink {
