@@ -6,6 +6,7 @@ import { promisify } from 'util'
 import type { Response } from 'express'
 import type { AuraQueryService } from './graph.ts'
 import type { AgentEventSink } from './sse.ts'
+import type { ManagedShellService } from '../managedShell.ts'
 import { SilentEventSink } from './sse.ts'
 import { buildCrawlArgs, buildDesignCrawlArgs } from './crawl.ts'
 import { PlanPersistenceService, type SavedPlan } from './plan-persistence.ts'
@@ -343,6 +344,22 @@ Use the \`execute\` tool to run build, test, and lint commands — NEVER use it 
 2. Reading the modified files back to confirm correctness
 3. If a fix fails, try a different approach — never repeat the same edit
 
+## Background Shell Management
+
+You have tools to manage background shells: shell_spawn, shell_read, shell_terminate, shell_list.
+
+When to use background shells vs inline execute:
+- Use \`execute\` for quick commands that complete in seconds (git status, ls, cat, quick checks)
+- Use \`shell_spawn\` for long-running commands (npm run dev, npm run build, test suites, dev servers, watchers)
+
+DEPENDENCY RULE: Before starting any task that depends on a background shell's completion, you MUST use \`shell_read\` to confirm the shell has completed successfully. For example:
+- After spawning "install-deps", do NOT start "build-project" until shell_read confirms install-deps exited with code 0
+- After spawning "build-project", do NOT start "run-tests" until shell_read confirms the build succeeded
+
+Naming: Give each shell a descriptive name that reflects its purpose (e.g., "install-deps", "dev-server", "run-tests", "build-project").
+
+When a shell completes, you will be informed via the shell_exited event. Check its output before proceeding with dependent work.
+
 ## How to Edit Code
 
 1. **Always \`read_file\` before \`update\`.** The \`oldString\` must match exactly — including whitespace and indentation.
@@ -534,7 +551,7 @@ function formatContext(context: Record<string, unknown>): string {
 
 // ── Tool definitions ───────────────────────────────────────────────────────
 
-function defineAgentTools(qs: AuraQueryService, projectPath: string): AgentTool[] {
+function defineAgentTools(qs: AuraQueryService, projectPath: string, managedShells?: ManagedShellService, projectId?: string): AgentTool[] {
   return [
     // ── Graph & Indexing Tools ────────────────────────────────────────────
 
@@ -1147,6 +1164,7 @@ function defineAgentTools(qs: AuraQueryService, projectPath: string): AgentTool[
         // NOTE: Dangerous git commands (force push, reset --hard, etc.) are checked in the agent loop
         // via DANGEROUS_COMMAND_DESCRIPTIONS — they route to the approval system instead of being hard-blocked.
 
+        const fullCommand = `git ${gitArgs}`
         try {
           const { stdout, stderr } = await execFileAsync(fullCommand, [], {
             cwd: projectPath,
@@ -1171,6 +1189,90 @@ function defineAgentTools(qs: AuraQueryService, projectPath: string): AgentTool[
             stderr: (execErr.stderr || '').trim() || (err instanceof Error ? err.message : String(err)),
           }
         }
+      },
+    },
+
+    // ── Managed Shell Tools ──────────────────────────────────────────────────
+
+    {
+      name: 'shell_spawn',
+      description: 'Spawn a background shell for long-running commands (dev servers, builds, test suites, watchers). The shell runs independently — you can check on it later with shell_read. Use descriptive names like "dev-server", "run-tests", "install-deps". IMPORTANT: Before starting any dependent task (e.g., running tests after a build), use shell_read to confirm the shell completed successfully. Do NOT use this for quick commands — use execute for those.',
+      parameters: {
+        type: 'object',
+        properties: {
+          name: { type: 'string', description: 'Descriptive name for this shell, e.g. "dev-server", "build-project", "install-deps"' },
+          command: { type: 'string', description: 'The shell command to run in the background' },
+          cwd: { type: 'string', description: 'Working directory (defaults to project root)' },
+        },
+        required: ['name', 'command'],
+      },
+      execute: async (args) => {
+        if (!managedShells || !projectId) {
+          return { error: 'Managed shells are not available for this project' }
+        }
+        try {
+          const shell = await managedShells.spawn(projectId, args.name as string, args.command as string, args.cwd as string | undefined)
+          return { shellId: shell.id, name: shell.name, status: shell.status, message: `Background shell "${shell.name}" spawned. Use shell_read to check progress.` }
+        } catch (err: unknown) {
+          return { error: `Failed to spawn shell: ${err instanceof Error ? err.message : String(err)}` }
+        }
+      },
+    },
+    {
+      name: 'shell_read',
+      description: 'Read the output and status of a background shell. Returns recent output (last 1MB), status, and exit code. If output was truncated by the ring buffer, includes the full log file path. IMPORTANT: Always check shell_read before starting dependent work — do not assume a build or install is done just because you spawned it.',
+      parameters: {
+        type: 'object',
+        properties: {
+          shellId: { type: 'string', description: 'The shell ID returned by shell_spawn' },
+          tailLines: { type: 'number', description: 'Number of lines to return from the end of output (default: all)' },
+        },
+        required: ['shellId'],
+      },
+      execute: async (args) => {
+        if (!managedShells) {
+          return { error: 'Managed shells are not available' }
+        }
+        const result = managedShells.readOutput(args.shellId as string, args.tailLines as number | undefined)
+        if (!result) {
+          return { error: `Shell "${args.shellId}" not found. Use shell_list to see available shells.` }
+        }
+        return result
+      },
+    },
+    {
+      name: 'shell_terminate',
+      description: 'Terminate a running background shell. Use this to stop dev servers, long-running processes, or shells you no longer need.',
+      parameters: {
+        type: 'object',
+        properties: {
+          shellId: { type: 'string', description: 'The shell ID to terminate' },
+        },
+        required: ['shellId'],
+      },
+      execute: async (args) => {
+        if (!managedShells) {
+          return { error: 'Managed shells are not available' }
+        }
+        const success = managedShells.terminate(args.shellId as string)
+        return success
+          ? { success: true, message: `Shell "${args.shellId}" terminated` }
+          : { error: `Shell "${args.shellId}" not found or already exited` }
+      },
+    },
+    {
+      name: 'shell_list',
+      description: 'List all managed background shells and their statuses. Use this to check which shells are running, completed, or failed before deciding what to do next.',
+      parameters: {
+        type: 'object',
+        properties: {},
+      },
+      execute: async () => {
+        if (!managedShells) {
+          return { error: 'Managed shells are not available' }
+        }
+        const shells = managedShells.listShells(projectId)
+        return { shells }
       },
     },
 
@@ -1372,13 +1474,17 @@ export class AuraAgent {
   private contextWindow: number
   private abortController: AbortController | null = null
   private approvalManager: ApprovalManager
+  private managedShells: ManagedShellService | null
+  private projectId: string | null
 
-  constructor(qs: AuraQueryService, projectPath: string, ollamaBaseUrl?: string, model?: string, contextWindow?: number) {
+  constructor(qs: AuraQueryService, projectPath: string, ollamaBaseUrl?: string, model?: string, contextWindow?: number, managedShells?: ManagedShellService, projectId?: string) {
     this.qs = qs
     this.projectPath = projectPath
     this.ollamaBaseUrl = ollamaBaseUrl || process.env.OLLAMA_BASE_URL || 'http://localhost:11434'
     this.model = model || process.env.OLLAMA_MODEL || 'glm-5.1:cloud'
     this.contextWindow = contextWindow ?? 200_000
+    this.managedShells = managedShells || null
+    this.projectId = projectId || null
     // Get or create the ApprovalManager for this project
     let am = globalApprovalManagers.get(projectPath)
     if (!am) {
@@ -1471,7 +1577,7 @@ export class AuraAgent {
     const systemPrompt = buildSystemPrompt(skillContent, contextSection, isGreenfield || undefined, gitContext || undefined, planResume || undefined)
 
     // Build tools
-    const tools = defineAgentTools(this.qs, this.projectPath)
+    const tools = defineAgentTools(this.qs, this.projectPath, this.managedShells ?? undefined, this.projectId ?? undefined)
     const ollamaTools = buildOllamaTools(tools)
 
     const priorMsgs = priorMessages || []
@@ -1520,6 +1626,8 @@ export class AuraAgent {
 
     // Agent loop
     const maxIterations = 500
+    const maxLoopRetries = 3
+    let loopRetryCount = 0
     const recentToolCalls: string[] = []  // Track tool call signatures for deduplication
     let todoList: AuraTodoItem[] = planResume ? [...planResume.todos] : []
     for (let i = 0; i < maxIterations; i++) {
@@ -1538,9 +1646,17 @@ export class AuraAgent {
       const result = await this.streamChat(messages, ollamaTools, eventSink)
 
       if (!result) {
+        if (loopRetryCount < maxLoopRetries) {
+          loopRetryCount++
+          eventSink.emit('token', { content: `[Retrying from last position… (${loopRetryCount}/${maxLoopRetries})] ` })
+          continue  // Retry from the same position — messages are preserved
+        }
         eventSink.emit('done', {})
         return
       }
+
+      // Reset retry counter on successful response
+      loopRetryCount = 0
 
       // Add assistant message to history
       messages.push({
@@ -1860,80 +1976,108 @@ export class AuraAgent {
     tools: OllamaTool[],
     eventSink: AgentEventSink,
   ): Promise<{ content: string; toolCalls: Array<{ name: string; args: Record<string, unknown>; id?: string }> } | null> {
-    try {
-      const payload = {
-        model: this.model,
-        messages: messages.map(m => {
-          const msg: Record<string, unknown> = { role: m.role, content: m.content }
-          if (m.tool_calls) msg.tool_calls = m.tool_calls
-          if (m.tool_call_id) msg.tool_call_id = m.tool_call_id
-          if (m.name) msg.name = m.name
-          return msg
-        }),
-        tools: tools.length > 0 ? tools : undefined,
-        stream: true,
-        options: { num_ctx: this.contextWindow },
-      }
-      const response = await fetch(`${this.ollamaBaseUrl}/api/chat`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-        signal: this.abortController?.signal,
-      })
+    const maxRetries = 5
+    let lastError: string = ''
 
-      if (!response.ok || !response.body) {
-        const errText = await response.text().catch(() => response.statusText)
-        eventSink.emit('error', { message: `Ollama chat failed: ${response.status} ${errText}` })
-        return null
-      }
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      if (this.abortController?.signal.aborted) return null
 
-      const reader = response.body.getReader()
-      const decoder = new TextDecoder()
-      let fullContent = ''
-      let buffer = ''
-      const toolCalls: Array<{ name: string; args: Record<string, unknown>; id?: string }> = []
+      try {
+        const payload = {
+          model: this.model,
+          messages: messages.map(m => {
+            const msg: Record<string, unknown> = { role: m.role, content: m.content }
+            if (m.tool_calls) msg.tool_calls = m.tool_calls
+            if (m.tool_call_id) msg.tool_call_id = m.tool_call_id
+            if (m.name) msg.name = m.name
+            return msg
+          }),
+          tools: tools.length > 0 ? tools : undefined,
+          stream: true,
+          options: { num_ctx: this.contextWindow },
+        }
+        const response = await fetch(`${this.ollamaBaseUrl}/api/chat`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+          signal: this.abortController?.signal,
+        })
 
-      while (true) {
-        const { done, value } = await reader.read()
-        if (done) break
-
-        buffer += decoder.decode(value, { stream: true })
-        const lines = buffer.split('\n')
-        buffer = lines.pop() || ''
-
-        for (const line of lines) {
-          if (!line.trim()) continue
-          try {
-            const parsed = JSON.parse(line)
-            if (parsed.message?.content) {
-              fullContent += parsed.message.content
-              eventSink.emit('token', { content: parsed.message.content })
+        if (!response.ok || !response.body) {
+          const errText = await response.text().catch(() => response.statusText)
+          lastError = `${response.status} ${errText}`
+          // Retry on server errors (5xx) and rate limits (429), not on client errors (4xx)
+          if (response.status >= 500 || response.status === 429) {
+            if (attempt < maxRetries) {
+              const delay = Math.min(1000 * Math.pow(2, attempt - 1), 8000)
+              eventSink.emit('token', { content: `[Retrying in ${delay / 1000}s… (${attempt}/${maxRetries})] ` })
+              await new Promise(r => setTimeout(r, delay))
+              continue
             }
-            if (parsed.message?.tool_calls) {
-              for (const tc of parsed.message.tool_calls) {
-                let args: Record<string, unknown> = {}
-                try {
-                  args = typeof tc.function.arguments === 'string'
-                    ? JSON.parse(tc.function.arguments)
-                    : tc.function.arguments || {}
-                } catch {
-                  args = {}
-                }
-                toolCalls.push({ name: tc.function.name, args, id: tc.id })
+          }
+          eventSink.emit('error', { message: `Ollama chat failed: ${lastError}` })
+          return null
+        }
+
+        const reader = response.body.getReader()
+        const decoder = new TextDecoder()
+        let fullContent = ''
+        let buffer = ''
+        const toolCalls: Array<{ name: string; args: Record<string, unknown>; id?: string }> = []
+
+        while (true) {
+          const { done, value } = await reader.read()
+          if (done) break
+
+          buffer += decoder.decode(value, { stream: true })
+          const lines = buffer.split('\n')
+          buffer = lines.pop() || ''
+
+          for (const line of lines) {
+            if (!line.trim()) continue
+            try {
+              const parsed = JSON.parse(line)
+              if (parsed.message?.content) {
+                fullContent += parsed.message.content
+                eventSink.emit('token', { content: parsed.message.content })
               }
+              if (parsed.message?.tool_calls) {
+                for (const tc of parsed.message.tool_calls) {
+                  let args: Record<string, unknown> = {}
+                  try {
+                    args = typeof tc.function.arguments === 'string'
+                      ? JSON.parse(tc.function.arguments)
+                      : tc.function.arguments || {}
+                  } catch {
+                    args = {}
+                  }
+                  toolCalls.push({ name: tc.function.name, args, id: tc.id })
+                }
+              }
+            } catch {
+              // Skip malformed lines
             }
-          } catch {
-            // Skip malformed lines
           }
         }
-      }
 
-      return { content: fullContent, toolCalls }
-    } catch (err) {
-      if ((err as Error).name === 'AbortError') return null
-      eventSink.emit('error', { message: `Ollama request failed: ${(err as Error).message}` })
-      return null
+        return { content: fullContent, toolCalls }
+      } catch (err) {
+        if ((err as Error).name === 'AbortError') return null
+        lastError = (err as Error).message
+
+        if (attempt < maxRetries) {
+          const delay = Math.min(1000 * Math.pow(2, attempt - 1), 8000)
+          eventSink.emit('token', { content: `[Connection error, retrying in ${delay / 1000}s… (${attempt}/${maxRetries})] ` })
+          await new Promise(r => setTimeout(r, delay))
+          continue
+        }
+
+        eventSink.emit('error', { message: `Ollama request failed after ${maxRetries} retries: ${lastError}` })
+        return null
+      }
     }
+
+    return null
   }
 
   private async runSubAgents(
@@ -1942,7 +2086,7 @@ export class AuraAgent {
     ollamaTools: OllamaTool[],
     eventSink: AgentEventSink,
   ): Promise<Array<{ focus: string; result: string }>> {
-    const allTools = defineAgentTools(this.qs, this.projectPath)
+    const allTools = defineAgentTools(this.qs, this.projectPath, this.managedShells ?? undefined, this.projectId ?? undefined)
     const maxSubIterations = 15
 
     const runOne = async (task: SubAgentTask): Promise<string> => {
