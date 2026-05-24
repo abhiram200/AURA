@@ -389,7 +389,7 @@ export class ManagedShellService extends EventEmitter {
       name: shell.name,
       command: shell.command,
       exitCode,
-      recentOutput: stripAnsi(shell.output.slice(-4096)),
+      recentOutput: stripAnsi(shell.output.slice(-51200)),
       timestamp: Date.now(),
     }
     const existing = this.crashReports.get(shell.projectId) || []
