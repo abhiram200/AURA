@@ -197,27 +197,13 @@ export function useManagedShells(projectId: string | null, onShellCrash?: (repor
     }
   }, [fetchShells])
 
-  // Fetch full output from REST API for a specific shell (used when opening terminal)
+  // Fetch full output from REST API for a specific shell (used by ManagedTerminalPanel directly)
+  // NOTE: We do NOT replace shell.output here — the terminal panel fetches independently
+  // and tracks its own writtenLenRef to avoid double-text from SSE overlap.
   const fetchShellOutput = useCallback(async (shellId: string) => {
-    const pid = projectIdRef.current
-    if (!pid) return
-    try {
-      const res = await fetch(`/api/managed-shells/${pid}/${shellId}/output`)
-      if (!res.ok) return
-      const data = await res.json()
-      if (data.recentOutput) {
-        setShells(prev => {
-          const next = new Map(prev)
-          const shell = next.get(shellId)
-          if (shell) {
-            next.set(shellId, { ...shell, output: data.recentOutput })
-          }
-          return next
-        })
-      }
-    } catch {
-      // Fetch failed silently
-    }
+    // No-op: terminal panel fetches output directly from the REST API.
+    // Keeping this function for API compatibility but it does nothing,
+    // since replacing shell.output here causes double-text in the terminal.
   }, [])
 
   const closeShellPanel = useCallback(() => {

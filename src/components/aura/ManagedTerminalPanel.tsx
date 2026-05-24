@@ -14,31 +14,42 @@ interface ManagedTerminalPanelProps {
   isLight: boolean
 }
 
+// Strip \r from PTY output — xterm with convertEol handles \n properly,
+// and \r\n would become a double line break without this.
+function sanitizeForXterm(data: string): string {
+  return data.replace(/\r\n/g, '\n')
+}
+
 export function ManagedTerminalPanel({ shell, projectId, onDismiss, onTerminate, onClose, isLight }: ManagedTerminalPanelProps) {
   const termRef = useRef<HTMLDivElement>(null)
   const xtermRef = useRef<Terminal | null>(null)
   const fitRef = useRef<FitAddon | null>(null)
-
-  // Track how many chars we've written to xterm.js — separate from shell.output
-  // to avoid double-text when fetchShellOutput replaces state and SSE re-appends
   const writtenLenRef = useRef(0)
-  const [initialOutput, setInitialOutput] = useState<string | null>(null)
+  const fetchedRef = useRef(false)
 
-  // Fetch full output from REST API on mount (before SSE might have missed some)
+  // Fetch full output from REST API on mount, then poll for new data
   useEffect(() => {
-    let cancelled = false
-    fetch(`/api/managed-shells/${projectId}/${shell.id}/output`)
-      .then(res => res.ok ? res.json() : null)
-      .then(data => {
-        if (!cancelled && data?.recentOutput) {
-          setInitialOutput(data.recentOutput)
-        }
-      })
-      .catch(() => {})
-    return () => { cancelled = true }
+    if (!fetchedRef.current) {
+      fetchedRef.current = true
+
+      fetch(`/api/managed-shells/${projectId}/${shell.id}/output`)
+        .then(res => res.ok ? res.json() : null)
+        .then(data => {
+          if (!data?.recentOutput) return
+          const term = xtermRef.current
+          if (!term) return
+
+          const output = sanitizeForXterm(data.recentOutput)
+          if (output) {
+            term.write(output)
+            writtenLenRef.current = output.length
+          }
+        })
+        .catch(() => {})
+    }
   }, [projectId, shell.id])
 
-  // Create xterm.js terminal and write the initial output
+  // Create xterm.js terminal
   useEffect(() => {
     if (!termRef.current || xtermRef.current) return
 
@@ -74,30 +85,19 @@ export function ManagedTerminalPanel({ shell, projectId, onDismiss, onTerminate,
     }
   }, [isLight])
 
-  // Write initial output to xterm.js when fetched (only once)
-  useEffect(() => {
-    const term = xtermRef.current
-    if (!term || initialOutput === null) return
-
-    // Use the longer of: fetched API output or SSE-accumulated output
-    const output = initialOutput.length >= shell.output.length ? initialOutput : shell.output
-    if (output) {
-      term.write(output)
-      writtenLenRef.current = output.length
-    }
-  }, [initialOutput]) // eslint-disable-line react-hooks/exhaustive-deps
-
   // Write new SSE output incrementally (only what hasn't been written yet)
   useEffect(() => {
     const term = xtermRef.current
-    if (!term || initialOutput === null) return // wait for initial fetch
+    if (!term || !fetchedRef.current) return
 
     if (shell.output.length > writtenLenRef.current) {
-      const newOutput = shell.output.slice(writtenLenRef.current)
-      term.write(newOutput)
+      const newOutput = sanitizeForXterm(shell.output.slice(writtenLenRef.current))
+      if (newOutput) {
+        term.write(newOutput)
+      }
       writtenLenRef.current = shell.output.length
     }
-  }, [shell.output, initialOutput])
+  }, [shell.output])
 
   useEffect(() => {
     const handleResize = () => {
