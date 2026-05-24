@@ -126,7 +126,7 @@ function SubAgentsGroup({ subAgents }: { subAgents: AuraSubAgentInfo[] }) {
   const groupStatusClass = groupStatus === 'completed' ? 'aura-chat__status-text--done' : 'aura-chat__status-text--running'
 
   return (
-    <details className="aura-chat__sub-agents-group">
+    <details className="aura-chat__sub-agents-group" open={running > 0}>
       <summary className="aura-chat__sub-agents-group-header">
         <StatusDot status={groupStatus} />
         <span className={`aura-chat__sub-agents-group-label ${groupStatusClass}`}>{label}</span>
