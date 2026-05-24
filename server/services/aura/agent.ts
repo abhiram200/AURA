@@ -1243,7 +1243,7 @@ function defineAgentTools(qs: AuraQueryService, projectPath: string, managedShel
 
     {
       name: 'shell_spawn',
-      description: 'Spawn a background shell for long-running commands (dev servers, builds, test suites, watchers). The shell runs independently — check on it with shell_read. Before spawning, use shell_list to check for duplicate commands and terminate any existing shell running the same command. Do NOT use for quick commands — use execute for those.',
+      description: 'Spawn a background shell for long-running commands (dev servers, builds, test suites, watchers). The shell runs independently — check on it with shell_read. Before spawning, use shell_list to check for duplicate commands and terminate any existing shell running the same command. After spawning, use shell_read or shell_list to verify the shell is actually running — do not assume the spawn succeeded just because the tool returned. Do NOT use for quick commands — use execute for those.',
       parameters: {
         type: 'object',
         properties: {

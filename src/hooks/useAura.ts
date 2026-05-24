@@ -1237,10 +1237,12 @@ export function useAura(projectId: string | null) {
                   }]
                   if (onShellEvent) onShellEvent('shell_spawned', data)
                 } else if (eventType === 'shell_exited') {
-                  msg.shells = (msg.shells || []).map((s: AuraShellEvent) =>
-                    s.shellId === data.shellId
-                      ? { ...s, status: data.exitCode === 0 ? 'completed' as const : 'failed' as const, exitCode: data.exitCode as number }
-                      : s
+                  msg.shells = (msg.shells || []).map((s: AuraShellEvent) => {
+                    if (s.shellId !== data.shellId) return s
+                    const exitCode = data.exitCode as number
+                    const status = exitCode === 0 ? 'completed' as const : exitCode === -1 ? 'killed' as const : 'failed' as const
+                    return { ...s, status, exitCode }
+                  })
                   )
                   if (onShellEvent) onShellEvent('shell_exited', data)
                 } else if (eventType === 'shell_terminated') {
