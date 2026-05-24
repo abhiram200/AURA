@@ -1074,7 +1074,15 @@ function defineAgentTools(qs: AuraQueryService, projectPath: string, managedShel
         try {
           const content = await fs.readFile(fullPath, 'utf-8')
 
-          if (!content.includes(oldString)) {
+          // Normalize line endings: the AI may send \n but the file may have \r\n.
+          // Compare on normalized (\n) versions but write back with the file's original line endings.
+          const fileEol = content.includes('\r\n') ? '\r\n' : '\n'
+          const normalizeEol = (s: string) => s.replace(/\r\n/g, '\n')
+          const normalizedContent = normalizeEol(content)
+          const normalizedOldString = normalizeEol(oldString)
+          const normalizedNewString = normalizeEol(newString)
+
+          if (!normalizedContent.includes(normalizedOldString)) {
             return {
               error: `oldString not found in "${filePath}". Use read_file to see the exact content and try again.`,
               hint: 'Make sure the string matches exactly, including whitespace, indentation, and line breaks.',
@@ -1082,21 +1090,24 @@ function defineAgentTools(qs: AuraQueryService, projectPath: string, managedShel
           }
 
           if (!replaceAll) {
-            const firstIndex = content.indexOf(oldString)
-            const secondIndex = content.indexOf(oldString, firstIndex + 1)
+            const firstIndex = normalizedContent.indexOf(normalizedOldString)
+            const secondIndex = normalizedContent.indexOf(normalizedOldString, firstIndex + 1)
             if (secondIndex !== -1) {
               return {
-                error: `oldString appears ${content.split(oldString).length - 1} times in "${filePath}". Provide more surrounding context to make it unique, or set replaceAll to true.`,
+                error: `oldString appears ${normalizedContent.split(normalizedOldString).length - 1} times in "${filePath}". Provide more surrounding context to make it unique, or set replaceAll to true.`,
               }
             }
           }
 
-          const newContent = replaceAll
-            ? content.replaceAll(oldString, newString)
-            : content.replace(oldString, newString)
+          const normalizedNewContent = replaceAll
+            ? normalizedContent.replaceAll(normalizedOldString, normalizedNewString)
+            : normalizedContent.replace(normalizedOldString, normalizedNewString)
+
+          // Write back with the file's original line endings
+          const newContent = fileEol === '\r\n' ? normalizedNewContent.replace(/\n/g, '\r\n') : normalizedNewContent
 
           const replacements = replaceAll
-            ? content.split(oldString).length - 1
+            ? normalizedContent.split(normalizedOldString).length - 1
             : 1
 
           await fs.writeFile(fullPath, newContent, 'utf-8')
