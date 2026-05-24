@@ -183,7 +183,7 @@ export function ProjectModeBuilderPage() {
           <WorkspacePage {...tabProps} pendingFileOpen={pendingFileOpen} onFileOpened={handleFileOpened} />
         </div>
         <div className={activeTab === 'assistant' ? 'builder-tab--active' : 'builder-tab--hidden'}>
-          <AssistantPage {...tabProps} aura={aura} />
+          <AssistantPage {...tabProps} aura={aura} isActive={activeTab === 'assistant'} />
         </div>
         <div className={activeTab === 'dependencies' ? 'builder-tab--active' : 'builder-tab--hidden'}>
           <DependenciesPage {...tabProps} onFileOpen={handleFileOpen} aura={aura} />

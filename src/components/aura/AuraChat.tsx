@@ -15,6 +15,8 @@ interface AuraChatProps {
   onRespondToApproval: (approvalId: string, approved: boolean, feedback?: string) => void
   onViewShell?: (shellId: string) => void
   liveShells?: Map<string, ManagedShellState>
+  isActive?: boolean
+  focusTrigger?: number
 }
 
 function StatusDot({ status }: { status: 'running' | 'completed' | 'error' }) {
@@ -399,7 +401,7 @@ function ChatMessage({ msg, onViewShell, liveShells }: { msg: AuraChatMessage; o
   )
 }
 
-export default function AuraChat({ messages, isStreaming, error, onAsk, onClearError, pendingApproval, onRespondToApproval, onViewShell, liveShells }: AuraChatProps) {
+export default function AuraChat({ messages, isStreaming, error, onAsk, onClearError, pendingApproval, onRespondToApproval, onViewShell, liveShells, isActive, focusTrigger }: AuraChatProps) {
   const [input, setInput] = useState('')
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLTextAreaElement>(null)
@@ -408,10 +410,12 @@ export default function AuraChat({ messages, isStreaming, error, onAsk, onClearE
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages, pendingApproval])
 
-  // Auto-focus input on mount
+  // Auto-focus input on mount, when tab becomes active, or after new chat
   useEffect(() => {
-    inputRef.current?.focus()
-  }, [])
+    if (isActive !== false) {
+      inputRef.current?.focus()
+    }
+  }, [isActive, focusTrigger])
 
   const handleSend = useCallback(() => {
     const trimmed = input.trim()
