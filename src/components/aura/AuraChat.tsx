@@ -246,13 +246,6 @@ function ToolCallsGroup({ toolCalls }: { toolCalls: AuraToolCall[] }) {
     </details>
   )
 }
-          {copied ? '✓' : 'Copy'}
-        </button>
-      </div>
-      <pre className="aura-chat__code-pre"><code>{code}</code></pre>
-    </div>
-  )
-}
 
 const MarkdownComponents = {
   code({ className, children }: { className?: string; children?: React.ReactNode }) {
