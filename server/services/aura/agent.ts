@@ -2137,7 +2137,7 @@ export class AuraAgent {
     eventSink: AgentEventSink,
   ): Promise<Array<{ focus: string; result: string }>> {
     const allTools = defineAgentTools(this.qs, this.projectPath, this.managedShells ?? undefined, this.projectId ?? undefined)
-    const maxSubIterations = 15
+    const maxSubIterations = 100
 
     const runOne = async (task: SubAgentTask): Promise<string> => {
       const agentType: SubAgentType = task.type || 'explore'
