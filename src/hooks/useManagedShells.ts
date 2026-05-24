@@ -166,11 +166,8 @@ export function useManagedShells(projectId: string | null, onShellCrash?: (repor
     if (!pid) return
     try {
       await fetch(`/api/managed-shells/${pid}/${shellId}`, { method: 'DELETE' })
-      setShells(prev => {
-        const next = new Map(prev)
-        next.delete(shellId)
-        return next
-      })
+      // Don't remove from Map here — ShellBlock falls back to stale msg.shells status
+      // if the shell disappears from liveShells. The fetchShells poll will clean it up.
       setViewingShell(prev => prev === shellId ? null : prev)
     } catch {
       // Dismiss failed
