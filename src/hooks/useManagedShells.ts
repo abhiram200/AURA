@@ -44,22 +44,28 @@ export function useManagedShells(projectId: string | null, onShellCrash?: (repor
       const data = await res.json()
       const list: ManagedShellInfo[] = data.shells || []
       setShells(prev => {
+        let changed = false
         const next = new Map(prev)
         for (const s of list) {
           const existing = next.get(s.id)
           if (existing) {
             if (existing.status !== s.status || existing.exitCode !== s.exitCode) {
               next.set(s.id, { ...existing, status: s.status, exitCode: s.exitCode })
+              changed = true
             }
           } else {
             next.set(s.id, { ...s, output: '' })
+            changed = true
           }
         }
         const serverIds = new Set(list.map(s => s.id))
         for (const id of next.keys()) {
-          if (!serverIds.has(id)) next.delete(id)
+          if (!serverIds.has(id)) {
+            next.delete(id)
+            changed = true
+          }
         }
-        return next
+        return changed ? next : prev
       })
     } catch {
       // Fetch failed silently

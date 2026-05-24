@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useCallback, type KeyboardEvent } from 'react'
+import { useState, useEffect, useCallback, useMemo, memo, type KeyboardEvent } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import type { AuraChatMessage, AuraToolCall, AuraSubAgentInfo, AuraTodoItem, AuraApprovalRequest } from '../../hooks/useAura'
@@ -26,11 +26,21 @@ function StatusDot({ status }: { status: 'running' | 'completed' | 'error' }) {
   return <span className={className} />
 }
 
-function ToolCallSection({ tc }: { tc: AuraToolCall }) {
+const ToolCallSection = memo(function ToolCallSection({ tc }: { tc: AuraToolCall }) {
   const purpose = tc.purpose || tc.name
   const statusClass = tc.status === 'completed' ? 'aura-chat__status-text--done'
     : tc.status === 'running' ? 'aura-chat__status-text--running'
     : 'aura-chat__status-text--error'
+
+  const resultPreview = useMemo(() => {
+    if (tc.result === undefined) return null
+    return typeof tc.result === 'string' ? tc.result : JSON.stringify(tc.result, null, 2).slice(0, 2000)
+  }, [tc.result])
+
+  const argsPreview = useMemo(() => {
+    return JSON.stringify(tc.args, null, 2)
+  }, [tc.args])
+
   return (
     <details className="aura-chat__tool-call">
       <summary className="aura-chat__tool-call-header">
@@ -56,12 +66,12 @@ function ToolCallSection({ tc }: { tc: AuraToolCall }) {
         )}
         <div className="aura-chat__tool-call-args">
           <span className="aura-chat__tool-call-label">Args:</span>
-          <pre>{JSON.stringify(tc.args, null, 2)}</pre>
+          <pre>{argsPreview}</pre>
         </div>
-        {tc.result !== undefined && (
+        {resultPreview !== null && (
           <div className="aura-chat__tool-call-result">
             <span className="aura-chat__tool-call-label">Result:</span>
-            <pre>{typeof tc.result === 'string' ? tc.result : JSON.stringify(tc.result, null, 2).slice(0, 2000)}</pre>
+            <pre>{resultPreview}</pre>
           </div>
         )}
         {tc.error && (
@@ -72,7 +82,7 @@ function ToolCallSection({ tc }: { tc: AuraToolCall }) {
       </div>
     </details>
   )
-}
+})
 
 const SUB_AGENT_TYPE_LABELS: Record<string, string> = {
   explore: 'Explorer',
@@ -81,7 +91,7 @@ const SUB_AGENT_TYPE_LABELS: Record<string, string> = {
   plan: 'Planner',
 }
 
-function SubAgentSection({ sa }: { sa: AuraSubAgentInfo }) {
+const SubAgentSection = memo(function SubAgentSection({ sa }: { sa: AuraSubAgentInfo }) {
   const statusClass = sa.status === 'completed' ? 'aura-chat__status-text--done'
     : sa.status === 'running' ? 'aura-chat__status-text--running'
     : 'aura-chat__status-text--error'
@@ -101,7 +111,7 @@ function SubAgentSection({ sa }: { sa: AuraSubAgentInfo }) {
       )}
     </details>
   )
-}
+})
 
 function SubAgentsGroup({ subAgents }: { subAgents: AuraSubAgentInfo[] }) {
   if (subAgents.length <= 1) {
@@ -196,46 +206,110 @@ function CodeBlock({ className, children }: { className?: string; children?: Rea
   )
 }
 
-function ToolCallsGroup({ toolCalls }: { toolCalls: AuraToolCall[] }) {
-  if (toolCalls.length <= 1) {
-    return (
-      <div className="aura-chat__tool-calls">
-        {toolCalls.map((tc, i) => (
-          <ToolCallSection key={`${tc.name}-${i}`} tc={tc} />
-        ))}
-      </div>
-    )
-  }
+const MarkdownComponents = {
+  code({ className, children }: { className?: string; children?: React.ReactNode }) {
+    const isBlock = className?.startsWith('language-') || String(children).includes('\n')
+    if (isBlock) return <CodeBlock className={className}>{children}</CodeBlock>
+    return <code className="aura-chat__inline-code">{children}</code>
+  },
+  pre({ children }: { children?: React.ReactNode }) { return <>{children}</> },
+  p({ children }: { children?: React.ReactNode }) { return <span>{children}</span> },
+  a({ href, children }: { href?: string; children?: React.ReactNode }) { return <a href={href} target="_blank" rel="noopener noreferrer">{children}</a> },
+}
 
-  const completed = toolCalls.filter(tc => tc.status === 'completed').length
-  const running = toolCalls.filter(tc => tc.status === 'running').length
-  const errored = toolCalls.filter(tc => tc.status === 'error').length
+const RemarkPlugins = [remarkGfm]
 
-  let statusLabel = ''
-  if (running > 0) statusLabel = `${running} running`
-  else if (errored === toolCalls.length) statusLabel = 'all errored'
-  else if (completed === toolCalls.length) statusLabel = 'all done'
+const ChatMessage = memo(function ChatMessage({ msg, onViewShell, liveShells }: { msg: AuraChatMessage; onViewShell?: (shellId: string) => void; liveShells?: Map<string, ManagedShellState> }) {
+  const isUser = msg.role === 'user'
+  const [copied, setCopied] = useState(false)
 
-  const label = `${toolCalls.length} tool calls${statusLabel ? ` · ${statusLabel}` : ''}`
-  const groupStatus = running > 0 ? 'running' : errored > 0 ? 'error' : 'completed'
-  const groupStatusClass = groupStatus === 'completed' ? 'aura-chat__status-text--done'
-    : groupStatus === 'running' ? 'aura-chat__status-text--running'
-    : 'aura-chat__status-text--error'
+  const handleCopy = useCallback(() => {
+    navigator.clipboard.writeText(msg.content).then(() => {
+      setCopied(true)
+      setTimeout(() => setCopied(false), 1500)
+    })
+  }, [msg.content])
 
   return (
-    <details className="aura-chat__tool-calls-group">
-      <summary className="aura-chat__tool-calls-group-header">
-        <StatusDot status={groupStatus} />
-        <span className={`aura-chat__tool-calls-group-label ${groupStatusClass}`}>{label}</span>
-      </summary>
-      <div className="aura-chat__tool-calls-group-list">
-        {toolCalls.map((tc, i) => (
-          <ToolCallSection key={`${tc.name}-${i}`} tc={tc} />
-        ))}
+    <div className={`aura-chat__message ${isUser ? 'aura-chat__message--user' : 'aura-chat__message--assistant'}`}>
+      {!isUser && msg.toolCalls && msg.toolCalls.length > 0 && (
+        <ToolCallsGroup toolCalls={msg.toolCalls} />
+      )}
+      {!isUser && msg.subAgents && msg.subAgents.length > 0 && (
+        <SubAgentsGroup subAgents={msg.subAgents} />
+      )}
+      {!isUser && msg.todos && msg.todos.length > 0 && (
+        <TodoListSection todos={msg.todos} />
+      )}
+      {!isUser && msg.shells && msg.shells.length > 0 && (
+        <ShellBlock shells={msg.shells} liveShells={liveShells} onViewShell={onViewShell} />
+      )}
+      <div className="aura-chat__message-content">
+        {isUser ? (
+          <span style={{ whiteSpace: 'pre-wrap' }}>{msg.content}</span>
+        ) : (
+          <>
+            <ReactMarkdown remarkPlugins={RemarkPlugins} components={MarkdownComponents}>
+              {msg.content}
+            </ReactMarkdown>
+            {msg.content === '' && (!msg.toolCalls || msg.toolCalls.length === 0) && (!msg.subAgents || msg.subAgents.length === 0) && (
+              <span className="aura-chat__cursor" />
+            )}
+          </>
+        )}
       </div>
-    </details>
+      {isUser && (
+        <button className="aura-chat__copy-btn" onClick={handleCopy} title="Copy message">
+          {copied ? '✓' : (
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
+              <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+            </svg>
+          )}
+        </button>
+      )}
+    </div>
   )
-}
+}, (prev, next) => {
+  if (prev.msg.id !== next.msg.id) return false
+  if (prev.msg.content !== next.msg.content) return false
+  if (prev.msg.role !== next.msg.role) return false
+  if (prev.onViewShell !== next.onViewShell) return false
+  // Deep compare toolCalls, subAgents, todos, shells
+  const prevTc = prev.msg.toolCalls
+  const nextTc = next.msg.toolCalls
+  if (prevTc?.length !== nextTc?.length) return false
+  if (prevTc && nextTc) {
+    for (let i = 0; i < prevTc.length; i++) {
+      if (prevTc[i].status !== nextTc[i].status || prevTc[i].result !== nextTc[i].result || prevTc[i].error !== nextTc[i].error) return false
+    }
+  }
+  const prevSa = prev.msg.subAgents
+  const nextSa = next.msg.subAgents
+  if (prevSa?.length !== nextSa?.length) return false
+  if (prevSa && nextSa) {
+    for (let i = 0; i < prevSa.length; i++) {
+      if (prevSa[i].status !== nextSa[i].status || prevSa[i].result !== nextSa[i].result) return false
+    }
+  }
+  const prevTodos = prev.msg.todos
+  const nextTodos = next.msg.todos
+  if (prevTodos?.length !== nextTodos?.length) return false
+  if (prevTodos && nextTodos) {
+    for (let i = 0; i < prevTodos.length; i++) {
+      if (prevTodos[i].status !== nextTodos[i].status) return false
+    }
+  }
+  // Only re-render if liveShells has entries relevant to this message's shells
+  if (prev.msg.shells?.length && next.liveShells) {
+    for (const s of prev.msg.shells) {
+      const prevShell = prev.liveShells?.get(s.shellId)
+      const nextShell = next.liveShells?.get(s.shellId)
+      if (prevShell?.status !== nextShell?.status || prevShell?.exitCode !== nextShell?.exitCode) return false
+    }
+  }
+  return true
+})
 
 function ApprovalCard({ request, onRespond }: { request: AuraApprovalRequest; onRespond: (approved: boolean, feedback?: string) => void }) {
   const [editText, setEditText] = useState('')
@@ -276,15 +350,7 @@ function ApprovalCard({ request, onRespond }: { request: AuraApprovalRequest; on
       <div className="aura-chat__approval-card">
         <div className="aura-chat__approval-type">Plan Review</div>
         <div className="aura-chat__approval-details">
-          <ReactMarkdown remarkPlugins={[remarkGfm]} components={{
-            code({ className, children }) {
-              const isBlock = className?.startsWith('language-') || String(children).includes('\n')
-              if (isBlock) return <CodeBlock className={className}>{children}</CodeBlock>
-              return <code className="aura-chat__inline-code">{children}</code>
-            },
-            pre({ children }) { return <>{children}</> },
-            a({ href, children }) { return <a href={href} target="_blank" rel="noopener noreferrer">{children}</a> },
-          }}>
+          <ReactMarkdown remarkPlugins={RemarkPlugins} components={MarkdownComponents}>
             {request.planMarkdown || ''}
           </ReactMarkdown>
         </div>
@@ -336,69 +402,6 @@ function ApprovalCard({ request, onRespond }: { request: AuraApprovalRequest; on
   }
 
   return null
-}
-
-function ChatMessage({ msg, onViewShell, liveShells }: { msg: AuraChatMessage; onViewShell?: (shellId: string) => void; liveShells?: Map<string, ManagedShellState> }) {
-  const isUser = msg.role === 'user'
-  const [copied, setCopied] = useState(false)
-
-  const handleCopy = useCallback(() => {
-    navigator.clipboard.writeText(msg.content).then(() => {
-      setCopied(true)
-      setTimeout(() => setCopied(false), 1500)
-    })
-  }, [msg.content])
-
-  return (
-    <div className={`aura-chat__message ${isUser ? 'aura-chat__message--user' : 'aura-chat__message--assistant'}`}>
-      {!isUser && msg.toolCalls && msg.toolCalls.length > 0 && (
-        <ToolCallsGroup toolCalls={msg.toolCalls} />
-      )}
-      {!isUser && msg.subAgents && msg.subAgents.length > 0 && (
-        <SubAgentsGroup subAgents={msg.subAgents} />
-      )}
-      {!isUser && msg.todos && msg.todos.length > 0 && (
-        <TodoListSection todos={msg.todos} />
-      )}
-      {!isUser && msg.shells && msg.shells.length > 0 && (
-        <ShellBlock shells={msg.shells} liveShells={liveShells} onViewShell={onViewShell} />
-      )}
-      <div className="aura-chat__message-content">
-        {isUser ? (
-          <span style={{ whiteSpace: 'pre-wrap' }}>{msg.content}</span>
-        ) : (
-          <>
-            <ReactMarkdown remarkPlugins={[remarkGfm]} components={{
-              code({ className, children }) {
-                const isBlock = className?.startsWith('language-') || String(children).includes('\n')
-                if (isBlock) return <CodeBlock className={className}>{children}</CodeBlock>
-                return <code className="aura-chat__inline-code">{children}</code>
-              },
-              pre({ children }) {
-                return <>{children}</>
-              },
-              a({ href, children }) { return <a href={href} target="_blank" rel="noopener noreferrer">{children}</a> },
-            }}>
-              {msg.content}
-            </ReactMarkdown>
-            {msg.content === '' && (!msg.toolCalls || msg.toolCalls.length === 0) && (!msg.subAgents || msg.subAgents.length === 0) && (
-              <span className="aura-chat__cursor" />
-            )}
-          </>
-        )}
-      </div>
-      {isUser && (
-        <button className="aura-chat__copy-btn" onClick={handleCopy} title="Copy message">
-          {copied ? '✓' : (
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
-              <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
-            </svg>
-          )}
-        </button>
-      )}
-    </div>
-  )
 }
 
 export default function AuraChat({ messages, isStreaming, error, onAsk, onClearError, pendingApproval, onRespondToApproval, onViewShell, liveShells, isActive, focusTrigger }: AuraChatProps) {
