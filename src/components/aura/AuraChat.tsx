@@ -206,6 +206,54 @@ function CodeBlock({ className, children }: { className?: string; children?: Rea
   )
 }
 
+function ToolCallsGroup({ toolCalls }: { toolCalls: AuraToolCall[] }) {
+  if (toolCalls.length <= 1) {
+    return (
+      <div className="aura-chat__tool-calls">
+        {toolCalls.map((tc, i) => (
+          <ToolCallSection key={`${tc.name}-${i}`} tc={tc} />
+        ))}
+      </div>
+    )
+  }
+
+  const completed = toolCalls.filter(tc => tc.status === 'completed').length
+  const running = toolCalls.filter(tc => tc.status === 'running').length
+  const errored = toolCalls.filter(tc => tc.status === 'error').length
+
+  let statusLabel = ''
+  if (running > 0) statusLabel = `${running} running`
+  else if (errored === toolCalls.length) statusLabel = 'all errored'
+  else if (completed === toolCalls.length) statusLabel = 'all done'
+
+  const label = `${toolCalls.length} tool calls${statusLabel ? ` · ${statusLabel}` : ''}`
+  const groupStatus = running > 0 ? 'running' : errored > 0 ? 'error' : 'completed'
+  const groupStatusClass = groupStatus === 'completed' ? 'aura-chat__status-text--done'
+    : groupStatus === 'running' ? 'aura-chat__status-text--running'
+    : 'aura-chat__status-text--error'
+
+  return (
+    <details className="aura-chat__tool-calls-group">
+      <summary className="aura-chat__tool-calls-group-header">
+        <StatusDot status={groupStatus} />
+        <span className={`aura-chat__tool-calls-group-label ${groupStatusClass}`}>{label}</span>
+      </summary>
+      <div className="aura-chat__tool-calls-group-list">
+        {toolCalls.map((tc, i) => (
+          <ToolCallSection key={`${tc.name}-${i}`} tc={tc} />
+        ))}
+      </div>
+    </details>
+  )
+}
+          {copied ? '✓' : 'Copy'}
+        </button>
+      </div>
+      <pre className="aura-chat__code-pre"><code>{code}</code></pre>
+    </div>
+  )
+}
+
 const MarkdownComponents = {
   code({ className, children }: { className?: string; children?: React.ReactNode }) {
     const isBlock = className?.startsWith('language-') || String(children).includes('\n')
