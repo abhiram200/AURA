@@ -1,7 +1,7 @@
-import { useState, useEffect } from 'react'
+import { useState, useCallback, useRef } from 'react'
 import type { useAura } from '../../hooks/useAura'
 import { useTheme } from '../../hooks/useTheme'
-import { useManagedShells } from '../../hooks/useManagedShells'
+import { useManagedShells, type CrashReport } from '../../hooks/useManagedShells'
 import AuraChat from '../../components/aura/AuraChat'
 import { ManagedShellBadge } from '../../components/aura/ManagedShellBadge'
 import { ManagedTerminalPanel } from '../../components/aura/ManagedTerminalPanel'
@@ -21,14 +21,35 @@ export function AssistantPage({ projectId, projectName, workspacePath: _workspac
   const { theme } = useTheme()
   const isLight = theme === 'light'
   const [showConfirm, setShowConfirm] = useState(false)
-  const managedShells = useManagedShells(projectId)
+  const auraRef = useRef(aura)
+  auraRef.current = aura
+  const handleShellEventRef = useRef<(eventType: string, data: Record<string, unknown>) => void>(() => {})
+  const reportedCrashesRef = useRef(new Set<string>())
 
-  // When viewing a shell, fetch its full output from the REST API
-  useEffect(() => {
-    if (managedShells.viewingShell) {
-      managedShells.fetchShellOutput(managedShells.viewingShell)
-    }
-  }, [managedShells.viewingShell]) // eslint-disable-line react-hooks/exhaustive-deps
+  const handleShellCrash = useCallback((report: CrashReport) => {
+    // Only prompt once per crash
+    if (reportedCrashesRef.current.has(report.shellId)) return
+
+    const currentAura = auraRef.current
+    // Silently ignore if AI is streaming
+    if (currentAura.isStreaming) return
+
+    reportedCrashesRef.current.add(report.shellId)
+
+    const outputPreview = report.recentOutput
+      ? `\n\nLast output:\n\`\`\`\n${report.recentOutput.slice(-2000)}\n\`\`\``
+      : ''
+
+    const prompt = `Shell "${report.name}" crashed unexpectedly with exit code ${report.exitCode}. Command: \`${report.command}\`${outputPreview}\n\nInvestigate the cause and fix the issue if possible.`
+    currentAura.ask(prompt, handleShellEventRef.current)
+
+    // Acknowledge the crash report so it won't be returned again
+    fetch(`/api/managed-shells/${projectId}/crash-reports/${report.shellId}`, { method: 'DELETE' }).catch(() => {})
+  }, [projectId])
+
+  const managedShells = useManagedShells(projectId, handleShellCrash)
+  handleShellEventRef.current = managedShells.handleShellEvent
+
 
   const handleNewChat = () => {
     const skip = localStorage.getItem(SKIP_KEY(projectId)) === 'true'
@@ -115,6 +136,7 @@ export function AssistantPage({ projectId, projectName, workspacePath: _workspac
         return (
           <ManagedTerminalPanel
             shell={shell}
+            projectId={projectId}
             onDismiss={managedShells.dismissShell}
             onTerminate={managedShells.terminateShell}
             onClose={managedShells.closeShellPanel}

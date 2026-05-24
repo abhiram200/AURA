@@ -46,6 +46,7 @@ function ToolCallSection({ tc }: { tc: AuraToolCall }) {
               },
               pre({ children }) { return <>{children}</> },
               p({ children }) { return <span>{children}</span> },
+              a({ href, children }) { return <a href={href} target="_blank" rel="noopener noreferrer">{children}</a> },
             }}>
               {tc.thinking}
             </ReactMarkdown>
@@ -280,6 +281,7 @@ function ApprovalCard({ request, onRespond }: { request: AuraApprovalRequest; on
               return <code className="aura-chat__inline-code">{children}</code>
             },
             pre({ children }) { return <>{children}</> },
+            a({ href, children }) { return <a href={href} target="_blank" rel="noopener noreferrer">{children}</a> },
           }}>
             {request.planMarkdown || ''}
           </ReactMarkdown>
@@ -373,6 +375,7 @@ function ChatMessage({ msg, onViewShell, liveShells }: { msg: AuraChatMessage; o
               pre({ children }) {
                 return <>{children}</>
               },
+              a({ href, children }) { return <a href={href} target="_blank" rel="noopener noreferrer">{children}</a> },
             }}>
               {msg.content}
             </ReactMarkdown>

@@ -38,5 +38,20 @@ export function createManagedShellRouter(managedShellService: ManagedShellServic
     res.json({ success })
   })
 
+  // Get crash reports for a project (does not consume)
+  router.get('/:projectId/crash-reports', (req: Request, res: Response) => {
+    const projectId = req.params.projectId as string
+    const reports = managedShellService.getCrashReports(projectId)
+    res.json({ crashReports: reports })
+  })
+
+  // Acknowledge a crash report so it won't be returned again
+  router.delete('/:projectId/crash-reports/:shellId', (req: Request, res: Response) => {
+    const projectId = req.params.projectId as string
+    const shellId = req.params.shellId as string
+    managedShellService.clearCrashReport(projectId, shellId)
+    res.json({ success: true })
+  })
+
   return router
 }

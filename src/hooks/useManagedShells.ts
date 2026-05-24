@@ -15,17 +15,31 @@ export interface ManagedShellState extends ManagedShellInfo {
   output: string
 }
 
-export function useManagedShells(projectId: string | null) {
+export interface CrashReport {
+  shellId: string
+  name: string
+  command: string
+  exitCode: number
+  recentOutput: string
+  timestamp: number
+}
+
+export function useManagedShells(projectId: string | null, onShellCrash?: (report: CrashReport) => void) {
   const [shells, setShells] = useState<Map<string, ManagedShellState>>(new Map())
   const [viewingShell, setViewingShell] = useState<string | null>(null)
   const shellsRef = useRef(shells)
   shellsRef.current = shells
+  const projectIdRef = useRef(projectId)
+  projectIdRef.current = projectId
+  const onShellCrashRef = useRef(onShellCrash)
+  onShellCrashRef.current = onShellCrash
 
-  // Fetch current shell list from REST API
+  // Fetch current shell list from REST API (also updates statuses)
   const fetchShells = useCallback(async () => {
-    if (!projectId) return
+    const pid = projectIdRef.current
+    if (!pid) return
     try {
-      const res = await fetch(`/api/managed-shells/${projectId}`)
+      const res = await fetch(`/api/managed-shells/${pid}`)
       if (!res.ok) return
       const data = await res.json()
       const list: ManagedShellInfo[] = data.shells || []
@@ -50,11 +64,47 @@ export function useManagedShells(projectId: string | null) {
     } catch {
       // Fetch failed silently
     }
-  }, [projectId])
+  }, [])
 
+  // Initial fetch + refetch on projectId change
   useEffect(() => {
-    fetchShells()
-  }, [fetchShells])
+    if (!projectId) return
+    const timer = setTimeout(() => { fetchShells() }, 0)
+    return () => clearTimeout(timer)
+  }, [projectId]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Poll shell statuses + crash reports every 5 seconds when any shell exists
+  useEffect(() => {
+    const pid = projectIdRef.current
+    if (!pid) return
+
+    const hasAnyShells = () => shellsRef.current.size > 0
+    if (!hasAnyShells()) return
+
+    const interval = setInterval(async () => {
+      if (!hasAnyShells()) return
+
+      // Always poll shell statuses to detect crashes between AI turns
+      fetchShells()
+
+      // Also poll crash reports if callback provided
+      if (onShellCrashRef.current) {
+        try {
+          const res = await fetch(`/api/managed-shells/${pid}/crash-reports`)
+          if (!res.ok) return
+          const data = await res.json()
+          const reports: CrashReport[] = data.crashReports || []
+          for (const report of reports) {
+            onShellCrashRef.current?.(report)
+          }
+        } catch {
+          // Poll failed silently
+        }
+      }
+    }, 5000)
+
+    return () => clearInterval(interval)
+  }, [projectId, shells, fetchShells, onShellCrash]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Handle SSE shell events (called from useAura's SSE parser)
   const handleShellEvent = useCallback((eventType: string, data: Record<string, unknown>) => {
@@ -112,22 +162,24 @@ export function useManagedShells(projectId: string | null) {
   }, [])
 
   const dismissShell = useCallback(async (shellId: string) => {
-    if (!projectId) return
+    const pid = projectIdRef.current
+    if (!pid) return
     try {
-      await fetch(`/api/managed-shells/${projectId}/${shellId}`, { method: 'DELETE' })
+      await fetch(`/api/managed-shells/${pid}/${shellId}`, { method: 'DELETE' })
       setShells(prev => {
         const next = new Map(prev)
         next.delete(shellId)
         return next
       })
-      if (viewingShell === shellId) setViewingShell(null)
+      setViewingShell(prev => prev === shellId ? null : prev)
     } catch {
       // Dismiss failed
     }
-  }, [projectId, viewingShell])
+  }, [])
 
   const terminateShell = useCallback(async (shellId: string) => {
-    if (!projectId) return
+    const pid = projectIdRef.current
+    if (!pid) return
     // Optimistically update UI state
     setShells(prev => {
       const next = new Map(prev)
@@ -138,18 +190,19 @@ export function useManagedShells(projectId: string | null) {
       return next
     })
     try {
-      await fetch(`/api/managed-shells/${projectId}/${shellId}/terminate`, { method: 'POST' })
+      await fetch(`/api/managed-shells/${pid}/${shellId}/terminate`, { method: 'POST' })
     } catch {
       // Terminate failed — revert on error by fetching fresh state
       fetchShells()
     }
-  }, [projectId, fetchShells])
+  }, [fetchShells])
 
   // Fetch full output from REST API for a specific shell (used when opening terminal)
   const fetchShellOutput = useCallback(async (shellId: string) => {
-    if (!projectId) return
+    const pid = projectIdRef.current
+    if (!pid) return
     try {
-      const res = await fetch(`/api/managed-shells/${projectId}/${shellId}/output`)
+      const res = await fetch(`/api/managed-shells/${pid}/${shellId}/output`)
       if (!res.ok) return
       const data = await res.json()
       if (data.recentOutput) {
@@ -165,7 +218,7 @@ export function useManagedShells(projectId: string | null) {
     } catch {
       // Fetch failed silently
     }
-  }, [projectId])
+  }, [])
 
   const closeShellPanel = useCallback(() => {
     setViewingShell(null)

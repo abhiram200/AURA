@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import { WebLinksAddon } from '@xterm/addon-web-links'
@@ -7,17 +7,38 @@ import '@xterm/xterm/css/xterm.css'
 
 interface ManagedTerminalPanelProps {
   shell: ManagedShellState
+  projectId: string
   onDismiss: (shellId: string) => void
   onTerminate: (shellId: string) => void
   onClose: () => void
   isLight: boolean
 }
 
-export function ManagedTerminalPanel({ shell, onDismiss, onTerminate, onClose, isLight }: ManagedTerminalPanelProps) {
+export function ManagedTerminalPanel({ shell, projectId, onDismiss, onTerminate, onClose, isLight }: ManagedTerminalPanelProps) {
   const termRef = useRef<HTMLDivElement>(null)
   const xtermRef = useRef<Terminal | null>(null)
   const fitRef = useRef<FitAddon | null>(null)
 
+  // Track how many chars we've written to xterm.js — separate from shell.output
+  // to avoid double-text when fetchShellOutput replaces state and SSE re-appends
+  const writtenLenRef = useRef(0)
+  const [initialOutput, setInitialOutput] = useState<string | null>(null)
+
+  // Fetch full output from REST API on mount (before SSE might have missed some)
+  useEffect(() => {
+    let cancelled = false
+    fetch(`/api/managed-shells/${projectId}/${shell.id}/output`)
+      .then(res => res.ok ? res.json() : null)
+      .then(data => {
+        if (!cancelled && data?.recentOutput) {
+          setInitialOutput(data.recentOutput)
+        }
+      })
+      .catch(() => {})
+    return () => { cancelled = true }
+  }, [projectId, shell.id])
+
+  // Create xterm.js terminal and write the initial output
   useEffect(() => {
     if (!termRef.current || xtermRef.current) return
 
@@ -39,7 +60,6 @@ export function ManagedTerminalPanel({ shell, onDismiss, onTerminate, onClose, i
     term.loadAddon(webLinksAddon)
 
     term.open(termRef.current)
-    // Delay fit to allow the modal to render
     requestAnimationFrame(() => {
       fitAddon.fit()
     })
@@ -47,28 +67,37 @@ export function ManagedTerminalPanel({ shell, onDismiss, onTerminate, onClose, i
     xtermRef.current = term
     fitRef.current = fitAddon
 
-    if (shell.output) {
-      term.write(shell.output)
-    }
-
     return () => {
       term.dispose()
       xtermRef.current = null
       fitRef.current = null
     }
-  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [isLight])
 
-  const lastOutputLengthRef = useRef(shell.output.length)
+  // Write initial output to xterm.js when fetched (only once)
   useEffect(() => {
     const term = xtermRef.current
-    if (!term) return
+    if (!term || initialOutput === null) return
 
-    const newOutput = shell.output.slice(lastOutputLengthRef.current)
-    if (newOutput) {
-      term.write(newOutput)
+    // Use the longer of: fetched API output or SSE-accumulated output
+    const output = initialOutput.length >= shell.output.length ? initialOutput : shell.output
+    if (output) {
+      term.write(output)
+      writtenLenRef.current = output.length
     }
-    lastOutputLengthRef.current = shell.output.length
-  }, [shell.output])
+  }, [initialOutput]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Write new SSE output incrementally (only what hasn't been written yet)
+  useEffect(() => {
+    const term = xtermRef.current
+    if (!term || initialOutput === null) return // wait for initial fetch
+
+    if (shell.output.length > writtenLenRef.current) {
+      const newOutput = shell.output.slice(writtenLenRef.current)
+      term.write(newOutput)
+      writtenLenRef.current = shell.output.length
+    }
+  }, [shell.output, initialOutput])
 
   useEffect(() => {
     const handleResize = () => {
@@ -79,7 +108,6 @@ export function ManagedTerminalPanel({ shell, onDismiss, onTerminate, onClose, i
     return () => window.removeEventListener('resize', handleResize)
   }, [])
 
-  // Stop click from propagating to overlay backdrop
   const handlePanelClick = (e: React.MouseEvent) => {
     e.stopPropagation()
   }
@@ -92,7 +120,7 @@ export function ManagedTerminalPanel({ shell, onDismiss, onTerminate, onClose, i
   const statusClass = shell.status === 'running' ? 'mtp__status--running'
     : shell.status === 'completed' ? 'mtp__status--completed'
     : shell.status === 'failed' ? 'mtp__status--failed'
-    : 'mtp__status--killed'
+    : 'mtp__killed'
 
   return (
     <div className="mtp-overlay" onClick={onClose}>

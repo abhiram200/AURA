@@ -3,6 +3,7 @@ import fs from 'fs/promises'
 import { rmSync } from 'fs'
 import { execFile } from 'child_process'
 import { promisify } from 'util'
+import { platform } from 'os'
 import type { Response } from 'express'
 import type { AuraQueryService } from './graph.ts'
 import type { AgentEventSink } from './sse.ts'
@@ -294,7 +295,7 @@ async function loadSkills(skillNames: string[]): Promise<string> {
 
 // ── System prompt ───────────────────────────────────────────────────────────
 
-function buildSystemPrompt(skillContent: string, contextSection?: string, isGreenfield?: boolean, gitContext?: string, planResume?: PlanResumeContext): string {
+function buildSystemPrompt(skillContent: string, contextSection?: string, isGreenfield?: boolean, gitContext?: string, planResume?: PlanResumeContext, isWindows?: boolean): string {
   const greenfieldNote = isGreenfield
     ? '\nThis is a NEW project with no existing code. You are building from scratch.\n\n**IMPORTANT: Your FIRST actions must be:**\n1. Initialize git: `git init`\n2. Create a proper `.gitignore` file with appropriate entries (e.g., node_modules/, dist/, .env for Node.js; __pycache__/, .venv/, *.pyc for Python; etc.)\n3. Commit: `git add -A` then `git commit -m "chore: initial commit"`\n4. Create a feature branch: `git checkout -b aura/<short-description>`\n\nThen proceed with creating the project structure (package.json, tsconfig, source files, etc.) and installing dependencies.\n'
     : '\nThis is an existing codebase. Use your investigation tools to understand it before making changes.\n'
@@ -346,19 +347,54 @@ Use the \`execute\` tool to run build, test, and lint commands — NEVER use it 
 
 ## Background Shell Management
 
-You have tools to manage background shells: shell_spawn, shell_read, shell_terminate, shell_list.
+Tools: \`shell_spawn\`, \`shell_read\`, \`shell_terminate\`, \`shell_list\`.
 
-When to use background shells vs inline execute:
-- Use \`execute\` for quick commands that complete in seconds (git status, ls, cat, quick checks)
-- Use \`shell_spawn\` for long-running commands (npm run dev, npm run build, test suites, dev servers, watchers)
+**When to use which:**
+- \`execute\` — quick commands that finish in seconds (git status, ls, cat)
+- \`shell_spawn\` — long-running commands (dev servers, builds, test suites, watchers)
 
-DEPENDENCY RULE: Before starting any task that depends on a background shell's completion, you MUST use \`shell_read\` to confirm the shell has completed successfully. For example:
-- After spawning "install-deps", do NOT start "build-project" until shell_read confirms install-deps exited with code 0
-- After spawning "build-project", do NOT start "run-tests" until shell_read confirms the build succeeded
+**Rules:**
+1. **No duplicates.** Before \`shell_spawn\`, run \`shell_list\`. If a shell with the same command is already running, \`shell_terminate\` it first.
+2. **Verify dependencies.** Before starting work that depends on a shell, use \`shell_read\` to confirm it exited with code 0. Do not assume success just because you spawned it.
+3. **Verify termination.** After \`shell_terminate\`, confirm the process is actually dead (see verification guide below). If still alive, kill it directly with \`execute\` (${isWindows ? '`taskkill /F /PID <pid>`' : '`kill -9 <pid>`'}) and re-check.
+4. **Descriptive names.** Use names like "dev-server", "install-deps", "run-tests" — not "shell1".
 
-Naming: Give each shell a descriptive name that reflects its purpose (e.g., "install-deps", "dev-server", "run-tests", "build-project").
+### Verifying Server Status
 
-When a shell completes, you will be informed via the shell_exited event. Check its output before proceeding with dependent work.
+When checking whether a server is running (after spawning, after terminating, or when asked), follow these steps in order. Do NOT skip steps or assume default ports.
+
+**Step 1 — Find the port from project config.** ALWAYS read the config files below before checking ports. Do NOT assume default ports — most projects customize their port.
+
+Read ALL of these files that exist in the project using \`read_file\`:
+1. \`package.json\` — find the "scripts" section to identify the framework and any \`--port\`/\`-p\`/\`PORT=\` flags
+2. The framework config file (read the one that exists):
+   - Vite: \`vite.config.ts\` or \`vite.config.js\` → look for \`server.port\`
+   - Next: \`next.config.js\` or \`next.config.mjs\` → look for \`port\`
+   - Nest: \`nest-cli.json\` or \`src/main.ts\` → look for \`port\`
+   - Webpack: \`webpack.config.js\` or \`webpack.config.ts\` → look for \`devServer.port\`
+3. \`.env\` and \`.env.development\` → look for \`PORT=\`
+
+The port comes from whichever file defines it. Priority: CLI flags in package.json > framework config > .env > framework default.
+
+Example: A Vite project has \`"dev": "vite"\` in package.json (no port flag). The port is defined in \`vite.config.ts\` under \`server: { port: 5555 }\`. You MUST read \`vite.config.ts\` to find it — the default Vite port (5173) would be WRONG here.
+
+**Step 2 — Check if the process is alive** (most reliable method):
+${isWindows
+? 'Use: `tasklist /FI "PID eq <pid>"` (get PID from `shell_list`)'
+: 'Use: `ps -p <pid> -o pid,comm`'}
+
+Process alive → server is running. Process gone → server is dead, regardless of port state.
+
+**Step 3 — Confirm with a port check** (optional, for certainty):
+${isWindows
+? '- `netstat -ano | findstr :<port> | findstr LISTENING`\n- `curl -s -o NUL -w "%{http_code}" http://localhost:<port>`'
+: '- `lsof -i :<port> -P -n`\n- `curl -s -o /dev/null -w "%{http_code}" http://localhost:<port>`'}
+
+**Interpreting results:**
+- Spawned + process alive → success. Report the port.
+- Spawned + process dead → crashed. Check \`shell_read\` for errors.
+- Terminated + process still alive → kill directly (\`${isWindows ? 'taskkill /F /PID <pid>' : 'kill -9 <pid>'}\`), then re-check.
+- Terminated + process gone → confirmed dead.
 
 ## How to Edit Code
 
@@ -1196,7 +1232,7 @@ function defineAgentTools(qs: AuraQueryService, projectPath: string, managedShel
 
     {
       name: 'shell_spawn',
-      description: 'Spawn a background shell for long-running commands (dev servers, builds, test suites, watchers). The shell runs independently — you can check on it later with shell_read. Use descriptive names like "dev-server", "run-tests", "install-deps". IMPORTANT: Before starting any dependent task (e.g., running tests after a build), use shell_read to confirm the shell completed successfully. Do NOT use this for quick commands — use execute for those.',
+      description: 'Spawn a background shell for long-running commands (dev servers, builds, test suites, watchers). The shell runs independently — check on it with shell_read. Before spawning, use shell_list to check for duplicate commands and terminate any existing shell running the same command. Do NOT use for quick commands — use execute for those.',
       parameters: {
         type: 'object',
         properties: {
@@ -1220,7 +1256,7 @@ function defineAgentTools(qs: AuraQueryService, projectPath: string, managedShel
     },
     {
       name: 'shell_read',
-      description: 'Read the output and status of a background shell. Returns recent output (last 1MB), status, and exit code. If output was truncated by the ring buffer, includes the full log file path. IMPORTANT: Always check shell_read before starting dependent work — do not assume a build or install is done just because you spawned it.',
+      description: 'Read the output and status of a background shell. Returns recent output (last 1MB, ANSI-stripped for readability), status (running/completed/failed/killed), and exit code. Always use this to confirm a shell finished successfully before starting dependent work.',
       parameters: {
         type: 'object',
         properties: {
@@ -1233,7 +1269,7 @@ function defineAgentTools(qs: AuraQueryService, projectPath: string, managedShel
         if (!managedShells) {
           return { error: 'Managed shells are not available' }
         }
-        const result = managedShells.readOutput(args.shellId as string, args.tailLines as number | undefined)
+        const result = managedShells.readOutput(args.shellId as string, args.tailLines as number | undefined, true)
         if (!result) {
           return { error: `Shell "${args.shellId}" not found. Use shell_list to see available shells.` }
         }
@@ -1242,7 +1278,7 @@ function defineAgentTools(qs: AuraQueryService, projectPath: string, managedShel
     },
     {
       name: 'shell_terminate',
-      description: 'Terminate a running background shell. Use this to stop dev servers, long-running processes, or shells you no longer need.',
+      description: 'Terminate a running background shell. After terminating, verify the process is actually dead using the process/port checks described in the "Verifying Server Status" section — do not assume success just because this tool returned it.',
       parameters: {
         type: 'object',
         properties: {
@@ -1262,7 +1298,7 @@ function defineAgentTools(qs: AuraQueryService, projectPath: string, managedShel
     },
     {
       name: 'shell_list',
-      description: 'List all managed background shells and their statuses. Use this to check which shells are running, completed, or failed before deciding what to do next.',
+      description: 'List all background shells with their ID, name, command, status, and exit code. Use this before shell_spawn to check for duplicate commands, and before shell_terminate to find the right shell ID.',
       parameters: {
         type: 'object',
         properties: {},
@@ -1495,7 +1531,7 @@ export class AuraAgent {
   }
 
   static estimateSystemTokens(qs: AuraQueryService, projectPath: string, ollamaBaseUrl: string, model: string): number {
-    const systemPrompt = buildSystemPrompt('', undefined, undefined, undefined)
+    const systemPrompt = buildSystemPrompt('', undefined, undefined, undefined, undefined, platform() === 'win32')
     return estimateTokens(systemPrompt)
   }
 
@@ -1574,7 +1610,8 @@ export class AuraAgent {
       }
     }
 
-    const systemPrompt = buildSystemPrompt(skillContent, contextSection, isGreenfield || undefined, gitContext || undefined, planResume || undefined)
+    const isWindows = platform() === 'win32'
+    const systemPrompt = buildSystemPrompt(skillContent, contextSection, isGreenfield || undefined, gitContext || undefined, planResume || undefined, isWindows)
 
     // Build tools
     const tools = defineAgentTools(this.qs, this.projectPath, this.managedShells ?? undefined, this.projectId ?? undefined)

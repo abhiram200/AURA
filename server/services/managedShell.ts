@@ -11,6 +11,15 @@ const nodeRequire = createRequire(import.meta.url)
 
 const isWindows = platform() === 'win32'
 
+// Strip ANSI escape sequences so output is readable by the AI agent
+const ANSI_RE = /\x1b\[[0-9;]*[a-zA-Z]|\x1b\][^\x07]*\x07|\x1b\[[0-9;]*[a-zA-Z][a-zA-Z]|\x1b[\(\)][B0UK]|\x1b\[\?[0-9;]*[a-zA-Z]|\r/g
+
+function stripAnsi(str: string): string {
+  return str.replace(ANSI_RE, '')
+    .replace(/\n{3,}/g, '\n\n') // collapse excessive blank lines
+    .trim()
+}
+
 // Kill an entire process tree (parent + all descendants).
 // On Windows, child_process.kill() only kills the direct parent,
 // orphaning child processes (e.g., npm run dev survives killing cmd.exe).
@@ -89,11 +98,21 @@ export interface ShellEvent {
   exitCode?: number
 }
 
+export interface CrashReport {
+  shellId: string
+  name: string
+  command: string
+  exitCode: number
+  recentOutput: string
+  timestamp: number
+}
+
 const MAX_BUFFER_SIZE = 1024 * 1024 // 1MB ring buffer
 
 export class ManagedShellService extends EventEmitter {
   private projectService: ProjectService
   private shells: Map<string, ManagedShell> = new Map()
+  private crashReports: Map<string, CrashReport[]> = new Map()
   private nextId = 1
   private ptyAvailable: boolean | null = null
   private ptyModule: any = null
@@ -150,7 +169,14 @@ export class ManagedShellService extends EventEmitter {
 
     if (pty) {
       try {
-        const ptyProcess = pty.spawn(platform() === 'win32' ? 'powershell.exe' : (process.env.SHELL || '/bin/bash'), [], {
+        // Run the command directly via cmd/sh — NOT through an interactive shell.
+        // Spawning powershell.exe and writing the command to it causes two problems:
+        // 1. PowerShell buffers child process output, so npm/vite output never reaches onData
+        // 2. The interactive shell never exits when the command finishes, so onExit never fires
+        const shellBin = isWindows ? 'cmd' : (process.env.SHELL || '/bin/sh')
+        const shellArgs = isWindows ? ['/c', command] : ['-c', command]
+
+        const ptyProcess = pty.spawn(shellBin, shellArgs, {
           name: 'xterm-256color',
           cols: 120,
           rows: 30,
@@ -177,10 +203,10 @@ export class ManagedShellService extends EventEmitter {
           shell.exitCode = exitCode
           shell.finishedAt = Date.now()
           this.emit('event', { type: 'shell_exited', shellId: id, exitCode, name } as ShellEvent)
+          if (exitCode !== 0 && exitCode !== -1) {
+            this.addCrashReport(shell, exitCode)
+          }
         })
-
-        // Send the command to the pty
-        ptyProcess.write(command + '\n')
       } catch (err) {
         // PTY spawn failed, fall back to child_process
         this.ptyAvailable = false
@@ -234,10 +260,14 @@ export class ManagedShellService extends EventEmitter {
         this.emit('event', { type: 'shell_exited', shellId: shell.id, exitCode: -1, name: shell.name } as ShellEvent)
         return
       }
-      shell.status = code === 0 ? 'completed' : 'failed'
-      shell.exitCode = code ?? 0
+      const exitCode = code ?? 0
+      shell.status = exitCode === 0 ? 'completed' : 'failed'
+      shell.exitCode = exitCode
       shell.finishedAt = Date.now()
-      this.emit('event', { type: 'shell_exited', shellId: shell.id, exitCode: code ?? 0, name: shell.name } as ShellEvent)
+      this.emit('event', { type: 'shell_exited', shellId: shell.id, exitCode, name: shell.name } as ShellEvent)
+      if (exitCode !== 0 && exitCode !== -1) {
+        this.addCrashReport(shell, exitCode)
+      }
     })
 
     child.on('error', (err) => {
@@ -249,6 +279,7 @@ export class ManagedShellService extends EventEmitter {
       shell.exitCode = 1
       shell.finishedAt = Date.now()
       this.emit('event', { type: 'shell_exited', shellId: shell.id, exitCode: 1, name: shell.name } as ShellEvent)
+      this.addCrashReport(shell, 1)
     })
   }
 
@@ -260,7 +291,7 @@ export class ManagedShellService extends EventEmitter {
     }
   }
 
-  readOutput(shellId: string, tailLines?: number): { status: ManagedShellStatus; exitCode: number | null; recentOutput: string; outputTruncated: boolean; fullLogPath?: string } | null {
+  readOutput(shellId: string, tailLines?: number, cleanOutput?: boolean): { status: ManagedShellStatus; exitCode: number | null; recentOutput: string; outputTruncated: boolean; fullLogPath?: string } | null {
     const shell = this.shells.get(shellId)
     if (!shell) return null
 
@@ -275,6 +306,11 @@ export class ManagedShellService extends EventEmitter {
     if (tailLines && tailLines > 0) {
       const lines = output.split('\n')
       output = lines.slice(-tailLines).join('\n')
+    }
+
+    // Strip ANSI escape sequences for AI agent readability
+    if (cleanOutput) {
+      output = stripAnsi(output)
     }
 
     return {
@@ -345,6 +381,35 @@ export class ManagedShellService extends EventEmitter {
 
   getShell(shellId: string): ManagedShell | undefined {
     return this.shells.get(shellId)
+  }
+
+  private addCrashReport(shell: ManagedShell, exitCode: number): void {
+    const report: CrashReport = {
+      shellId: shell.id,
+      name: shell.name,
+      command: shell.command,
+      exitCode,
+      recentOutput: stripAnsi(shell.output.slice(-4096)),
+      timestamp: Date.now(),
+    }
+    const existing = this.crashReports.get(shell.projectId) || []
+    existing.push(report)
+    this.crashReports.set(shell.projectId, existing)
+    console.log(`[ManagedShell] Crash report created for ${shell.name} (${shell.id}), exit code ${exitCode}`)
+  }
+
+  getCrashReports(projectId: string): CrashReport[] {
+    return this.crashReports.get(projectId) || []
+  }
+
+  clearCrashReport(projectId: string, shellId: string): void {
+    const reports = this.crashReports.get(projectId)
+    if (!reports) return
+    const idx = reports.findIndex(r => r.shellId === shellId)
+    if (idx !== -1) {
+      reports.splice(idx, 1)
+      if (reports.length === 0) this.crashReports.delete(projectId)
+    }
   }
 
   dismissShell(shellId: string): boolean {
