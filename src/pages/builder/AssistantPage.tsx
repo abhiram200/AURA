@@ -38,7 +38,7 @@ export function AssistantPage({ projectId, projectName, workspacePath: _workspac
     reportedCrashesRef.current.add(report.shellId)
 
     const outputPreview = report.recentOutput
-      ? `\n\nLast output:\n\`\`\`\n${report.recentOutput.slice(-2000)}\n\`\`\``
+      ? `\n\nLast output:\n\`\`\`\n${report.recentOutput}\n\`\`\``
       : ''
 
     const prompt = `Shell "${report.name}" crashed unexpectedly with exit code ${report.exitCode}. Command: \`${report.command}\`${outputPreview}\n\nInvestigate the cause and fix the issue if possible.`
