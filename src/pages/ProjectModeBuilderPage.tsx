@@ -4,6 +4,7 @@ import { useAura } from '../hooks/useAura'
 import { WorkspacePage } from './builder/WorkspacePage'
 import { AssistantPage } from './builder/AssistantPage'
 import { DependenciesPage } from './builder/DependenciesPage'
+import { IndexingOverlay } from '../components/aura/IndexingOverlay'
 
 type BuilderTab = 'workspace' | 'assistant' | 'dependencies'
 
@@ -189,6 +190,7 @@ export function ProjectModeBuilderPage() {
           <DependenciesPage {...tabProps} onFileOpen={handleFileOpen} aura={aura} />
         </div>
       </div>
+      <IndexingOverlay status={aura.indexingStatus} />
     </div>
   )
 }

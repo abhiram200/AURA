@@ -365,7 +365,7 @@ function ChatMessage({ msg, onViewShell, liveShells }: { msg: AuraChatMessage; o
       )}
       <div className="aura-chat__message-content">
         {isUser ? (
-          msg.content
+          <span style={{ whiteSpace: 'pre-wrap' }}>{msg.content}</span>
         ) : (
           <>
             <ReactMarkdown remarkPlugins={[remarkGfm]} components={{
@@ -422,6 +422,9 @@ export default function AuraChat({ messages, isStreaming, error, onAsk, onClearE
     if (!trimmed || isStreaming) return
     onAsk(trimmed)
     setInput('')
+    if (inputRef.current) {
+      inputRef.current.style.height = 'auto'
+    }
     inputRef.current?.focus()
   }, [input, isStreaming, onAsk])
 
@@ -434,6 +437,9 @@ export default function AuraChat({ messages, isStreaming, error, onAsk, onClearE
 
   const handleTextareaChange = useCallback((e: React.ChangeEvent<HTMLTextAreaElement>) => {
     setInput(e.target.value)
+    const el = e.target
+    el.style.height = 'auto'
+    el.style.height = el.scrollHeight + 'px'
   }, [])
 
   return (
