@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo, memo, type KeyboardEvent } from 'react'
+import { useState, useEffect, useCallback, useMemo, useRef, memo, type KeyboardEvent } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import type { AuraChatMessage, AuraToolCall, AuraSubAgentInfo, AuraTodoItem, AuraApprovalRequest } from '../../hooks/useAura'
