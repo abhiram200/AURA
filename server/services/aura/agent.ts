@@ -138,6 +138,7 @@ interface OllamaMessage {
 }
 
 interface SubAgentTask {
+  title: string
   task: string
   focus: string
   type?: SubAgentType
@@ -329,7 +330,7 @@ For quick fixes (single file, obvious change): skip the plan, just fix it direct
 
 ## Sub-Agents
 
-When a question requires multiple independent tasks, use \`dispatch_sub_agents\` to fan out parallel agents. Choose the right type:
+When a question requires multiple independent tasks, use \`dispatch_sub_agents\` to fan out parallel agents. Each task MUST have a short, descriptive \`title\` (e.g. "Explore auth module", "Fix CSS layout bug") and a detailed \`task\` prompt. Choose the right type:
 
 - **explore**: Investigate code — find symbols, trace dependencies, understand architecture. Read-only.
 - **research**: Look up external info — documentation, APIs, examples via web search.
@@ -1464,11 +1465,12 @@ function defineAgentTools(qs: AuraQueryService, projectPath: string, managedShel
             items: {
               type: 'object',
               properties: {
+                title: { type: 'string', description: 'Short title for this task, e.g. "Explore auth module" or "Fix CSS layout bug"' },
                 task: { type: 'string', description: 'What to investigate or do — a focused question for the agent' },
                 focus: { type: 'string', description: 'Specific focus area — e.g., "upstream dependencies", "API surface", "auth module"' },
                 type: { type: 'string', enum: ['explore', 'research', 'fix', 'plan'], description: 'Agent type: "explore" (investigate code, read-only), "research" (web/docs), "fix" (make and verify edits), "plan" (create implementation plan, read-only)' },
               },
-              required: ['task'],
+              required: ['title', 'task'],
             },
             description: 'Array of 2+ tasks for parallel agents',
           },
@@ -2139,7 +2141,7 @@ export class AuraAgent {
 
     const runOne = async (task: SubAgentTask): Promise<string> => {
       const agentType: SubAgentType = task.type || 'explore'
-      eventSink.emit('sub_agent_start', { taskId: task.focus, task: task.task, type: agentType })
+      eventSink.emit('sub_agent_start', { taskId: task.focus, title: task.title, task: task.task, type: agentType })
 
       // Build specialized system prompt for this agent type
       const agentPrompt = SUB_AGENT_SYSTEM_PROMPTS[agentType]

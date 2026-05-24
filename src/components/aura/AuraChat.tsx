@@ -91,7 +91,7 @@ function SubAgentSection({ sa }: { sa: AuraSubAgentInfo }) {
       <summary className="aura-chat__sub-agent-header">
         <StatusDot status={sa.status} />
         <span className={`aura-chat__sub-agent-task ${statusClass}`}>
-          {typeLabel}({sa.task})
+          {sa.title ? `${typeLabel}(${sa.title})` : `${typeLabel}(${sa.task.split('\n')[0].slice(0, 60)}…)`}
         </span>
       </summary>
       {sa.result && (

@@ -396,6 +396,7 @@ export interface AuraToolCall {
 
 export interface AuraSubAgentInfo {
   taskId: string
+  title: string
   task: string
   type?: string
   status: 'running' | 'completed'
@@ -1213,6 +1214,7 @@ export function useAura(projectId: string | null) {
                 } else if (eventType === 'sub_agent_start') {
                   msg.subAgents = [...(msg.subAgents || []), {
                     taskId: data.taskId,
+                    title: data.title || '',
                     task: data.task,
                     type: data.type || 'explore',
                     status: 'running' as const,
