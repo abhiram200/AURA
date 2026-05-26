@@ -270,6 +270,7 @@ export class WorkspaceService {
   private watchers = new Map<string, FSWatcher>()
   private watchListeners = new Map<string, Set<(projectId: string, dirPath: string) => void>>()
   private gitStatusListeners = new Map<string, Set<(projectId: string) => void>>()
+  private fileChangeListeners = new Map<string, Set<(projectId: string, filePath: string) => void>>()
 
   onFileChange(projectId: string, listener: (pid: string, dirPath: string) => void) {
     if (!this.watchListeners.has(projectId)) {
@@ -278,6 +279,16 @@ export class WorkspaceService {
     this.watchListeners.get(projectId)!.add(listener)
     return () => {
       this.watchListeners.get(projectId)?.delete(listener)
+    }
+  }
+
+  onFileChangeSpecific(projectId: string, listener: (pid: string, filePath: string) => void) {
+    if (!this.fileChangeListeners.has(projectId)) {
+      this.fileChangeListeners.set(projectId, new Set())
+    }
+    this.fileChangeListeners.get(projectId)!.add(listener)
+    return () => {
+      this.fileChangeListeners.get(projectId)?.delete(listener)
     }
   }
 
@@ -299,6 +310,7 @@ export class WorkspaceService {
 
     let debounceTimer: ReturnType<typeof setTimeout> | null = null
     let changedDirs = new Set<string>()
+    let changedFiles = new Set<string>()
 
     const flush = () => {
       debounceTimer = null
@@ -312,16 +324,25 @@ export class WorkspaceService {
       if (gitListeners) {
         for (const fn of gitListeners) fn(projectId)
       }
+      const fileListeners = this.fileChangeListeners.get(projectId)
+      if (fileListeners) {
+        for (const filePath of changedFiles) {
+          for (const fn of fileListeners) fn(projectId, filePath)
+        }
+      }
       changedDirs = new Set()
+      changedFiles = new Set()
     }
 
     let watcher: FSWatcher
     try {
       watcher = watch(root, { recursive: true, persistent: false }, (_event, filename) => {
         if (!filename) return
-        const parentDir = dirname(filename).replace(/\\/g, '/')
+        const normalized = filename.replace(/\\/g, '/')
+        const parentDir = dirname(normalized)
         const dirPath = parentDir === '.' ? '.' : parentDir
         changedDirs.add(dirPath)
+        changedFiles.add(normalized)
 
         if (!debounceTimer) {
           debounceTimer = setTimeout(flush, 300)
@@ -343,5 +364,6 @@ export class WorkspaceService {
     }
     this.watchListeners.delete(projectId)
     this.gitStatusListeners.delete(projectId)
+    this.fileChangeListeners.delete(projectId)
   }
 }

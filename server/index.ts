@@ -192,6 +192,12 @@ async function start() {
       }
     })
 
+    const unsubscribeFile = workspaceService.onFileChangeSpecific(projectId, (_pid, filePath) => {
+      if (ws.readyState === ws.OPEN) {
+        ws.send(JSON.stringify({ type: 'file-change', filePath }))
+      }
+    })
+
     const unsubscribeGit = workspaceService.onGitStatusChange(projectId, () => {
       if (ws.readyState === ws.OPEN) {
         ws.send(JSON.stringify({ type: 'git-status-change' }))
@@ -202,6 +208,7 @@ async function start() {
 
     ws.on('close', () => {
       unsubscribe()
+      unsubscribeFile()
       unsubscribeGit()
       // Stop watching if no more listeners
       const hasOtherClients = Array.from(wssFiles.clients).some((c) => {

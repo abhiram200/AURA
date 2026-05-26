@@ -491,6 +491,23 @@ export function useWorkspace(projectId: string) {
               fetchGitStatus()
             }, 400)
           }
+        } else if (msg.type === 'file-change' && msg.filePath) {
+          // Re-fetch content for non-dirty open files that were changed externally
+          const open = openFilesRef.current
+          for (const f of open) {
+            if (f.path === msg.filePath && !f.dirty && !f.binary) {
+              fetch(`/api/workspace/${projectId}/file?path=${encodeURIComponent(f.path)}`)
+                .then(res => res.ok ? res.json() : null)
+                .then(data => {
+                  if (data?.content !== undefined) {
+                    setOpenFiles(prev => prev.map(of =>
+                      of.path === f.path ? { ...of, content: data.content } : of
+                    ))
+                  }
+                })
+                .catch(() => {})
+            }
+          }
         } else if (msg.type === 'git-status-change') {
           fetchGitStatus()
         }
