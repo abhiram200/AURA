@@ -77,8 +77,8 @@ function getFileIconColor(name: string): string {
 
 interface ClipboardState {
   type: 'copy' | 'cut'
-  path: string
-  name: string
+  paths: string[]
+  names: string[]
 }
 
 function ContextMenu({
@@ -125,8 +125,8 @@ export function FileExplorer({
   const [clipboard, setClipboard] = useState<ClipboardState | null>(null)
   const [dragOverPath, setDragOverPath] = useState<string | null>(null)
   const [draggingPath, setDraggingPath] = useState<string | null>(null)
-  const [selectedPath, setSelectedPath] = useState<string | null>(null)
-  const [selectedType, setSelectedType] = useState<'file' | 'directory' | null>(null)
+  const [selectedPaths, setSelectedPaths] = useState<Set<string>>(new Set())
+  const [anchorPath, setAnchorPath] = useState<string | null>(null)
   const renameInputRef = useRef<HTMLInputElement>(null)
   const createInputRef = useRef<HTMLInputElement>(null)
 
@@ -138,8 +138,8 @@ export function FileExplorer({
   // Keep selection in sync with active file (e.g., when switching tabs)
   useEffect(() => {
     if (activeFilePath) {
-      setSelectedPath(activeFilePath)
-      setSelectedType('file')
+      setSelectedPaths(new Set([activeFilePath]))
+      setAnchorPath(activeFilePath)
     }
   }, [activeFilePath])
 
@@ -183,13 +183,16 @@ export function FileExplorer({
 
   const handlePaste = useCallback(async (targetDir: string) => {
     if (!clipboard) return
-    if (clipboard.type === 'copy') {
-      await onCopyEntry(clipboard.path, targetDir)
-    } else {
-      const name = clipboard.name
-      const newPath = targetDir === '.' ? name : `${targetDir}/${name}`
-      if (clipboard.path !== newPath) {
-        await onMoveEntry(clipboard.path, newPath)
+    for (let i = 0; i < clipboard.paths.length; i++) {
+      const srcPath = clipboard.paths[i]
+      const name = clipboard.names[i]
+      if (clipboard.type === 'copy') {
+        await onCopyEntry(srcPath, targetDir)
+      } else {
+        const newPath = targetDir === '.' ? name : `${targetDir}/${name}`
+        if (srcPath !== newPath) {
+          await onMoveEntry(srcPath, newPath)
+        }
       }
     }
     setClipboard(null)
@@ -263,13 +266,24 @@ export function FileExplorer({
       return (
         <div key={entry.path}>
           <div
-            className={`file-explorer__item${isActive ? ' file-explorer__item--active' : ''}${selectedPath === entry.path && !isActive ? ' file-explorer__item--selected' : ''}${dragOverPath === entry.path && entry.type === 'directory' ? ' file-explorer__item--drag-over' : ''}${draggingPath === entry.path ? ' file-explorer__item--dragging' : ''}`}
+            className={`file-explorer__item${isActive ? ' file-explorer__item--active' : ''}${selectedPaths.has(entry.path) && !isActive ? ' file-explorer__item--selected' : ''}${dragOverPath === entry.path && entry.type === 'directory' ? ' file-explorer__item--drag-over' : ''}${draggingPath === entry.path ? ' file-explorer__item--dragging' : ''}`}
             style={{ paddingLeft: depth * 16 + 8 }}
-            onClick={() => {
-              setSelectedPath(entry.path)
-              setSelectedType(entry.type)
-              if (entry.type === 'directory') onToggleDir(entry.path)
-              else onOpenFile(entry.path)
+            onClick={(e) => {
+              if (e.ctrlKey || e.metaKey) {
+                // Toggle in multi-selection
+                setSelectedPaths(prev => {
+                  const next = new Set(prev)
+                  if (next.has(entry.path)) next.delete(entry.path)
+                  else next.add(entry.path)
+                  return next
+                })
+              } else {
+                // Single click — set as sole selection
+                setSelectedPaths(new Set([entry.path]))
+                setAnchorPath(entry.path)
+                if (entry.type === 'directory') onToggleDir(entry.path)
+                else onOpenFile(entry.path)
+              }
             }}
             onContextMenu={(e) => handleContextMenu(e, entry.path, entry.type)}
             draggable
@@ -353,57 +367,78 @@ export function FileExplorer({
     ] : []),
     { label: 'Rename', action: () => startRename(contextMenu.path) },
     { label: 'Copy', action: () => {
-      const name = contextMenu.path.split('/').pop() || contextMenu.path
-      setClipboard({ type: 'copy', path: contextMenu.path, name })
+      const paths = selectedPaths.size > 0 ? [...selectedPaths] : [contextMenu.path]
+      setClipboard({ type: 'copy', paths, names: paths.map(p => p.split('/').pop() || p) })
     }},
     { label: 'Cut', action: () => {
-      const name = contextMenu.path.split('/').pop() || contextMenu.path
-      setClipboard({ type: 'cut', path: contextMenu.path, name })
+      const paths = selectedPaths.size > 0 ? [...selectedPaths] : [contextMenu.path]
+      setClipboard({ type: 'cut', paths, names: paths.map(p => p.split('/').pop() || p) })
     }},
     ...(contextMenu.type === 'directory' && clipboard ? [
-      { label: `Paste (${clipboard.type === 'copy' ? 'Copy' : 'Move'})`, action: () => handlePaste(contextMenu.path) },
+      { label: `Paste (${clipboard.type === 'copy' ? 'Copy' : 'Move'}, ${clipboard.paths.length} item${clipboard.paths.length > 1 ? 's' : ''})`, action: () => handlePaste(contextMenu.path) },
     ] : []),
     { label: 'Delete', action: () => setPendingDelete(contextMenu.path), danger: true },
   ] : []
 
-  // Keyboard shortcuts for copy/cut/paste/delete when explorer is focused
+  // Keyboard shortcuts for copy/cut/paste/delete/select-all when explorer is focused
   const handleExplorerKeyDown = useCallback((e: React.KeyboardEvent) => {
     // Don't intercept if user is typing in an input
     if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return
 
     const ctrl = e.ctrlKey || e.metaKey
 
-    if (ctrl && e.key === 'c' && selectedPath) {
+    if (ctrl && e.key === 'a') {
       e.preventDefault()
-      const name = selectedPath.split('/').pop() || selectedPath
-      setClipboard({ type: 'copy', path: selectedPath, name })
-    } else if (ctrl && e.key === 'x' && selectedPath) {
+      // Select all visible files
+      const allPaths = new Set<string>()
+      const collectAll = (entries: FileEntry[]) => {
+        for (const entry of entries) {
+          allPaths.add(entry.path)
+          if (entry.type === 'directory' && expandedDirs.has(entry.path) && fileTree[entry.path]) {
+            collectAll(fileTree[entry.path])
+          }
+        }
+      }
+      collectAll(fileTree['.'] || [])
+      setSelectedPaths(allPaths)
+    } else if (ctrl && e.key === 'c' && selectedPaths.size > 0) {
       e.preventDefault()
-      const name = selectedPath.split('/').pop() || selectedPath
-      setClipboard({ type: 'cut', path: selectedPath, name })
+      const paths = [...selectedPaths]
+      setClipboard({ type: 'copy', paths, names: paths.map(p => p.split('/').pop() || p) })
+    } else if (ctrl && e.key === 'x' && selectedPaths.size > 0) {
+      e.preventDefault()
+      const paths = [...selectedPaths]
+      setClipboard({ type: 'cut', paths, names: paths.map(p => p.split('/').pop() || p) })
     } else if (ctrl && e.key === 'v' && clipboard) {
       e.preventDefault()
-      const targetDir = selectedType === 'directory' && selectedPath ? selectedPath
-        : selectedPath ? (selectedPath.includes('/') ? selectedPath.substring(0, selectedPath.lastIndexOf('/')) : '.')
-        : '.'
+      const primaryPath = anchorPath || [...selectedPaths][0]
+      // Determine target dir: if a directory is selected, paste into it; otherwise paste into its parent
+      const entryType = primaryPath ? (fileTree[primaryPath] ? 'directory' : 'file') : null
+      const targetDir = entryType === 'directory' && primaryPath
+        ? primaryPath
+        : primaryPath && primaryPath.includes('/')
+          ? primaryPath.substring(0, primaryPath.lastIndexOf('/'))
+          : '.'
       handlePaste(targetDir)
-    } else if (e.key === 'Delete' && selectedPath) {
+    } else if (e.key === 'Delete' && selectedPaths.size > 0) {
       e.preventDefault()
-      setPendingDelete(selectedPath)
-    } else if (e.key === 'F2' && selectedPath) {
+      const primaryPath = anchorPath || [...selectedPaths][0]
+      if (primaryPath) setPendingDelete(primaryPath)
+    } else if (e.key === 'F2' && selectedPaths.size === 1) {
       e.preventDefault()
-      startRename(selectedPath)
+      const primaryPath = [...selectedPaths][0]
+      if (primaryPath) startRename(primaryPath)
     }
-  }, [selectedPath, selectedType, clipboard, handlePaste, startRename])
+  }, [selectedPaths, anchorPath, clipboard, handlePaste, startRename, fileTree, expandedDirs])
 
-  // Determine target directory for header buttons — falls back to activeFilePath when nothing selected in explorer
+  // Determine target directory for header buttons
   const getCreateDir = useCallback((): string => {
-    const effectivePath = selectedPath || activeFilePath
+    const effectivePath = anchorPath || activeFilePath
     if (!effectivePath) return '.'
-    const isDir = selectedPath ? selectedType === 'directory' : false
+    const isDir = fileTree[effectivePath] ? true : false
     if (isDir) return effectivePath
     return effectivePath.includes('/') ? effectivePath.substring(0, effectivePath.lastIndexOf('/')) : '.'
-  }, [selectedPath, selectedType, activeFilePath])
+  }, [anchorPath, activeFilePath, fileTree])
 
   return (
     <div className="file-explorer" tabIndex={-1}
@@ -426,7 +461,7 @@ export function FileExplorer({
         </div>
       </div>
       <div className="file-explorer__workspace-name">{workspacePath.split(/[\\/]/).pop()}</div>
-      <div className="file-explorer__tree" onClick={(e) => { if (e.target === e.currentTarget) { setSelectedPath(null); setSelectedType(null) } }}>
+      <div className="file-explorer__tree" onClick={(e) => { if (e.target === e.currentTarget) { setSelectedPaths(new Set()); setAnchorPath(null) } }}>
         {renderTree(rootEntries, '.', 0)}
       </div>
 
