@@ -76,18 +76,6 @@ function TerminalInstance({ projectId, terminalId, isActive, isLightMode }: Term
       fontSize: 14,
       cursorBlink: true,
       cursorStyle: 'bar',
-      customKeyEventHandler: (e) => {
-        if (e.ctrlKey && e.key === 'c' && term.hasSelection()) {
-          const selection = term.getSelection()
-          if (selection) {
-            navigator.clipboard.writeText(selection)
-            term.clearSelection()
-          }
-          e.preventDefault()
-          return false
-        }
-        return true
-      },
     })
 
     const fit = new FitAddon()
@@ -98,6 +86,20 @@ function TerminalInstance({ projectId, terminalId, isActive, isLightMode }: Term
     term.open(containerRef.current)
 
     try { fit.fit() } catch {}
+
+    // Ctrl+C copies selection instead of sending ^C to the shell
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.ctrlKey && e.key === 'c' && term.hasSelection()) {
+        const selection = term.getSelection()
+        if (selection) {
+          navigator.clipboard.writeText(selection)
+          term.clearSelection()
+        }
+        e.preventDefault()
+        e.stopPropagation()
+      }
+    }
+    containerRef.current.addEventListener('keydown', handleKeyDown, true)
 
     termRef.current = term
     fitRef.current = fit
@@ -110,6 +112,7 @@ function TerminalInstance({ projectId, terminalId, isActive, isLightMode }: Term
     })
 
     return () => {
+      containerRef.current?.removeEventListener('keydown', handleKeyDown, true)
       term.dispose()
       termRef.current = null
       fitRef.current = null

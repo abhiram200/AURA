@@ -63,18 +63,6 @@ export function ManagedTerminalPanel({ shell, projectId, onDismiss, onTerminate,
       disableStdin: true,
       convertEol: true,
       scrollback: 10000,
-      customKeyEventHandler: (e) => {
-        if (e.ctrlKey && e.key === 'c' && term.hasSelection()) {
-          const selection = term.getSelection()
-          if (selection) {
-            navigator.clipboard.writeText(selection)
-            term.clearSelection()
-          }
-          e.preventDefault()
-          return false
-        }
-        return true
-      },
     })
 
     const fitAddon = new FitAddon()
@@ -87,10 +75,25 @@ export function ManagedTerminalPanel({ shell, projectId, onDismiss, onTerminate,
       fitAddon.fit()
     })
 
+    // Ctrl+C copies selection
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.ctrlKey && e.key === 'c' && term.hasSelection()) {
+        const selection = term.getSelection()
+        if (selection) {
+          navigator.clipboard.writeText(selection)
+          term.clearSelection()
+        }
+        e.preventDefault()
+        e.stopPropagation()
+      }
+    }
+    termRef.current.addEventListener('keydown', handleKeyDown, true)
+
     xtermRef.current = term
     fitRef.current = fitAddon
 
     return () => {
+      termRef.current?.removeEventListener('keydown', handleKeyDown, true)
       term.dispose()
       xtermRef.current = null
       fitRef.current = null
