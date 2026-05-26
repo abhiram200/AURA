@@ -63,6 +63,18 @@ export function ManagedTerminalPanel({ shell, projectId, onDismiss, onTerminate,
       disableStdin: true,
       convertEol: true,
       scrollback: 10000,
+      customKeyEventHandler: (e) => {
+        if (e.ctrlKey && e.key === 'c' && term.hasSelection()) {
+          const selection = term.getSelection()
+          if (selection) {
+            navigator.clipboard.writeText(selection)
+            term.clearSelection()
+          }
+          e.preventDefault()
+          return false
+        }
+        return true
+      },
     })
 
     const fitAddon = new FitAddon()
@@ -73,20 +85,6 @@ export function ManagedTerminalPanel({ shell, projectId, onDismiss, onTerminate,
     term.open(termRef.current)
     requestAnimationFrame(() => {
       fitAddon.fit()
-    })
-
-    // Ctrl+C copies selection
-    term.onKey(({ domEvent }) => {
-      if (domEvent.ctrlKey && domEvent.key === 'c' && term.hasSelection()) {
-        const selection = term.getSelection()
-        if (selection) {
-          navigator.clipboard.writeText(selection)
-          term.clearSelection()
-        }
-        domEvent.preventDefault()
-        domEvent.stopPropagation()
-        return false
-      }
     })
 
     xtermRef.current = term
