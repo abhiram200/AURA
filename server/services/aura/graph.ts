@@ -302,8 +302,11 @@ export class AuraQueryService {
     for (const nodeId of scores.keys()) {
       if (nodeId === targetId) continue
       const path: TraceStep[] = []
+      const visited = new Set<string>()
       let current = nodeId
       while (current !== targetId) {
+        if (visited.has(current)) break
+        visited.add(current)
         const pred = predecessor.get(current)
         if (!pred) break
         const node = this.nodeMap.get(pred.nodeId)

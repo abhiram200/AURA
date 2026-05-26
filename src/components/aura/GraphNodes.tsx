@@ -19,6 +19,8 @@ interface GraphNodesProps {
 const dummy = new THREE.Object3D()
 const sphereGeometry = new THREE.SphereGeometry(1, 16, 12)
 sphereGeometry.boundingSphere = new THREE.Sphere(new THREE.Vector3(), 5000)
+const tempColor = new THREE.Color()
+const hiddenColor = new THREE.Color('#000000')
 
 export function GraphNodes({
   nodes,
@@ -58,7 +60,7 @@ export function GraphNodes({
         dummy.updateMatrix()
         mesh.setMatrixAt(i, dummy.matrix)
         // Set color to transparent/hidden
-        mesh.setColorAt(i, new THREE.Color('#000000'))
+        mesh.setColorAt(i, hiddenColor)
         continue
       }
 
@@ -66,14 +68,13 @@ export function GraphNodes({
       dummy.updateMatrix()
       mesh.setMatrixAt(i, dummy.matrix)
 
-      const nodeColor = new THREE.Color(node.color)
+      tempColor.set(node.color)
       const depth = depthMap.get(node.id)
       const appearance = getDepthAppearance(depth, hasSelection)
 
-      nodeColor.multiplyScalar(appearance.brightness)
-      // In light mode, darken colors for contrast against light background
-      if (isLightMode) nodeColor.multiplyScalar(0.55)
-      mesh.setColorAt(i, nodeColor)
+      tempColor.multiplyScalar(appearance.brightness)
+      if (isLightMode) tempColor.multiplyScalar(0.55)
+      mesh.setColorAt(i, tempColor)
     }
 
     mesh.instanceMatrix.needsUpdate = true
