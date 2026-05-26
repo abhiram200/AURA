@@ -21,6 +21,8 @@ import { yaml } from '@codemirror/lang-yaml'
 import { php } from '@codemirror/lang-php'
 import { less } from '@codemirror/lang-less'
 import { sass } from '@codemirror/lang-sass'
+import { StreamLanguage } from '@codemirror/language'
+import { shell } from '@codemirror/legacy-modes/mode/shell'
 import { getThemeExtension, getThemeInfo } from '../../utils/editorThemes'
 import type { OpenFile } from '../../hooks/useWorkspace'
 
@@ -87,6 +89,7 @@ function getLanguageExtension(path: string) {
   if (path.endsWith('.xml') || path.endsWith('.svg') || path.endsWith('.xsl') || path.endsWith('.xslt') || path.endsWith('.xsd')) return xml()
   if (path.endsWith('.yml') || path.endsWith('.yaml')) return yaml()
   if (path.endsWith('.php') || path.endsWith('.phtml')) return php()
+  if (path.endsWith('.sh') || path.endsWith('.bash') || path.endsWith('.zsh')) return StreamLanguage.define(shell)
   return []
 }
 

@@ -10,6 +10,19 @@ import bash from 'highlight.js/lib/languages/bash';
 import css from 'highlight.js/lib/languages/css';
 import json from 'highlight.js/lib/languages/json';
 import xml from 'highlight.js/lib/languages/xml';
+import c from 'highlight.js/lib/languages/c';
+import cpp from 'highlight.js/lib/languages/cpp';
+import java from 'highlight.js/lib/languages/java';
+import rust from 'highlight.js/lib/languages/rust';
+import go from 'highlight.js/lib/languages/go';
+import sql from 'highlight.js/lib/languages/sql';
+import yaml from 'highlight.js/lib/languages/yaml';
+import php from 'highlight.js/lib/languages/php';
+import scss from 'highlight.js/lib/languages/scss';
+import less from 'highlight.js/lib/languages/less';
+import markdown from 'highlight.js/lib/languages/markdown';
+import diff from 'highlight.js/lib/languages/diff';
+import dockerfile from 'highlight.js/lib/languages/dockerfile';
 
 hljs.registerLanguage('javascript', javascript);
 hljs.registerLanguage('js', javascript);
@@ -24,6 +37,23 @@ hljs.registerLanguage('css', css);
 hljs.registerLanguage('json', json);
 hljs.registerLanguage('html', xml);
 hljs.registerLanguage('xml', xml);
+hljs.registerLanguage('svg', xml);
+hljs.registerLanguage('c', c);
+hljs.registerLanguage('cpp', cpp);
+hljs.registerLanguage('c++', cpp);
+hljs.registerLanguage('java', java);
+hljs.registerLanguage('rust', rust);
+hljs.registerLanguage('go', go);
+hljs.registerLanguage('sql', sql);
+hljs.registerLanguage('yaml', yaml);
+hljs.registerLanguage('yml', yaml);
+hljs.registerLanguage('php', php);
+hljs.registerLanguage('scss', scss);
+hljs.registerLanguage('less', less);
+hljs.registerLanguage('markdown', markdown);
+hljs.registerLanguage('md', markdown);
+hljs.registerLanguage('diff', diff);
+hljs.registerLanguage('dockerfile', dockerfile);
 
 function CopyButton({ code }: { code: string }) {
   const [copied, setCopied] = useState(false);
@@ -53,7 +83,7 @@ export function StreamingText({ content, isStreaming }: StreamingTextProps) {
         remarkPlugins={[remarkGfm]}
         components={{
           code({ className, children, ...props }) {
-            const match = /language-(\w+)/.exec(className || '');
+            const match = /language-([\w+]+)/.exec(className || '');
             const code = String(children).replace(/\n$/, '');
 
             if (match) {
