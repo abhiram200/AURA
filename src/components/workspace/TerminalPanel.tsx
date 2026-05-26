@@ -87,6 +87,20 @@ function TerminalInstance({ projectId, terminalId, isActive, isLightMode }: Term
 
     try { fit.fit() } catch {}
 
+    // Ctrl+C copies selection instead of sending ^C
+    term.onKey(({ domEvent }) => {
+      if (domEvent.ctrlKey && domEvent.key === 'c' && term.hasSelection()) {
+        const selection = term.getSelection()
+        if (selection) {
+          navigator.clipboard.writeText(selection)
+          term.clearSelection()
+        }
+        domEvent.preventDefault()
+        domEvent.stopPropagation()
+        return false
+      }
+    })
+
     termRef.current = term
     fitRef.current = fit
 

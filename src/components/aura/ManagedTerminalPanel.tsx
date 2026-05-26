@@ -75,6 +75,20 @@ export function ManagedTerminalPanel({ shell, projectId, onDismiss, onTerminate,
       fitAddon.fit()
     })
 
+    // Ctrl+C copies selection
+    term.onKey(({ domEvent }) => {
+      if (domEvent.ctrlKey && domEvent.key === 'c' && term.hasSelection()) {
+        const selection = term.getSelection()
+        if (selection) {
+          navigator.clipboard.writeText(selection)
+          term.clearSelection()
+        }
+        domEvent.preventDefault()
+        domEvent.stopPropagation()
+        return false
+      }
+    })
+
     xtermRef.current = term
     fitRef.current = fitAddon
 
