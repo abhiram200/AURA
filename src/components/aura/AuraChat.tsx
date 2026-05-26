@@ -5,6 +5,131 @@ import type { AuraChatMessage, AuraToolCall, AuraSubAgentInfo, AuraTodoItem, Aur
 import type { ManagedShellState } from '../../hooks/useManagedShells'
 import { ShellBlock } from './ShellBlock'
 
+interface DiffLine {
+  type: 'add' | 'remove' | 'context'
+  content: string
+  oldLineNo?: number
+  newLineNo?: number
+}
+
+function computeDiff(oldText: string, newText: string): DiffLine[] {
+  const oldLines = oldText.split('\n')
+  const newLines = newText.split('\n')
+
+  const { lcs } = lcsMatrix(oldLines, newLines)
+  const full = buildDiffLines(oldLines, newLines, lcs, 0, 0)
+  return collapseToHunks(full, 5)
+}
+
+function collapseToHunks(lines: DiffLine[], context: number): DiffLine[] {
+  // Find indices of all changed lines
+  const changeIdxs: number[] = []
+  for (let i = 0; i < lines.length; i++) {
+    if (lines[i].type !== 'context') changeIdxs.push(i)
+  }
+
+  if (changeIdxs.length === 0) return []
+
+  // Build ranges: each change gets `context` lines of surrounding context
+  // Merge overlapping/adjacent ranges
+  const ranges: [number, number][] = []
+  for (const ci of changeIdxs) {
+    const start = Math.max(0, ci - context)
+    const end = Math.min(lines.length - 1, ci + context)
+    if (ranges.length === 0 || start > ranges[ranges.length - 1][1] + 1) {
+      ranges.push([start, end])
+    } else {
+      ranges[ranges.length - 1][1] = Math.max(ranges[ranges.length - 1][1], end)
+    }
+  }
+
+  const result: DiffLine[] = []
+  for (let r = 0; r < ranges.length; r++) {
+    const [start, end] = ranges[r]
+    if (r > 0) {
+      result.push({ type: 'context', content: '⋯' })
+    }
+    for (let i = start; i <= end; i++) {
+      result.push(lines[i])
+    }
+  }
+  return result
+}
+
+function lcsMatrix(a: string[], b: string[]) {
+  const m = a.length
+  const n = b.length
+  // For very large files, skip full LCS (O(n²) memory) and fall back to simple diff
+  if (m > 2000 || n > 2000) {
+    return { lcs: new Set<string>() }
+  }
+
+  let prev = new Uint16Array(n + 1)
+  const dp: Uint16Array[] = [new Uint16Array(n + 1)]
+
+  for (let i = 1; i <= m; i++) {
+    const curr = new Uint16Array(n + 1)
+    for (let j = 1; j <= n; j++) {
+      if (a[i - 1] === b[j - 1]) {
+        curr[j] = prev[j - 1] + 1
+      } else {
+        curr[j] = Math.max(prev[j], curr[j - 1])
+      }
+    }
+    dp.push(new Uint16Array(curr))
+    prev = curr
+  }
+
+  const lcsSet = new Set<string>()
+  let i = m, j = n
+  while (i > 0 && j > 0) {
+    if (a[i - 1] === b[j - 1]) {
+      lcsSet.add(`${i - 1},${j - 1}`)
+      i--; j--
+    } else if (dp[i - 1][j]! >= dp[i][j - 1]!) {
+      i--
+    } else {
+      j--
+    }
+  }
+  return { lcs: lcsSet }
+}
+
+function buildDiffLines(oldLines: string[], newLines: string[], lcs: Set<string>, startOld: number, startNew: number): DiffLine[] {
+  const result: DiffLine[] = []
+  let oi = 0, ni = 0
+  const lcsPairs = Array.from(lcs).map(s => s.split(',').map(Number)).sort((a, b) => a[0] - b[0])
+
+  for (const [oIdx, nIdx] of lcsPairs) {
+    // Removed lines
+    while (oi < oIdx) {
+      result.push({ type: 'remove', content: oldLines[oi], oldLineNo: startOld + oi + 1 })
+      oi++
+    }
+    // Added lines
+    while (ni < nIdx) {
+      result.push({ type: 'add', content: newLines[ni], newLineNo: startNew + ni + 1 })
+      ni++
+    }
+    // Context line
+    result.push({ type: 'context', content: oldLines[oi], oldLineNo: startOld + oi + 1, newLineNo: startNew + ni + 1 })
+    oi++; ni++
+  }
+  // Remaining removed
+  while (oi < oldLines.length) {
+    result.push({ type: 'remove', content: oldLines[oi], oldLineNo: startOld + oi + 1 })
+    oi++
+  }
+  // Remaining added
+  while (ni < newLines.length) {
+    result.push({ type: 'add', content: newLines[ni], newLineNo: startNew + ni + 1 })
+    ni++
+  }
+  return result
+}
+
+const WRITE_TOOLS = new Set(['write', 'update'])
+
 interface AuraChatProps {
   messages: AuraChatMessage[]
   isStreaming: boolean
@@ -80,6 +205,96 @@ const ToolCallSection = memo(function ToolCallSection({ tc }: { tc: AuraToolCall
           </div>
         )}
       </div>
+    </details>
+  )
+})
+
+const WriteToolSection = memo(function WriteToolSection({ tc }: { tc: AuraToolCall }) {
+  const statusClass = tc.status === 'completed' ? 'aura-chat__status-text--done'
+    : tc.status === 'running' ? 'aura-chat__status-text--running'
+    : 'aura-chat__status-text--error'
+
+  const diffLines = useMemo(() => {
+    if (tc.status !== 'completed' || !tc.result || typeof tc.result !== 'object') return null
+    const res = tc.result as { filePath?: string; previousContent?: string | null; created?: boolean; replacements?: number; applied?: boolean }
+    const filePath = res.filePath || (tc.args as Record<string, unknown>)?.filePath as string || ''
+    const previousContent = res.previousContent
+    if (previousContent == null && !res.created) return null
+
+    // Get new content from args
+    const newContent = (tc.args as Record<string, unknown>)?.content as string
+      ?? (tc.args as Record<string, unknown>)?.newString as string
+      ?? ''
+
+    if (res.created) {
+      // New file - show all lines as additions
+      const lines = newContent.split('\n')
+      return {
+        filePath,
+        created: true,
+        lines: lines.map((line, i) => ({ type: 'add' as const, content: line, newLineNo: i + 1 })),
+      }
+    }
+
+    // For update tool, reconstruct the full new content from old content + replacement
+    let fullNewContent = newContent
+    if (tc.name === 'update' && previousContent != null) {
+      const oldString = (tc.args as Record<string, unknown>)?.oldString as string ?? ''
+      const replaceAll = (tc.args as Record<string, unknown>)?.replaceAll as boolean ?? false
+      const normalizedPrev = previousContent.replace(/\r\n/g, '\n')
+      const normalizedOld = oldString.replace(/\r\n/g, '\n')
+      const normalizedNew = newContent.replace(/\r\n/g, '\n')
+      fullNewContent = replaceAll
+        ? normalizedPrev.replaceAll(normalizedOld, normalizedNew)
+        : normalizedPrev.replace(normalizedOld, normalizedNew)
+    }
+
+    const lines = computeDiff(previousContent.replace(/\r\n/g, '\n'), fullNewContent.replace(/\r\n/g, '\n'))
+    const adds = lines.filter(l => l.type === 'add').length
+    const removes = lines.filter(l => l.type === 'remove').length
+    return { filePath, created: false, lines, adds, removes }
+  }, [tc.status, tc.result, tc.args, tc.name])
+
+  const label = tc.name === 'write'
+    ? (diffLines?.created ? 'Created' : 'Modified')
+    : 'Updated'
+
+  return (
+    <details className="aura-chat__write-tool" open>
+      <summary className="aura-chat__write-tool-header">
+        <StatusDot status={tc.status} />
+        <span className={`aura-chat__write-tool-name ${statusClass}`}>
+          {label} {diffLines?.filePath || ((tc.args as Record<string, unknown>)?.filePath as string) || ''}
+        </span>
+        {diffLines && !diffLines.created && (
+          <span className="aura-chat__write-tool-stats">
+            +{diffLines.adds} -{diffLines.removes}
+          </span>
+        )}
+      </summary>
+      {tc.status === 'completed' && diffLines && diffLines.lines.length > 0 && (
+        <div className="aura-chat__write-tool-diff">
+          {diffLines.lines.map((line, i) => (
+            <div key={i} className={`aura-chat__diff-line aura-chat__diff-line--${line.type}`}>
+              <span className="aura-chat__diff-line-no">
+                {line.type === 'add' ? (line.newLineNo ?? '') : (line.oldLineNo ?? '')}
+              </span>
+              <span className="aura-chat__diff-line-no">
+                {line.type === 'remove' ? '' : (line.newLineNo ?? '')}
+              </span>
+              <span className="aura-chat__diff-prefix">
+                {line.type === 'add' ? '+' : line.type === 'remove' ? '-' : ' '}
+              </span>
+              <span className="aura-chat__diff-content">{line.content}</span>
+            </div>
+          ))}
+        </div>
+      )}
+      {tc.error && (
+        <div className="aura-chat__tool-call-error">
+          <span className="aura-chat__tool-call-label">Error:</span> {tc.error}
+        </div>
+      )}
     </details>
   )
 })
@@ -207,16 +422,26 @@ function CodeBlock({ className, children }: { className?: string; children?: Rea
 }
 
 function ToolCallsGroup({ toolCalls }: { toolCalls: AuraToolCall[] }) {
-  if (toolCalls.length <= 1) {
-    return (
-      <div className="aura-chat__tool-calls">
-        {toolCalls.map((tc, i) => (
-          <ToolCallSection key={`${tc.name}-${i}`} tc={tc} />
-        ))}
-      </div>
-    )
-  }
+  const writeCalls = toolCalls.filter(tc => WRITE_TOOLS.has(tc.name))
+  const otherCalls = toolCalls.filter(tc => !WRITE_TOOLS.has(tc.name))
 
+  return (
+    <div className="aura-chat__tool-calls">
+      {writeCalls.map((tc, i) => (
+        <WriteToolSection key={`${tc.name}-${i}`} tc={tc} />
+      ))}
+      {otherCalls.length <= 1 ? (
+        otherCalls.map((tc, i) => (
+          <ToolCallSection key={`${tc.name}-${i}`} tc={tc} />
+        ))
+      ) : (
+        <OtherToolCallsGroup toolCalls={otherCalls} />
+      )}
+    </div>
+  )
+}
+
+function OtherToolCallsGroup({ toolCalls }: { toolCalls: AuraToolCall[] }) {
   const completed = toolCalls.filter(tc => tc.status === 'completed').length
   const running = toolCalls.filter(tc => tc.status === 'running').length
   const errored = toolCalls.filter(tc => tc.status === 'error').length

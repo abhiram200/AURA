@@ -1855,6 +1855,124 @@
   margin-top: 4px;
 }
 
+/* ── Write Tool (ungrouped, with diff) ──────────────────────────────────── */
+
+.aura-chat__write-tool {
+  border: 1px solid var(--assistant-border, #1a1a1a);
+  border-radius: 4px;
+  overflow: hidden;
+  margin-bottom: 6px;
+}
+
+.aura-chat__write-tool summary {
+  cursor: pointer;
+  list-style: none;
+  padding: 4px 8px;
+  background: var(--assistant-code-bg, #111);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+}
+
+.aura-chat__write-tool summary::-webkit-details-marker {
+  display: none;
+}
+
+.aura-chat__write-tool summary::before {
+  content: '▾';
+  color: #555;
+  font-size: 10px;
+  transition: transform 0.15s;
+}
+
+.aura-chat__write-tool[open] summary::before {
+  content: '▴';
+}
+
+.aura-chat__write-tool-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.aura-chat__write-tool-name {
+  color: #ccc;
+  font-family: 'Cascadia Code', 'Fira Code', monospace;
+  font-size: 12px;
+}
+
+.aura-chat__write-tool-stats {
+  color: #888;
+  font-family: 'Cascadia Code', 'Fira Code', monospace;
+  font-size: 11px;
+  margin-left: auto;
+}
+
+.aura-chat__write-tool-diff {
+  background: #0d0d0d;
+  border-top: 1px solid var(--assistant-border, #1a1a1a);
+  overflow-x: auto;
+  max-height: 400px;
+  overflow-y: auto;
+  font-family: 'Cascadia Code', 'Fira Code', monospace;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.aura-chat__diff-line {
+  display: flex;
+  min-height: 18px;
+}
+
+.aura-chat__diff-line--add {
+  background: rgba(46, 160, 67, 0.15);
+}
+
+.aura-chat__diff-line--remove {
+  background: rgba(248, 81, 73, 0.15);
+}
+
+.aura-chat__diff-line--context {
+  background: transparent;
+}
+
+.aura-chat__diff-line-no {
+  color: #484848;
+  text-align: right;
+  min-width: 40px;
+  padding: 0 8px 0 4px;
+  user-select: none;
+  flex-shrink: 0;
+  border-right: 1px solid #1a1a1a;
+}
+
+.aura-chat__diff-prefix {
+  color: #4ade80;
+  min-width: 14px;
+  text-align: center;
+  user-select: none;
+  flex-shrink: 0;
+}
+
+.aura-chat__diff-line--remove .aura-chat__diff-prefix {
+  color: #f85149;
+}
+
+.aura-chat__diff-content {
+  white-space: pre;
+  padding-right: 8px;
+  color: #c9d1d9;
+}
+
+.aura-chat__diff-line--remove .aura-chat__diff-content {
+  color: #f85149;
+}
+
+.aura-chat__diff-line--add .aura-chat__diff-content {
+  color: #4ade80;
+}
+
 .aura-chat__status-dot {
   display: inline-block;
   width: 8px;

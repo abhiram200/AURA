@@ -23,8 +23,43 @@ import { less } from '@codemirror/lang-less'
 import { sass } from '@codemirror/lang-sass'
 import { StreamLanguage } from '@codemirror/language'
 import { shell } from '@codemirror/legacy-modes/mode/shell'
+import * as prettier from 'prettier'
+import prettierPluginEstree from 'prettier/plugins/estree'
+import prettierPluginTypescript from 'prettier/plugins/typescript'
+import prettierPluginBabel from 'prettier/plugins/babel'
+import prettierPluginHtml from 'prettier/plugins/html'
+import prettierPluginCss from 'prettier/plugins/postcss'
+import prettierPluginMarkdown from 'prettier/plugins/markdown'
+import prettierPluginYaml from 'prettier/plugins/yaml'
 import { getThemeExtension, getThemeInfo } from '../../utils/editorThemes'
 import type { OpenFile } from '../../hooks/useWorkspace'
+
+function getPrettierParser(path: string): string | null {
+  if (path.endsWith('.tsx')) return 'babel-ts'
+  if (path.endsWith('.ts')) return 'typescript'
+  if (path.endsWith('.jsx')) return 'babel'
+  if (path.endsWith('.js') || path.endsWith('.mjs') || path.endsWith('.cjs')) return 'babel'
+  if (path.endsWith('.css') || path.endsWith('.scss') || path.endsWith('.less')) return 'css'
+  if (path.endsWith('.html') || path.endsWith('.htm')) return 'html'
+  if (path.endsWith('.json')) return 'json'
+  if (path.endsWith('.md') || path.endsWith('.markdown')) return 'markdown'
+  if (path.endsWith('.yml') || path.endsWith('.yaml')) return 'yaml'
+  return null
+}
+
+function getPrettierPlugins(parser: string) {
+  switch (parser) {
+    case 'babel-ts': return [prettierPluginBabel, prettierPluginEstree, prettierPluginTypescript]
+    case 'typescript': return [prettierPluginTypescript, prettierPluginEstree]
+    case 'babel': return [prettierPluginBabel, prettierPluginEstree]
+    case 'css': return [prettierPluginCss]
+    case 'html': return [prettierPluginHtml]
+    case 'json': return [prettierPluginBabel, prettierPluginEstree]
+    case 'markdown': return [prettierPluginMarkdown]
+    case 'yaml': return [prettierPluginYaml]
+    default: return []
+  }
+}
 
 const themeCompartment = new Compartment()
 const lightOverrideCompartment = new Compartment()
@@ -107,6 +142,27 @@ export function CodeEditor({ file, onChange, onSave, editorTheme = 'catppuccin-m
     if (!containerRef.current) return
 
     const langExt = getLanguageExtension(file.path)
+    const parser = getPrettierParser(file.path)
+
+    const formatDoc = async (view: EditorView) => {
+      if (!parser) return false
+      try {
+        const plugins = getPrettierPlugins(parser)
+        const formatted = await prettier.format(view.state.doc.toString(), {
+          parser,
+          plugins,
+          filepath: file.path,
+        })
+        if (formatted !== view.state.doc.toString()) {
+          view.dispatch({
+            changes: { from: 0, to: view.state.doc.length, insert: formatted },
+          })
+        }
+        return true
+      } catch {
+        return false
+      }
+    }
 
     const state = EditorState.create({
       doc: file.content,
@@ -134,6 +190,10 @@ export function CodeEditor({ file, onChange, onSave, editorTheme = 'catppuccin-m
           {
             key: 'Mod-s',
             run: () => { onSaveRef.current(); return true },
+          },
+          {
+            key: 'Shift-Alt-f',
+            run: (v) => { formatDoc(v); return true },
           },
         ]),
         EditorView.updateListener.of((update) => {

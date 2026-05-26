@@ -1031,7 +1031,11 @@ function defineAgentTools(qs: AuraQueryService, projectPath: string, managedShel
         }
 
         try {
+          let previousContent: string | null = null
           const exists = await fs.access(fullPath).then(() => true).catch(() => false)
+          if (exists) {
+            previousContent = await fs.readFile(fullPath, 'utf-8')
+          }
           await fs.mkdir(path.dirname(fullPath), { recursive: true })
           await fs.writeFile(fullPath, content, 'utf-8')
 
@@ -1041,6 +1045,7 @@ function defineAgentTools(qs: AuraQueryService, projectPath: string, managedShel
             linesWritten,
             created: !exists,
             applied: true,
+            previousContent,
           }
         } catch (err) {
           return { error: `Could not write file "${filePath}": ${err instanceof Error ? err.message : String(err)}` }
@@ -1117,6 +1122,7 @@ function defineAgentTools(qs: AuraQueryService, projectPath: string, managedShel
             filePath,
             replacements,
             applied: true,
+            previousContent: content,
           }
         } catch (err) {
           if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
