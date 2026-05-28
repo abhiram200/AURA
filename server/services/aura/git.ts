@@ -20,6 +20,15 @@ export async function isGitRepository(projectPath: string): Promise<boolean> {
   }
 }
 
+export async function getGitHead(projectPath: string): Promise<string | null> {
+  try {
+    const result = await execGit(['rev-parse', 'HEAD'], projectPath)
+    return result.trim() || null
+  } catch {
+    return null
+  }
+}
+
 export async function getCurrentBranch(projectPath: string): Promise<string | null> {
   try {
     const result = await execGit(['rev-parse', '--abbrev-ref', 'HEAD'], projectPath)

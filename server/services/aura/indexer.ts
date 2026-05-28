@@ -20,6 +20,7 @@ import type {
   FileHashEntry,
 } from './types.ts'
 import { computeProgress } from './types.ts'
+import { getGitHead } from './git.ts'
 import { BM25SearchEngine } from './search/bm25.ts'
 import { EmbeddingService } from './search/embedding.ts'
 import { ContextGenerator } from './context-generator.ts'
@@ -318,7 +319,7 @@ export class AuraIndexer {
     const graphPath = path.join(auraDir, 'graph.json')
     await fs.writeFile(graphPath, JSON.stringify(this.graph, null, 2), 'utf-8')
 
-    const lastCommit = await this.getGitHead()
+    const lastCommit = await getGitHead(this.projectPath)
     const meta: AuraMeta = {
       indexedAt: new Date().toISOString(),
       lastCommit,
@@ -937,15 +938,6 @@ export class AuraIndexer {
     return Array.from(folders)
   }
 
-  private async getGitHead(): Promise<string | null> {
-    try {
-      const headPath = path.join(this.projectPath, '.git', 'HEAD')
-      const content = await fs.readFile(headPath, 'utf-8')
-      return content.trim()
-    } catch {
-      return null
-    }
-  }
 
   private async ensureGitignore(): Promise<void> {
     const gitignorePath = path.join(this.projectPath, '.gitignore')

@@ -901,7 +901,7 @@ export function useAura(projectId: string | null) {
     }
   }, [projectId])
 
-  // ── Auto-load on projectId change (always re-index on project open) ──────
+  // ── Auto-load on projectId change (smart: only re-index if changes detected) ──
 
   useEffect(() => {
     if (!projectId) {
@@ -960,7 +960,27 @@ export function useAura(projectId: string | null) {
           }
         }
 
-        // Always re-index on project open
+        // Smart re-index: check if changes exist before re-indexing
+        const needsRes = await fetch(`/api/aura/needs-reindex/${projectId}`)
+        if (cancelled) return
+
+        if (needsRes.ok) {
+          const needsData = await needsRes.json()
+          if (!needsData.needsReindex) {
+            // No changes — just load the existing graph
+            const graphRes = await fetch(`/api/aura/graph/${projectId}`)
+            if (cancelled) return
+            if (graphRes.ok) {
+              const graph: AuraGraphData = await graphRes.json()
+              setGraphData(graph)
+              setIndexingStatus({ phase: 'complete', progress: 100, filesProcessed: 0, totalFiles: 0, nodesFound: 0, edgesFound: 0, message: 'Loaded from cache' })
+            }
+            setLoading(false)
+            return
+          }
+        }
+
+        // Changes detected or first time — full re-index
         await startIndexing(projectId!)
       } catch (err) {
         if (!cancelled) {

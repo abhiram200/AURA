@@ -53,11 +53,25 @@ export function AssistantPage({ projectId, projectName, workspacePath: _workspac
   handleShellEventRef.current = managedShells.handleShellEvent
 
 
+  const smartReindex = () => {
+    fetch(`/api/aura/needs-reindex/${projectId}`)
+      .then(res => res.ok ? res.json() : { needsReindex: true })
+      .then(data => {
+        if (data.needsReindex) {
+          aura.startIndexing(projectId)
+        }
+      })
+      .catch(() => {
+        // On error, re-index anyway
+        aura.startIndexing(projectId)
+      })
+  }
+
   const handleNewChat = () => {
     const skip = localStorage.getItem(SKIP_KEY(projectId)) === 'true'
     if (skip || aura.chatMessages.length === 0) {
       aura.startNewChat()
-      aura.startIndexing(projectId)
+      smartReindex()
       setFocusTrigger(t => t + 1)
     } else {
       setShowConfirm(true)
@@ -69,7 +83,7 @@ export function AssistantPage({ projectId, projectName, workspacePath: _workspac
       localStorage.setItem(SKIP_KEY(projectId), 'true')
     }
     aura.startNewChat()
-    aura.startIndexing(projectId)
+    smartReindex()
     setFocusTrigger(t => t + 1)
     setShowConfirm(false)
   }

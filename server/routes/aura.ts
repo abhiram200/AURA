@@ -9,7 +9,7 @@ import type { Settings } from '../storage/types.ts'
 // Lazy-imported services — instantiated per project on demand
 import { AuraIndexer } from '../services/aura/indexer.ts'
 import { AuraQueryService } from '../services/aura/graph.ts'
-import { isGitRepository, getGitDiff } from '../services/aura/git.ts'
+import { isGitRepository, getGitDiff, getGitHead } from '../services/aura/git.ts'
 import { syncContracts, loadContracts } from '../services/aura/contract-registry.ts'
 import { GroupQueryService } from '../services/aura/group-query.ts'
 import { installSkills, listAvailableSkills } from '../services/skill-installer.ts'
@@ -103,6 +103,65 @@ export function createAuraRouter(
       })
 
     res.json({ status: 'started', projectId })
+  })
+
+  // GET /api/aura/needs-reindex/:projectId — Check if re-indexing is needed
+  router.get('/needs-reindex/:projectId', async (req, res) => {
+    const { projectId } = req.params
+    const project = await projectService.get(projectId)
+    if (!project) {
+      res.status(404).json({ error: 'Project not found' })
+      return
+    }
+
+    // If server has no in-memory index for this project, always re-index
+    const qs = queryMap.get(projectId)
+    if (!qs || !qs.isLoaded()) {
+      res.json({ needsReindex: true, reason: 'not_in_memory' })
+      return
+    }
+
+    const auraDir = path.join(project.workspacePath, '.aura')
+    const metaPath = path.join(auraDir, 'meta.json')
+    const graphPath = path.join(auraDir, 'graph.json')
+
+    try {
+      // If graph file doesn't exist on disk, need to index
+      try {
+        await fs.access(graphPath)
+      } catch {
+        res.json({ needsReindex: true, reason: 'no_graph' })
+        return
+      }
+
+      // Load saved meta to get lastCommit
+      let lastCommit: string | null = null
+      try {
+        const metaContent = await fs.readFile(metaPath, 'utf-8')
+        const meta = JSON.parse(metaContent)
+        lastCommit = meta.lastCommit || null
+      } catch {
+        res.json({ needsReindex: true, reason: 'no_meta' })
+        return
+      }
+
+      // If no lastCommit saved, need to index
+      if (!lastCommit) {
+        res.json({ needsReindex: true, reason: 'no_commit_record' })
+        return
+      }
+
+      // Compare with current git HEAD — only re-index if commits changed
+      const currentHead = await getGitHead(project.workspacePath)
+      if (currentHead !== lastCommit) {
+        res.json({ needsReindex: true, reason: 'commit_changed', lastCommit, currentHead })
+        return
+      }
+
+      res.json({ needsReindex: false })
+    } catch (err) {
+      res.json({ needsReindex: true, reason: 'error' })
+    }
   })
 
   // GET /api/aura/status/:projectId — Indexing progress
