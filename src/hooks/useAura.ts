@@ -488,6 +488,7 @@ export function useAura(projectId: string | null) {
   const lastActivityRef = useRef(Date.now())
   const gitHeadRef = useRef<string | null>(null)
   const idleTimerRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const pendingGitCommitRef = useRef<Set<string>>(new Set()) // tool_call_ids of git commit attempts
 
   // ── Helpers ──────────────────────────────────────────────────────────────
 
@@ -1209,6 +1210,15 @@ export function useAura(projectId: string | null) {
                   if (editTools.includes(data.name)) {
                     reportActivity('edit')
                   }
+                  // Track git commit attempts to trigger re-index on success
+                  if (data.name === 'git') {
+                    const gitArgs = typeof (data.args as Record<string, unknown>)?.args === 'string'
+                      ? (data.args as Record<string, unknown>).args as string
+                      : ''
+                    if (gitArgs.split(/\s+/)[0] === 'commit') {
+                      pendingGitCommitRef.current.add(data.tool_call_id || `${data.name}_${eventOrder}`)
+                    }
+                  }
                   msg.toolCalls = [...(msg.toolCalls || []), newTc]
                   msg.content = '' // Reset content — text before this tool is now in segments
                   segments.push({ type: 'tool_call', toolCall: newTc, order: newTc.order! })
@@ -1236,11 +1246,11 @@ export function useAura(projectId: string | null) {
                       segMatchFn(s) ? { ...s, toolCall: updatedTc } : s
                     )
                   }
-                  // Detect git commit — trigger immediate re-index
-                  if (data.name === 'git') {
-                    const cmd = typeof data.args?.command === 'string' ? data.args.command : ''
-                    const resultStr = typeof data.result === 'string' ? data.result : JSON.stringify(data.result ?? '')
-                    if (cmd.includes('commit') || resultStr.includes('commit')) {
+                  // Detect successful git commit — trigger immediate re-index
+                  if (data.name === 'git' && tcId && pendingGitCommitRef.current.has(tcId)) {
+                    pendingGitCommitRef.current.delete(tcId)
+                    const result = data.result as Record<string, unknown> | undefined
+                    if (!data.error && result?.exitCode === 0) {
                       if (projectId) {
                         startIndexing(projectId)
                       }
