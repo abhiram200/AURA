@@ -20,7 +20,6 @@ import { createSettingsRouter } from './routes/settings.ts'
 import { createAuraRouter } from './routes/aura.ts'
 import { AuraIndexer } from './services/aura/indexer.ts'
 import { AuraQueryService } from './services/aura/graph.ts'
-import { AuraWatcherManager } from './services/aura/watcher-manager.ts'
 import { WorkspaceService } from './services/workspace.ts'
 import { TerminalService } from './services/terminal.ts'
 import { ManagedShellService } from './services/managedShell.ts'
@@ -87,7 +86,6 @@ async function start() {
   const managedShellService = new ManagedShellService(projectService)
   const auraIndexers = new Map<string, AuraIndexer>()
   const auraQueries = new Map<string, AuraQueryService>()
-  const auraWatcherManager = new AuraWatcherManager()
   await skillsService.init()
   await projectService.init()
 
@@ -99,7 +97,7 @@ async function start() {
   app.use('/api/projects', createProjectsRouter(projectService, ollama, store))
   app.use('/api/workspace', createWorkspaceRouter(workspaceService))
   app.use('/api/settings', createSettingsRouter(store))
-  app.use('/api/aura', createAuraRouter(projectService, auraIndexers, auraQueries, auraWatcherManager, groupService, DATA_DIR, store, managedShellService))
+  app.use('/api/aura', createAuraRouter(projectService, auraIndexers, auraQueries, groupService, DATA_DIR, store, managedShellService))
   app.use('/api/managed-shells', createManagedShellRouter(managedShellService))
 
   app.get('/api/health', async (_req, res) => {

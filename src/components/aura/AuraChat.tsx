@@ -189,6 +189,7 @@ interface AuraChatProps {
   liveShells?: Map<string, ManagedShellState>
   isActive?: boolean
   focusTrigger?: number
+  onActivity?: (type: 'edit' | 'interaction') => void
 }
 
 function StatusDot({ status }: { status: 'running' | 'completed' | 'error' }) {
@@ -710,6 +711,19 @@ const ChatMessage = memo(function ChatMessage({ msg, onViewShell, liveShells }: 
   if (prev.msg.content !== next.msg.content) return false
   if (prev.msg.role !== next.msg.role) return false
   if (prev.onViewShell !== next.onViewShell) return false
+  // Compare segments
+  const prevSegs = prev.msg.segments
+  const nextSegs = next.msg.segments
+  if (prevSegs?.length !== nextSegs?.length) return false
+  if (prevSegs && nextSegs) {
+    for (let i = 0; i < prevSegs.length; i++) {
+      if (prevSegs[i].type !== nextSegs[i].type) return false
+      if (prevSegs[i].content !== nextSegs[i].content) return false
+      if (prevSegs[i].toolCall?.status !== nextSegs[i].toolCall?.status) return false
+      if (prevSegs[i].toolCall?.result !== nextSegs[i].toolCall?.result) return false
+      if (prevSegs[i].subAgent?.status !== nextSegs[i].subAgent?.status) return false
+    }
+  }
   // Deep compare toolCalls, subAgents, todos, shells
   const prevTc = prev.msg.toolCalls
   const nextTc = next.msg.toolCalls
@@ -839,7 +853,7 @@ function ApprovalCard({ request, onRespond }: { request: AuraApprovalRequest; on
   return null
 }
 
-export default function AuraChat({ messages, isStreaming, error, onAsk, onClearError, pendingApproval, onRespondToApproval, onViewShell, liveShells, isActive, focusTrigger }: AuraChatProps) {
+export default function AuraChat({ messages, isStreaming, error, onAsk, onClearError, pendingApproval, onRespondToApproval, onViewShell, liveShells, isActive, focusTrigger, onActivity }: AuraChatProps) {
   const [input, setInput] = useState('')
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const messagesContainerRef = useRef<HTMLDivElement>(null)
@@ -902,6 +916,7 @@ export default function AuraChat({ messages, isStreaming, error, onAsk, onClearE
     if (!trimmed || isStreaming) return
     stickToBottomRef.current = true
     onAsk(trimmed)
+    onActivity?.('interaction')
     setInput('')
     if (inputRef.current) {
       inputRef.current.style.height = 'auto'
@@ -918,10 +933,11 @@ export default function AuraChat({ messages, isStreaming, error, onAsk, onClearE
 
   const handleTextareaChange = useCallback((e: React.ChangeEvent<HTMLTextAreaElement>) => {
     setInput(e.target.value)
+    onActivity?.('interaction')
     const el = e.target
     el.style.height = 'auto'
     el.style.height = el.scrollHeight + 'px'
-  }, [])
+  }, [onActivity])
 
   return (
     <div className="aura-chat">

@@ -151,7 +151,7 @@ export function ProjectModeBuilderPage() {
     },
   ]
 
-  const tabProps = { projectId: projectId!, projectName, workspacePath, conversationId }
+  const tabProps = { projectId: projectId!, projectName, workspacePath, conversationId, reportActivity: aura.reportActivity }
 
   return (
     <div className="builder-page">

@@ -13,11 +13,12 @@ interface AssistantPageProps {
   workspacePath: string
   conversationId: string | null
   aura: ReturnType<typeof useAura>
+  reportActivity?: (type: 'edit' | 'interaction') => void
 }
 
 const SKIP_KEY = (pid: string) => `aura-skip-new-chat-confirm:${pid}`
 
-export function AssistantPage({ projectId, projectName, workspacePath: _workspacePath, conversationId: _conversationId, aura, isActive }: AssistantPageProps & { isActive?: boolean }) {
+export function AssistantPage({ projectId, projectName, workspacePath: _workspacePath, conversationId: _conversationId, aura, isActive, reportActivity }: AssistantPageProps & { isActive?: boolean }) {
   const { theme } = useTheme()
   const isLight = theme === 'light'
   const [showConfirm, setShowConfirm] = useState(false)
@@ -56,6 +57,7 @@ export function AssistantPage({ projectId, projectName, workspacePath: _workspac
     const skip = localStorage.getItem(SKIP_KEY(projectId)) === 'true'
     if (skip || aura.chatMessages.length === 0) {
       aura.startNewChat()
+      aura.startIndexing(projectId)
       setFocusTrigger(t => t + 1)
     } else {
       setShowConfirm(true)
@@ -67,6 +69,7 @@ export function AssistantPage({ projectId, projectName, workspacePath: _workspac
       localStorage.setItem(SKIP_KEY(projectId), 'true')
     }
     aura.startNewChat()
+    aura.startIndexing(projectId)
     setFocusTrigger(t => t + 1)
     setShowConfirm(false)
   }
@@ -134,6 +137,7 @@ export function AssistantPage({ projectId, projectName, workspacePath: _workspac
         liveShells={managedShells.shells}
         isActive={isActive}
         focusTrigger={focusTrigger}
+        onActivity={reportActivity}
       />
       {managedShells.viewingShell && (() => {
         const shell = managedShells.shells.get(managedShells.viewingShell)

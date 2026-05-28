@@ -29,6 +29,7 @@ interface AuraPageProps {
   search: (query: string, options?: { limit?: number; kinds?: string[] }) => void
   selectNode: (node: AuraNodeData | null) => void
   isLightMode?: boolean
+  reportActivity?: (type: 'edit' | 'interaction') => void
 }
 
 // ── Component ───────────────────────────────────────────────────────────────────
@@ -48,6 +49,7 @@ export function AuraPage({
   search,
   selectNode,
   isLightMode = false,
+  reportActivity,
 }: AuraPageProps) {
   const [nodeFilters, setNodeFilters] = useState<Set<string>>(new Set(ALL_NODE_KINDS))
   const [edgeFilters, setEdgeFilters] = useState<Set<string>>(new Set(ALL_EDGE_TYPES))
@@ -71,7 +73,8 @@ export function AuraPage({
 
   const handleSearch = useCallback((query: string, options?: { limit?: number; kinds?: string[] }) => {
     search(query, options)
-  }, [search])
+    reportActivity?.('interaction')
+  }, [search, reportActivity])
 
   const handleSearchResultClick = useCallback((node: AuraNodeData) => {
     selectNode(node)

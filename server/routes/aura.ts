@@ -9,7 +9,6 @@ import type { Settings } from '../storage/types.ts'
 // Lazy-imported services — instantiated per project on demand
 import { AuraIndexer } from '../services/aura/indexer.ts'
 import { AuraQueryService } from '../services/aura/graph.ts'
-import { AuraWatcherManager } from '../services/aura/watcher-manager.ts'
 import { isGitRepository, getGitDiff } from '../services/aura/git.ts'
 import { syncContracts, loadContracts } from '../services/aura/contract-registry.ts'
 import { GroupQueryService } from '../services/aura/group-query.ts'
@@ -46,7 +45,6 @@ export function createAuraRouter(
   projectService: ProjectService,
   indexerMap: Map<string, AuraIndexer>,
   queryMap: Map<string, AuraQueryService>,
-  watcherManager: AuraWatcherManager,
   groupService: GroupService,
   dataDir: string,
   store: FileStore,
@@ -97,9 +95,8 @@ export function createAuraRouter(
         const { bm25, embedding } = indexer.getSearchEngines()
         qs.setSearchEngines(bm25, embedding)
 
-        // Transition to watching phase and start file watcher
+        // Transition to complete phase
         indexer.setWatching()
-        await watcherManager.startWatching(projectId, project.workspacePath, indexer, qs)
       })
       .catch((err) => {
         console.error(`AURA indexing failed for ${projectId}:`, err)
@@ -215,48 +212,6 @@ export function createAuraRouter(
     }
   })
 
-  // POST /api/aura/incremental-index/:projectId — Trigger incremental indexing
-  router.post('/incremental-index/:projectId', async (req, res) => {
-    const { projectId } = req.params
-    const { files } = req.body as { files?: string[] }
-    const config = await getAuraConfig()
-
-    const project = await projectService.get(projectId)
-    if (!project) {
-      res.status(404).json({ error: 'Project not found' })
-      return
-    }
-
-    let indexer = indexerMap.get(projectId)
-    if (!indexer) {
-      indexer = new AuraIndexer(project.workspacePath, config)
-      indexerMap.set(projectId, indexer)
-    }
-
-    // Start incremental indexing in background
-    indexer.incrementalIndex(files)
-      .then(async () => {
-        let qs = queryMap.get(projectId)
-        if (!qs) {
-          qs = new AuraQueryService(project.workspacePath, config)
-          queryMap.set(projectId, qs)
-        }
-        await qs.load()
-
-        // Push search engines to query service
-        const { bm25, embedding } = indexer.getSearchEngines()
-        qs.setSearchEngines(bm25, embedding)
-
-        // Return to watching phase
-        indexer.setWatching()
-      })
-      .catch((err) => {
-        console.error(`AURA incremental indexing failed for ${projectId}:`, err)
-      })
-
-    res.json({ status: 'started', projectId })
-  })
-
   // POST /api/aura/detect-changes/:projectId — Detect changes from git diff
   router.post('/detect-changes/:projectId', async (req, res) => {
     const { projectId } = req.params
@@ -335,27 +290,6 @@ export function createAuraRouter(
 
     const result = await qs.rename(resolvedId, newName, shouldDryRun)
     res.json(result)
-
-    // Trigger re-index if not a dry run
-    if (!shouldDryRun && result.edits.length > 0) {
-      const changedFiles = [...new Set(result.edits.map(e => e.filePath))]
-      let indexer = indexerMap.get(projectId)
-      if (!indexer) {
-        indexer = new AuraIndexer(project.workspacePath, config)
-        indexerMap.set(projectId, indexer)
-      }
-      indexer.incrementalIndex(changedFiles)
-        .then(async () => {
-          await qs.load()
-          const { bm25, embedding } = indexer.getSearchEngines()
-          qs.setSearchEngines(bm25, embedding)
-          indexer.setWatching()
-          await watcherManager.startWatching(projectId, project.workspacePath, indexer, qs)
-        })
-        .catch((err) => {
-          console.error(`AURA re-index after rename failed for ${projectId}:`, err)
-        })
-    }
   })
 
   // POST /api/aura/route-map/:projectId — Get all routes and API calls

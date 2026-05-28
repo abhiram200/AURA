@@ -219,6 +219,18 @@ export class WorkspaceService {
     }
   }
 
+  async getGitHead(projectId: string): Promise<string | null> {
+    const root = await this.getWorkspaceRoot(projectId)
+    if (!root) return null
+
+    try {
+      const { stdout } = await execFileAsync('git', ['rev-parse', 'HEAD'], { cwd: root })
+      return stdout.trim() || null
+    } catch {
+      return null
+    }
+  }
+
   async getGitStatus(projectId: string): Promise<Record<string, string>> {
     const root = await this.getWorkspaceRoot(projectId)
     if (!root) throw new Error('Project not found')

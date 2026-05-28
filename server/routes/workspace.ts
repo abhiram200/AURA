@@ -210,5 +210,15 @@ export function createWorkspaceRouter(workspaceService: WorkspaceService) {
     }
   })
 
+  // GET /:id/git-head - Get current HEAD commit hash (for detecting commits)
+  router.get('/:id/git-head', async (req, res) => {
+    try {
+      const head = await workspaceService.getGitHead(req.params.id)
+      res.json({ head })
+    } catch {
+      res.json({ head: null })
+    }
+  })
+
   return router
 }

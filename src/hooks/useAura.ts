@@ -484,10 +484,10 @@ export function useAura(projectId: string | null) {
   activeChatIdRef.current = activeChatId
 
   const pollIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
-  const watchPollRef = useRef<ReturnType<typeof setInterval> | null>(null)
-  const startWatchPollingRef = useRef<(pid: string) => void>(() => {})
-  const startFastPollingRef = useRef<(pid: string) => void>(() => {})
-  const lastGraphCountsRef = useRef<{ nodes: number; edges: number }>({ nodes: 0, edges: 0 })
+  const editsSinceLastIndexRef = useRef(false)
+  const lastActivityRef = useRef(Date.now())
+  const gitHeadRef = useRef<string | null>(null)
+  const idleTimerRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
   // ── Helpers ──────────────────────────────────────────────────────────────
 
@@ -495,10 +495,6 @@ export function useAura(projectId: string | null) {
     if (pollIntervalRef.current !== null) {
       clearInterval(pollIntervalRef.current)
       pollIntervalRef.current = null
-    }
-    if (watchPollRef.current !== null) {
-      clearInterval(watchPollRef.current)
-      watchPollRef.current = null
     }
   }, [])
 
@@ -512,6 +508,17 @@ export function useAura(projectId: string | null) {
     setLoading(false)
     setError(null)
   }, [])
+
+  // ── Activity Tracking & Idle Re-index ─────────────────────────────────────
+
+  const reportActivity = useCallback((type: 'edit' | 'interaction' = 'interaction') => {
+    lastActivityRef.current = Date.now()
+    if (type === 'edit') {
+      editsSinceLastIndexRef.current = true
+    }
+  }, [])
+
+  // ── Chat Persistence ─────────────────────────────────────────────────────────
 
   // ── Chat Persistence ─────────────────────────────────────────────────────────
 
@@ -569,87 +576,22 @@ export function useAura(projectId: string | null) {
     }
   }, [])
 
-  // ── Watch Polling (5s slow-poll during watching phase) ────────────────────
-
-  const startWatchPolling = useCallback((pid: string) => {
-    clearAllPolling()
-    watchPollRef.current = setInterval(() => {
-      void (async () => {
-        try {
-          const statusRes = await fetch(`/api/aura/status/${pid}`)
-          if (!statusRes.ok) return
-          const status: AuraIndexingStatus = await statusRes.json()
-          setIndexingStatus(status)
-
-          if (status.phase === 'watching') {
-            // Check if graph data changed by comparing counts with ref
-            const last = lastGraphCountsRef.current
-            if (last.nodes !== status.nodesFound || last.edges !== status.edgesFound) {
-              const graphRes = await fetch(`/api/aura/graph/${pid}`)
-              if (graphRes.ok) {
-                const graph: AuraGraphData = await graphRes.json()
-                setGraphData(graph)
-                lastGraphCountsRef.current = { nodes: graph.nodes.length, edges: graph.edges.length }
-              }
-            }
-          } else if (status.phase === 'error') {
-            clearAllPolling()
-            setError(status.error || 'Re-indexing failed')
-          } else {
-            // Transitioned to a re-indexing phase — switch to fast polling
-            clearAllPolling()
-            startFastPollingRef.current(pid)
-          }
-        } catch {
-          // skip
-        }
-      })()
-    }, 5000)
-  }, [clearAllPolling])
-
-  // ── Fast Polling (1s during re-indexing) ──────────────────────────────────
-
-  const startFastPolling = useCallback((pid: string) => {
-    clearAllPolling()
-    setLoading(true)
-    pollIntervalRef.current = setInterval(() => {
-      void (async () => {
-        try {
-          const statusRes = await fetch(`/api/aura/status/${pid}`)
-          if (!statusRes.ok) return
-          const status: AuraIndexingStatus = await statusRes.json()
-          setIndexingStatus(status)
-
-          if (status.phase === 'complete' || status.phase === 'watching') {
-            clearAllPolling()
-            const graphRes = await fetch(`/api/aura/graph/${pid}`)
-            if (graphRes.ok) {
-              const graph: AuraGraphData = await graphRes.json()
-              setGraphData(graph)
-              lastGraphCountsRef.current = { nodes: graph.nodes.length, edges: graph.edges.length }
-            }
-            setLoading(false)
-            startWatchPollingRef.current(pid)
-          } else if (status.phase === 'error') {
-            clearAllPolling()
-            setError(status.error || 'Indexing failed')
-            setLoading(false)
-          }
-        } catch {
-          // skip
-        }
-      })()
-    }, 1000)
-  }, [clearAllPolling])
-
-  startWatchPollingRef.current = startWatchPolling
-  startFastPollingRef.current = startFastPolling
-
   // ── Indexing ─────────────────────────────────────────────────────────────
 
   const startIndexing = useCallback(async (pid: string) => {
     setLoading(true)
     setError(null)
+    editsSinceLastIndexRef.current = false
+    // Refresh git HEAD after re-index
+    ;(async () => {
+      try {
+        const res = await fetch(`/api/workspace/${pid}/git-head`)
+        if (res.ok) {
+          const data = await res.json()
+          gitHeadRef.current = data.head
+        }
+      } catch { /* ignore */ }
+    })()
     try {
       const res = await fetch(`/api/aura/index/${pid}`, { method: 'POST' })
       if (!res.ok) {
@@ -673,11 +615,8 @@ export function useAura(projectId: string | null) {
               if (graphRes.ok) {
                 const graph: AuraGraphData = await graphRes.json()
                 setGraphData(graph)
-                lastGraphCountsRef.current = { nodes: graph.nodes.length, edges: graph.edges.length }
               }
               setLoading(false)
-              // Transition to watch-polling for live updates
-              startWatchPolling(pid)
             } else if (status.phase === 'error') {
               clearAllPolling()
               setError(status.error || 'Indexing failed')
@@ -692,7 +631,7 @@ export function useAura(projectId: string | null) {
       setError(err instanceof Error ? err.message : 'Failed to start indexing')
       setLoading(false)
     }
-  }, [clearAllPolling, startWatchPolling])
+  }, [clearAllPolling])
 
   // ── Search ───────────────────────────────────────────────────────────────
 
@@ -962,7 +901,7 @@ export function useAura(projectId: string | null) {
     }
   }, [projectId])
 
-  // ── Auto-load on projectId change ───────────────────────────────────────
+  // ── Auto-load on projectId change (always re-index on project open) ──────
 
   useEffect(() => {
     if (!projectId) {
@@ -978,31 +917,7 @@ export function useAura(projectId: string | null) {
       setError(null)
 
       try {
-        // Try to fetch existing graph first
-        const graphRes = await fetch(`/api/aura/graph/${projectId}`)
-        if (cancelled) return
-
-        if (graphRes.ok) {
-          const graph: AuraGraphData = await graphRes.json()
-          if (cancelled) return
-          setGraphData(graph)
-          lastGraphCountsRef.current = { nodes: graph.nodes.length, edges: graph.edges.length }
-
-          // Check if project is being watched — start watch-polling if so
-          const statusRes = await fetch(`/api/aura/status/${projectId}`)
-          if (!cancelled && statusRes.ok) {
-            const status: AuraIndexingStatus = await statusRes.json()
-            setIndexingStatus(status)
-            if (status.phase === 'watching') {
-              startWatchPolling(projectId!)
-            }
-          }
-
-          setLoading(false)
-          return
-        }
-
-        // No existing graph — check status
+        // Check if already indexing
         const statusRes = await fetch(`/api/aura/status/${projectId}`)
         if (cancelled) return
 
@@ -1011,23 +926,9 @@ export function useAura(projectId: string | null) {
           if (cancelled) return
           setIndexingStatus(status)
 
-          if (status.phase === 'complete' || status.phase === 'watching') {
-            // Graph should exist but didn't — retry fetch
-            const retryRes = await fetch(`/api/aura/graph/${projectId}`)
-            if (retryRes.ok) {
-              const graph: AuraGraphData = await retryRes.json()
-              setGraphData(graph)
-              lastGraphCountsRef.current = { nodes: graph.nodes.length, edges: graph.edges.length }
-            }
-            setLoading(false)
-            startWatchPolling(projectId!)
-            return
-          }
-
-          const activePhases = ['indexing', 'processing', 'scanning', 'parsing', 'resolving', 'typeResolving', 'aggregating', 'saving']
+          const activePhases = ['indexing', 'processing', 'scanning', 'parsing', 'resolving', 'typeResolving', 'aggregating', 'saving', 'apiAnalysis', 'processTracing', 'searchIndexing']
           if (activePhases.includes(status.phase)) {
-            // Already indexing — start fast polling
-            setLoading(true)
+            // Already indexing — start polling until done
             clearAllPolling()
             pollIntervalRef.current = setInterval(() => {
               void (async () => {
@@ -1043,10 +944,8 @@ export function useAura(projectId: string | null) {
                     if (gRes.ok) {
                       const g: AuraGraphData = await gRes.json()
                       setGraphData(g)
-                      lastGraphCountsRef.current = { nodes: g.nodes.length, edges: g.edges.length }
                     }
                     setLoading(false)
-                    startWatchPolling(projectId!)
                   } else if (pollStatus.phase === 'error') {
                     clearAllPolling()
                     setError(pollStatus.error || 'Indexing failed')
@@ -1059,13 +958,10 @@ export function useAura(projectId: string | null) {
             }, 1000)
             return
           }
-
-          // Phase is idle or similar — start indexing
-          await startIndexing(projectId!)
-        } else {
-          // No status endpoint either — start indexing fresh
-          await startIndexing(projectId!)
         }
+
+        // Always re-index on project open
+        await startIndexing(projectId!)
       } catch (err) {
         if (!cancelled) {
           setError(err instanceof Error ? err.message : 'Failed to load AURA data')
@@ -1080,13 +976,73 @@ export function useAura(projectId: string | null) {
       cancelled = true
       clearAllPolling()
     }
-  }, [projectId, clearAllPolling, resetState, startIndexing, startWatchPolling])
+  }, [projectId, clearAllPolling, resetState, startIndexing])
+
+  // ── Idle Re-index Timer (5 min) ────────────────────────────────────────────
+
+  useEffect(() => {
+    if (!projectId) return
+
+    // Capture initial git HEAD for change detection
+    let cancelled = false
+    ;(async () => {
+      try {
+        const res = await fetch(`/api/workspace/${projectId}/git-head`)
+        if (res.ok && !cancelled) {
+          const data = await res.json()
+          gitHeadRef.current = data.head
+        }
+      } catch { /* ignore */ }
+    })()
+
+    // Check every 30s: if idle for 5+ min and edits since last index, re-index
+    const IDLE_MS = 5 * 60 * 1000
+    const CHECK_MS = 30 * 1000
+
+    idleTimerRef.current = setInterval(() => {
+      if (!projectId) return
+      const idle = Date.now() - lastActivityRef.current
+      if (idle < IDLE_MS) return
+
+      // Check git HEAD change (catches manual terminal commits)
+      ;(async () => {
+        let gitChanged = false
+        try {
+          const res = await fetch(`/api/workspace/${projectId}/git-head`)
+          if (res.ok) {
+            const data = await res.json()
+            if (gitHeadRef.current && data.head !== gitHeadRef.current) {
+              gitChanged = true
+            }
+            gitHeadRef.current = data.head
+          }
+        } catch { /* ignore */ }
+
+        if (editsSinceLastIndexRef.current || gitChanged) {
+          editsSinceLastIndexRef.current = false
+          startIndexing(projectId)
+        }
+      })()
+    }, CHECK_MS)
+
+    return () => {
+      cancelled = true
+      if (idleTimerRef.current !== null) {
+        clearInterval(idleTimerRef.current)
+        idleTimerRef.current = null
+      }
+    }
+  }, [projectId, startIndexing])
 
   // ── Cleanup on unmount ───────────────────────────────────────────────────
 
   useEffect(() => {
     return () => {
       clearAllPolling()
+      if (idleTimerRef.current !== null) {
+        clearInterval(idleTimerRef.current)
+        idleTimerRef.current = null
+      }
     }
   }, [clearAllPolling])
 
@@ -1228,24 +1184,48 @@ export function useAura(projectId: string | null) {
                     status: 'running' as const,
                     order: eventOrder++,
                   }
+                  // Track edit activity from file-modifying tools
+                  const editTools = ['write', 'update', 'execute', 'git']
+                  if (editTools.includes(data.name)) {
+                    reportActivity('edit')
+                  }
                   msg.toolCalls = [...(msg.toolCalls || []), newTc]
                   msg.content = '' // Reset content — text before this tool is now in segments
                   segments.push({ type: 'tool_call', toolCall: newTc, order: newTc.order! })
                   msg.segments = [...segments]
                 } else if (eventType === 'tool_result') {
-                  msg.toolCalls = (msg.toolCalls || []).map((tc: AuraToolCall) => {
-                    const tcId = data.tool_call_id
-                    if (tcId ? tc.toolCallId === tcId : (tc.name === data.name && tc.status === 'running')) {
-                      const updated = { ...tc, result: data.result, error: data.error, status: data.error ? 'error' as const : 'completed' as const }
-                      // Update segment too
-                      const segments = msg.segments || []
-                      msg.segments = segments.map(s =>
-                        s.type === 'tool_call' && s.toolCall?.toolCallId === tcId ? { ...s, toolCall: updated } : s
-                      )
-                      return updated
+                  const tcId = data.tool_call_id
+                  const matchedName = data.name as string | undefined
+                  // Match by ID (preferred) or by name+status (fallback)
+                  const matchRunningFn = (tc: AuraToolCall) =>
+                    tcId ? tc.toolCallId === tcId : (matchedName != null && tc.name === matchedName && tc.status === 'running')
+                  const matchAnyFn = (tc: AuraToolCall) =>
+                    tcId ? tc.toolCallId === tcId : (matchedName != null && tc.name === matchedName)
+
+                  const updatedToolCalls = (msg.toolCalls || []).map((tc: AuraToolCall) =>
+                    matchRunningFn(tc) ? { ...tc, result: data.result, error: data.error, status: data.error ? 'error' as const : 'completed' as const } : tc
+                  )
+                  msg.toolCalls = updatedToolCalls
+
+                  // Find the updated tool call to also update segments
+                  const updatedTc = updatedToolCalls.find(matchAnyFn)
+                  if (updatedTc) {
+                    const segMatchFn = (s: MessageSegment) =>
+                      s.type === 'tool_call' && s.toolCall != null && matchAnyFn(s.toolCall)
+                    msg.segments = (msg.segments || []).map(s =>
+                      segMatchFn(s) ? { ...s, toolCall: updatedTc } : s
+                    )
+                  }
+                  // Detect git commit — trigger immediate re-index
+                  if (data.name === 'git') {
+                    const cmd = typeof data.args?.command === 'string' ? data.args.command : ''
+                    const resultStr = typeof data.result === 'string' ? data.result : JSON.stringify(data.result ?? '')
+                    if (cmd.includes('commit') || resultStr.includes('commit')) {
+                      if (projectId) {
+                        startIndexing(projectId)
+                      }
                     }
-                    return tc
-                  })
+                  }
                 } else if (eventType === 'sub_agent_start') {
                   const newSa: AuraSubAgentInfo = {
                     taskId: data.taskId,
@@ -1446,6 +1426,7 @@ export function useAura(projectId: string | null) {
     pendingApproval,
     respondToApproval,
     offline,
+    reportActivity,
   }
 }
 

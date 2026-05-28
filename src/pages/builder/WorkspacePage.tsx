@@ -19,9 +19,10 @@ interface WorkspacePageProps {
   conversationId: string | null
   pendingFileOpen?: { path: string; startLine?: number } | null
   onFileOpened?: () => void
+  reportActivity?: (type: 'edit' | 'interaction') => void
 }
 
-export function WorkspacePage({ projectId, projectName, workspacePath, pendingFileOpen, onFileOpened }: WorkspacePageProps) {
+export function WorkspacePage({ projectId, projectName, workspacePath, pendingFileOpen, onFileOpened, reportActivity }: WorkspacePageProps) {
   const ws = useWorkspace(projectId)
   const { settings, updateSettings } = useSettings()
   const { theme } = useTheme()
@@ -46,7 +47,10 @@ export function WorkspacePage({ projectId, projectName, workspacePath, pendingFi
     if (autoSaveTimer.current) clearTimeout(autoSaveTimer.current)
     if (!settings.autoSave || !ws.activeFile?.dirty) return
     autoSaveTimer.current = setTimeout(() => {
-      if (ws.activeFilePath) ws.saveFile(ws.activeFilePath)
+      if (ws.activeFilePath) {
+        ws.saveFile(ws.activeFilePath)
+        reportActivity?.('edit')
+      }
     }, 1500)
     return () => { if (autoSaveTimer.current) clearTimeout(autoSaveTimer.current) }
   }, [ws.activeFile?.dirty, ws.activeFilePath, settings.autoSave])
@@ -64,7 +68,10 @@ export function WorkspacePage({ projectId, projectName, workspacePath, pendingFi
 
     if (ctrl && e.key === 's') {
       e.preventDefault()
-      if (ws.activeFilePath) ws.saveFile(ws.activeFilePath)
+      if (ws.activeFilePath) {
+        ws.saveFile(ws.activeFilePath)
+        reportActivity?.('edit')
+      }
     } else if (ctrl && e.key === 'w') {
       e.preventDefault()
       if (ws.activeFilePath) ws.closeFile(ws.activeFilePath)
@@ -143,8 +150,14 @@ export function WorkspacePage({ projectId, projectName, workspacePath, pendingFi
             {ws.activeFile ? (
               <CodeEditor
                 file={ws.activeFile}
-                onChange={(content) => ws.updateFileContent(ws.activeFile!.path, content)}
-                onSave={() => ws.saveFile(ws.activeFilePath!)}
+                onChange={(content) => {
+                  ws.updateFileContent(ws.activeFile!.path, content)
+                  reportActivity?.('edit')
+                }}
+                onSave={() => {
+                  ws.saveFile(ws.activeFilePath!)
+                  reportActivity?.('edit')
+                }}
                 editorTheme={settings.codeEditorTheme}
                 isLightMode={isLightMode}
               />

@@ -9,9 +9,10 @@ interface DependenciesPageProps {
   conversationId: string | null
   onFileOpen?: (filePath: string, startLine?: number) => void
   aura: ReturnType<typeof useAura>
+  reportActivity?: (type: 'edit' | 'interaction') => void
 }
 
-export function DependenciesPage({ projectId, projectName, workspacePath, conversationId: _conversationId, onFileOpen, aura }: DependenciesPageProps) {
+export function DependenciesPage({ projectId, projectName, workspacePath, conversationId: _conversationId, onFileOpen, aura, reportActivity }: DependenciesPageProps) {
   const { theme } = useTheme()
   const isLightMode = theme === 'light'
 
@@ -33,6 +34,7 @@ export function DependenciesPage({ projectId, projectName, workspacePath, conver
       search={aura.search}
       selectNode={aura.selectNode}
       isLightMode={isLightMode}
+      reportActivity={reportActivity}
     />
   )
 }
