@@ -3726,6 +3726,25 @@ body {
   font-weight: 600;
   margin-left: auto;
   flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.builder-header__status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.builder-header__status-dot--pulse {
+  animation: builder-status-pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes builder-status-pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.5; transform: scale(1.3); }
 }
 
 .builder-header__tabs {

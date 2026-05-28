@@ -126,8 +126,12 @@ export function ProjectModeBuilderPage() {
 
   const projectName = project?.name ?? 'Project'
   const workspacePath = project?.workspacePath ?? 'Unknown'
-  const statusColor = project?.status === 'active' ? 'var(--accent-primary)' : 'var(--text-tertiary)'
-  const statusLabel = project?.status === 'active' ? 'Active' : 'Completed'
+
+  // Dynamic status based on what the AI is doing
+  const isIndexing = aura.indexingStatus?.phase && aura.indexingStatus.phase !== 'idle' && aura.indexingStatus.phase !== 'complete' && aura.indexingStatus.phase !== 'watching'
+  const statusLabel = aura.offline === 'backend' ? 'Offline' : aura.offline === 'ollama' ? 'No Ollama' : aura.isStreaming ? 'Thinking' : isIndexing ? 'Indexing' : 'Ready'
+  const statusColor = aura.offline ? '#ef4444' : (aura.isStreaming || isIndexing) ? '#facc15' : '#4ade80'
+  const statusPulse = true
 
   const tabs: { key: BuilderTab; label: string; icon: JSX.Element }[] = [
     {
@@ -171,7 +175,10 @@ export function ProjectModeBuilderPage() {
               </button>
             ))}
           </div>
-          <span className="builder-header__status" style={{ color: statusColor }}>{statusLabel}</span>
+          <span className="builder-header__status" style={{ color: statusColor }}>
+            <span className={`builder-header__status-dot${statusPulse ? ' builder-header__status-dot--pulse' : ''}`} style={{ background: statusColor }} />
+            {statusLabel}
+          </span>
         </div>
       </div>
       {pathMissing && (

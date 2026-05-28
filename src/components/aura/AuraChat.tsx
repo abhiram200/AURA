@@ -1,7 +1,54 @@
 import { useState, useEffect, useCallback, useMemo, useRef, memo, type KeyboardEvent } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
-import type { AuraChatMessage, AuraToolCall, AuraSubAgentInfo, AuraTodoItem, AuraApprovalRequest } from '../../hooks/useAura'
+type OrderedEvent =
+  | { kind: 'write-tool'; tc: AuraToolCall; order: number }
+  | { kind: 'other-tools'; tcs: AuraToolCall[]; order: number }
+  | { kind: 'agents'; agents: AuraSubAgentInfo[]; order: number }
+  | { kind: 'single-agent'; agent: AuraSubAgentInfo; order: number }
+
+function buildOrderedEvents(toolCalls: AuraToolCall[], subAgents: AuraSubAgentInfo[]): OrderedEvent[] {
+  const events: OrderedEvent[] = []
+
+  // 1. Pin non-write tool calls at the top as a single group
+  const otherTools = toolCalls.filter(tc => !WRITE_TOOLS.has(tc.name))
+  if (otherTools.length > 0) {
+    events.push({ kind: 'other-tools', tcs: otherTools, order: -1 })
+  }
+
+  // 2. Interleave write tools and sub-agents by call order
+  const writeTools = toolCalls.filter(tc => WRITE_TOOLS.has(tc.name))
+  const all: { type: 'write' | 'agent'; order: number; item: AuraToolCall | AuraSubAgentInfo }[] = [
+    ...writeTools.map(tc => ({ type: 'write' as const, order: tc.order ?? 0, item: tc as AuraToolCall | AuraSubAgentInfo })),
+    ...subAgents.map(sa => ({ type: 'agent' as const, order: sa.order ?? 0, item: sa as AuraToolCall | AuraSubAgentInfo })),
+  ].sort((a, b) => a.order - b.order)
+
+  // Group consecutive agents together
+  let i = 0
+  while (i < all.length) {
+    const cur = all[i]
+    if (cur.type === 'write') {
+      events.push({ kind: 'write-tool', tc: cur.item as AuraToolCall, order: cur.order })
+      i++
+    } else {
+      // Collect consecutive agents
+      const group: AuraSubAgentInfo[] = [cur.item as AuraSubAgentInfo]
+      let j = i + 1
+      while (j < all.length && all[j].type === 'agent') {
+        group.push(all[j].item as AuraSubAgentInfo)
+        j++
+      }
+      if (group.length > 1) {
+        events.push({ kind: 'agents', agents: group, order: cur.order })
+      } else {
+        events.push({ kind: 'single-agent', agent: group[0], order: cur.order })
+      }
+      i = j
+    }
+  }
+
+  return events
+}
 import type { ManagedShellState } from '../../hooks/useManagedShells'
 import { ShellBlock } from './ShellBlock'
 
@@ -485,6 +532,32 @@ const MarkdownComponents = {
 
 const RemarkPlugins = [remarkGfm]
 
+function MessageEvents({ toolCalls, subAgents }: { toolCalls: AuraToolCall[]; subAgents: AuraSubAgentInfo[] }) {
+  const events = useMemo(() => buildOrderedEvents(toolCalls, subAgents), [toolCalls, subAgents])
+
+  return (
+    <div className="aura-chat__tool-calls">
+      {events.map((evt, i) => {
+        if (evt.kind === 'write-tool') {
+          return <WriteToolSection key={`w-${i}`} tc={evt.tc} />
+        }
+        if (evt.kind === 'other-tools') {
+          return evt.tcs.length <= 1
+            ? <ToolCallSection key={`t-${i}`} tc={evt.tcs[0]} />
+            : <OtherToolCallsGroup key={`tg-${i}`} toolCalls={evt.tcs} />
+        }
+        if (evt.kind === 'agents') {
+          return <SubAgentsGroup key={`ag-${i}`} subAgents={evt.agents} />
+        }
+        if (evt.kind === 'single-agent') {
+          return <SubAgentSection key={`sa-${i}`} sa={evt.agent} />
+        }
+        return null
+      })}
+    </div>
+  )
+}
+
 const ChatMessage = memo(function ChatMessage({ msg, onViewShell, liveShells }: { msg: AuraChatMessage; onViewShell?: (shellId: string) => void; liveShells?: Map<string, ManagedShellState> }) {
   const isUser = msg.role === 'user'
   const [copied, setCopied] = useState(false)
@@ -496,13 +569,119 @@ const ChatMessage = memo(function ChatMessage({ msg, onViewShell, liveShells }: 
     })
   }, [msg.content])
 
+  const hasSegments = !isUser && msg.segments && msg.segments.length > 0
+
+  // Build grouped render blocks from segments
+  type RenderBlock =
+    | { kind: 'text'; content: string; key: string }
+    | { kind: 'write-tool'; tc: AuraToolCall; key: string }
+    | { kind: 'other-tool-group'; tcs: AuraToolCall[]; key: string }
+    | { kind: 'agent-group'; agents: AuraSubAgentInfo[]; key: string }
+    | { kind: 'single-agent'; agent: AuraSubAgentInfo; key: string }
+
+  const renderBlocks: RenderBlock[] = useMemo(() => {
+    if (!hasSegments || !msg.segments) return []
+    const blocks: RenderBlock[] = []
+    let i = 0
+    while (i < msg.segments.length) {
+      const seg = msg.segments[i]
+      if (seg.type === 'text') {
+        if (seg.content?.trim()) {
+          blocks.push({ kind: 'text', content: seg.content, key: `txt-${i}` })
+        }
+        i++
+      } else if (seg.type === 'tool_call' && seg.toolCall) {
+        const tc = msg.toolCalls?.find(t => t.toolCallId === seg.toolCall!.toolCallId) || seg.toolCall
+        if (WRITE_TOOLS.has(tc.name)) {
+          blocks.push({ kind: 'write-tool', tc, key: `wt-${i}` })
+          i++
+        } else {
+          // Collect consecutive non-write tool calls
+          const group: AuraToolCall[] = [tc]
+          let j = i + 1
+          while (j < msg.segments.length && msg.segments[j].type === 'tool_call' && msg.segments[j].toolCall) {
+            const nextTc = msg.toolCalls?.find(t => t.toolCallId === msg.segments[j].toolCall!.toolCallId) || msg.segments[j].toolCall
+            if (WRITE_TOOLS.has(nextTc.name)) break
+            group.push(nextTc)
+            j++
+          }
+          blocks.push({ kind: 'other-tool-group', tcs: group, key: `tg-${i}` })
+          i = j
+        }
+      } else if (seg.type === 'sub_agent_start' && seg.subAgent) {
+        const sa = msg.subAgents?.find(s => s.taskId === seg.subAgent!.taskId) || seg.subAgent
+        // Collect consecutive sub-agents
+        const group: AuraSubAgentInfo[] = [sa]
+        let j = i + 1
+        while (j < msg.segments.length && msg.segments[j].type === 'sub_agent_start' && msg.segments[j].subAgent) {
+          const nextSa = msg.subAgents?.find(s => s.taskId === msg.segments[j].subAgent!.taskId) || msg.segments[j].subAgent
+          group.push(nextSa)
+          j++
+        }
+        if (group.length > 1) {
+          blocks.push({ kind: 'agent-group', agents: group, key: `ag-${i}` })
+        } else {
+          blocks.push({ kind: 'single-agent', agent: group[0], key: `sa-${i}` })
+        }
+        i = j
+      } else {
+        i++
+      }
+    }
+    return blocks
+  }, [hasSegments, msg.segments, msg.toolCalls, msg.subAgents])
+
   return (
     <div className={`aura-chat__message ${isUser ? 'aura-chat__message--user' : 'aura-chat__message--assistant'}`}>
-      {!isUser && msg.toolCalls && msg.toolCalls.length > 0 && (
-        <ToolCallsGroup toolCalls={msg.toolCalls} />
-      )}
-      {!isUser && msg.subAgents && msg.subAgents.length > 0 && (
-        <SubAgentsGroup subAgents={msg.subAgents} />
+      {hasSegments ? (
+        // Segmented rendering: interleaved text, grouped tool calls, and agents
+        renderBlocks.map((block) => {
+          if (block.kind === 'text') {
+            return (
+              <div key={block.key} className="aura-chat__message-content">
+                <ReactMarkdown remarkPlugins={RemarkPlugins} components={MarkdownComponents}>
+                  {block.content}
+                </ReactMarkdown>
+              </div>
+            )
+          }
+          if (block.kind === 'write-tool') {
+            return <WriteToolSection key={block.key} tc={block.tc} />
+          }
+          if (block.kind === 'other-tool-group') {
+            return block.tcs.length === 1
+              ? <ToolCallSection key={block.key} tc={block.tcs[0]} />
+              : <OtherToolCallsGroup key={block.key} toolCalls={block.tcs} />
+          }
+          if (block.kind === 'agent-group') {
+            return <SubAgentsGroup key={block.key} subAgents={block.agents} />
+          }
+          if (block.kind === 'single-agent') {
+            return <SubAgentSection key={block.key} sa={block.agent} />
+          }
+          return null
+        })
+      ) : (
+        // Legacy rendering for messages without segments
+        <>
+          {!isUser && (msg.toolCalls?.length || 0) + (msg.subAgents?.length || 0) > 0 && (
+            <MessageEvents toolCalls={msg.toolCalls || []} subAgents={msg.subAgents || []} />
+          )}
+          <div className="aura-chat__message-content">
+            {isUser ? (
+              <span style={{ whiteSpace: 'pre-wrap' }}>{msg.content}</span>
+            ) : (
+              <>
+                <ReactMarkdown remarkPlugins={RemarkPlugins} components={MarkdownComponents}>
+                  {msg.content}
+                </ReactMarkdown>
+                {msg.content === '' && (!msg.toolCalls || msg.toolCalls.length === 0) && (!msg.subAgents || msg.subAgents.length === 0) && (
+                  <span className="aura-chat__cursor" />
+                )}
+              </>
+            )}
+          </div>
+        </>
       )}
       {!isUser && msg.todos && msg.todos.length > 0 && (
         <TodoListSection todos={msg.todos} />
@@ -510,20 +689,10 @@ const ChatMessage = memo(function ChatMessage({ msg, onViewShell, liveShells }: 
       {!isUser && msg.shells && msg.shells.length > 0 && (
         <ShellBlock shells={msg.shells} liveShells={liveShells} onViewShell={onViewShell} />
       )}
-      <div className="aura-chat__message-content">
-        {isUser ? (
-          <span style={{ whiteSpace: 'pre-wrap' }}>{msg.content}</span>
-        ) : (
-          <>
-            <ReactMarkdown remarkPlugins={RemarkPlugins} components={MarkdownComponents}>
-              {msg.content}
-            </ReactMarkdown>
-            {msg.content === '' && (!msg.toolCalls || msg.toolCalls.length === 0) && (!msg.subAgents || msg.subAgents.length === 0) && (
-              <span className="aura-chat__cursor" />
-            )}
-          </>
-        )}
-      </div>
+      {/* Show streaming cursor when content is empty during streaming (no segments yet) */}
+      {!isUser && !hasSegments && msg.content === '' && (!msg.toolCalls || msg.toolCalls.length === 0) && (!msg.subAgents || msg.subAgents.length === 0) && (
+        <span className="aura-chat__cursor" />
+      )}
       {isUser && (
         <button className="aura-chat__copy-btn" onClick={handleCopy} title="Copy message">
           {copied ? '✓' : (
@@ -673,11 +842,53 @@ function ApprovalCard({ request, onRespond }: { request: AuraApprovalRequest; on
 export default function AuraChat({ messages, isStreaming, error, onAsk, onClearError, pendingApproval, onRespondToApproval, onViewShell, liveShells, isActive, focusTrigger }: AuraChatProps) {
   const [input, setInput] = useState('')
   const messagesEndRef = useRef<HTMLDivElement>(null)
+  const messagesContainerRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLTextAreaElement>(null)
+  const stickToBottomRef = useRef(true)
 
+  // Auto-scroll: stick to bottom during streaming, stop if user scrolls up
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+    if (stickToBottomRef.current) {
+      messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+    }
   }, [messages, pendingApproval])
+
+  // Detect user scrolling up to break auto-scroll
+  useEffect(() => {
+    const container = messagesContainerRef.current
+    if (!container) return
+
+    const handleWheel = (e: WheelEvent) => {
+      if (e.deltaY > 0) return // scrolling down, stay stuck
+      // User scrolled up — check if we're no longer at bottom
+      const nearBottom = container.scrollHeight - container.scrollTop - container.clientHeight < 80
+      if (!nearBottom) stickToBottomRef.current = false
+    }
+
+    const handleTouchMove = () => {
+      const nearBottom = container.scrollHeight - container.scrollTop - container.clientHeight < 80
+      if (!nearBottom) stickToBottomRef.current = false
+    }
+
+    // Keyboard: PageUp, Home, ArrowUp scroll up
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'PageUp' || e.key === 'Home' || (e.key === 'ArrowUp' && !e.shiftKey)) {
+        requestAnimationFrame(() => {
+          const nearBottom = container.scrollHeight - container.scrollTop - container.clientHeight < 80
+          if (!nearBottom) stickToBottomRef.current = false
+        })
+      }
+    }
+
+    container.addEventListener('wheel', handleWheel, { passive: true })
+    container.addEventListener('touchmove', handleTouchMove, { passive: true })
+    container.addEventListener('keydown', handleKeyDown)
+    return () => {
+      container.removeEventListener('wheel', handleWheel)
+      container.removeEventListener('touchmove', handleTouchMove)
+      container.removeEventListener('keydown', handleKeyDown)
+    }
+  }, [])
 
   // Auto-focus input on mount, when tab becomes active, or after new chat
   useEffect(() => {
@@ -689,6 +900,7 @@ export default function AuraChat({ messages, isStreaming, error, onAsk, onClearE
   const handleSend = useCallback(() => {
     const trimmed = input.trim()
     if (!trimmed || isStreaming) return
+    stickToBottomRef.current = true
     onAsk(trimmed)
     setInput('')
     if (inputRef.current) {
@@ -713,7 +925,7 @@ export default function AuraChat({ messages, isStreaming, error, onAsk, onClearE
 
   return (
     <div className="aura-chat">
-      <div className="aura-chat__messages">
+      <div className="aura-chat__messages" ref={messagesContainerRef}>
         {messages.length === 0 && (
           <div className="aura-chat__empty">
             <span className="aura-chat__empty-icon">&gt;_</span>
@@ -726,7 +938,7 @@ export default function AuraChat({ messages, isStreaming, error, onAsk, onClearE
         {messages.map(msg => (
           <ChatMessage key={msg.id} msg={msg} onViewShell={onViewShell} liveShells={liveShells} />
         ))}
-        {isStreaming && messages[messages.length - 1]?.role === 'assistant' && messages[messages.length - 1]?.content !== '' && (
+        {isStreaming && messages[messages.length - 1]?.role === 'assistant' && (messages[messages.length - 1]?.content !== '' || (messages[messages.length - 1]?.segments?.length || 0) > 0) && (
           <div className="aura-chat__streaming">
             <span className="aura-chat__cursor" />
           </div>

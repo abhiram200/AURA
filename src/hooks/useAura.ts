@@ -392,6 +392,7 @@ export interface AuraToolCall {
   status: 'running' | 'completed' | 'error'
   purpose?: string
   thinking?: string
+  order?: number
 }
 
 export interface AuraSubAgentInfo {
@@ -401,6 +402,7 @@ export interface AuraSubAgentInfo {
   type?: string
   status: 'running' | 'completed'
   result?: string
+  order?: number
 }
 
 export interface AuraTodoItem {
@@ -431,6 +433,14 @@ export interface AuraShellEvent {
   exitCode: number | null
 }
 
+export interface MessageSegment {
+  type: 'text' | 'tool_call' | 'sub_agent_start'
+  content?: string
+  toolCall?: AuraToolCall
+  subAgent?: AuraSubAgentInfo
+  order: number
+}
+
 export interface AuraChatMessage {
   id: string
   role: 'user' | 'assistant'
@@ -439,6 +449,7 @@ export interface AuraChatMessage {
   subAgents?: AuraSubAgentInfo[]
   todos?: AuraTodoItem[]
   shells?: AuraShellEvent[]
+  segments?: MessageSegment[]
   timestamp: number
 }
 
@@ -463,6 +474,7 @@ export function useAura(projectId: string | null) {
   const [chatMessages, setChatMessages] = useState<AuraChatMessage[]>([])
   const [isStreaming, setIsStreaming] = useState(false)
   const [chatError, setChatError] = useState<string | null>(null)
+  const [offline, setOffline] = useState<'backend' | 'ollama' | null>(null)
   const [activeChatId, setActiveChatId] = useState<string | null>(null)
   const [pendingApproval, setPendingApproval] = useState<AuraApprovalRequest | null>(null)
 
@@ -1159,6 +1171,7 @@ export function useAura(projectId: string | null) {
       const decoder = new TextDecoder()
       let buffer = ''
       let currentEvent = ''
+      let eventOrder = 0
 
       while (true) {
         const { done, value } = await reader.read()
@@ -1191,39 +1204,80 @@ export function useAura(projectId: string | null) {
 
                 if (eventType === 'token') {
                   msg.content += data.content || ''
+                  // Update last text segment or create one
+                  const segments = msg.segments || []
+                  if (segments.length > 0 && segments[segments.length - 1].type === 'text') {
+                    segments[segments.length - 1] = { ...segments[segments.length - 1], content: msg.content }
+                  } else {
+                    segments.push({ type: 'text', content: msg.content, order: eventOrder++ })
+                  }
+                  msg.segments = [...segments]
                 } else if (eventType === 'tool_call') {
-                  // Capture any accumulated content as "thinking" for this tool call,
-                  // then reset content so only the final response remains visible
-                  const thinking = msg.content.trim() || undefined
-                  msg.content = ''
-                  msg.toolCalls = [...(msg.toolCalls || []), {
+                  // Save any accumulated text as a segment, then add tool_call segment
+                  const segments = msg.segments || []
+                  if (msg.content.trim()) {
+                    // If last segment is text, just keep it; otherwise add new text segment
+                    if (segments.length === 0 || segments[segments.length - 1].type !== 'text') {
+                      segments.push({ type: 'text', content: msg.content, order: eventOrder++ })
+                    }
+                  }
+                  const newTc: AuraToolCall = {
                     name: data.name,
                     toolCallId: data.tool_call_id,
                     args: data.args || {},
                     status: 'running' as const,
-                    thinking,
-                  }]
+                    order: eventOrder++,
+                  }
+                  msg.toolCalls = [...(msg.toolCalls || []), newTc]
+                  msg.content = '' // Reset content — text before this tool is now in segments
+                  segments.push({ type: 'tool_call', toolCall: newTc, order: newTc.order! })
+                  msg.segments = [...segments]
                 } else if (eventType === 'tool_result') {
                   msg.toolCalls = (msg.toolCalls || []).map((tc: AuraToolCall) => {
                     const tcId = data.tool_call_id
                     if (tcId ? tc.toolCallId === tcId : (tc.name === data.name && tc.status === 'running')) {
-                      return { ...tc, result: data.result, error: data.error, status: data.error ? 'error' as const : 'completed' as const }
+                      const updated = { ...tc, result: data.result, error: data.error, status: data.error ? 'error' as const : 'completed' as const }
+                      // Update segment too
+                      const segments = msg.segments || []
+                      msg.segments = segments.map(s =>
+                        s.type === 'tool_call' && s.toolCall?.toolCallId === tcId ? { ...s, toolCall: updated } : s
+                      )
+                      return updated
                     }
                     return tc
                   })
                 } else if (eventType === 'sub_agent_start') {
-                  msg.subAgents = [...(msg.subAgents || []), {
+                  const newSa: AuraSubAgentInfo = {
                     taskId: data.taskId,
                     title: data.title || '',
                     task: data.task,
                     type: data.type || 'explore',
                     status: 'running' as const,
-                  }]
+                    order: eventOrder++,
+                  }
+                  msg.subAgents = [...(msg.subAgents || []), newSa]
+                  // Save any text as segment, then add sub_agent_start segment
+                  const segments = msg.segments || []
+                  if (msg.content.trim()) {
+                    if (segments.length === 0 || segments[segments.length - 1].type !== 'text') {
+                      segments.push({ type: 'text', content: msg.content, order: eventOrder++ })
+                    }
+                  }
+                  msg.content = ''
+                  segments.push({ type: 'sub_agent_start', subAgent: newSa, order: newSa.order! })
+                  msg.segments = [...segments]
                 } else if (eventType === 'sub_agent_result') {
                   msg.subAgents = (msg.subAgents || []).map((sa: AuraSubAgentInfo) =>
                     sa.taskId === data.taskId
                       ? { ...sa, result: data.result, status: 'completed' as const }
                       : sa
+                  )
+                  // Update segment too
+                  const saSegments = msg.segments || []
+                  msg.segments = saSegments.map(s =>
+                    s.type === 'sub_agent_start' && s.subAgent?.taskId === data.taskId
+                      ? { ...s, subAgent: { ...s.subAgent!, result: data.result, status: 'completed' as const } }
+                      : s
                   )
                 } else if (eventType === 'todo_update') {
                   msg.todos = data.todos || []
@@ -1334,6 +1388,25 @@ export function useAura(projectId: string | null) {
     return Math.min(100, Math.round((total / contextWindowSize) * 100))
   }, [chatMessages, contextWindowSize, systemPromptTokens])
 
+  // Health check: detect if backend or Ollama is offline
+  useEffect(() => {
+    let timer: ReturnType<typeof setInterval>
+    const check = () => {
+      fetch('/api/health', { method: 'GET' })
+        .then(res => {
+          if (!res.ok) { setOffline('backend'); return }
+          res.json().then((data: { ollama?: boolean }) => {
+            if (!data.ollama) setOffline('ollama')
+            else setOffline(null)
+          }).catch(() => setOffline(null))
+        })
+        .catch(() => setOffline('backend'))
+    }
+    check()
+    timer = setInterval(check, 15000)
+    return () => clearInterval(timer)
+  }, [])
+
   return {
     graphData,
     indexingStatus,
@@ -1372,6 +1445,7 @@ export function useAura(projectId: string | null) {
     contextUsagePercent,
     pendingApproval,
     respondToApproval,
+    offline,
   }
 }
 
