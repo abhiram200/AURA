@@ -1554,7 +1554,7 @@ function defineAgentTools(qs: AuraQueryService, projectPath: string, managedShel
 
     {
       name: 'dispatch_sub_agents',
-      description: 'Spawn one or more sub-agents to investigate the codebase in parallel. Each agent runs its own tool-calling loop and returns a detailed summary. Use this when a task requires exploring multiple areas of the codebase, tracing relationships across files, or researching something that would take multiple tool calls to understand. Choose the right type: "explore" for investigating code, "research" for web/docs lookup, "plan" for creating implementation plans.',
+      description: 'Spawn one or more sub-agents to work on tasks in parallel. Each agent runs its own tool-calling loop and returns a detailed summary. Use this for any task that benefits from focused attention — investigating, researching, or planning. Choose the right type: "explore" for investigating code, "research" for web/docs lookup, "plan" for creating implementation plans.',
       parameters: {
         type: 'object',
         properties: {
