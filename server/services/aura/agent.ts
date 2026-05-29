@@ -161,19 +161,17 @@ interface AuraTodoItem {
   blockedBy?: string[]
 }
 
-type SubAgentType = 'explore' | 'research' | 'fix' | 'plan'
+type SubAgentType = 'explore' | 'research' | 'plan'
 
 const SUB_AGENT_SYSTEM_PROMPTS: Record<SubAgentType, string> = {
   explore: 'You are an exploration agent. Investigate the codebase to answer the question. Use tools to find facts — search for symbols, trace dependencies, read files. Return a detailed report with specific file paths, symbol names, and line numbers. Do not make any edits.',
   research: 'You are a research agent. Find information from the web and codebase. Use search_web for URLs and queries, context tools for codebase overview. Return a comprehensive summary of your findings with sources.',
-  fix: 'You are a fix agent. Read the relevant code, make targeted edits using update or write, then VERIFY your changes — read the file back to confirm correctness, and run build/test commands if available using execute. If the fix doesn\'t work, try a completely different approach — never repeat the same edit. Return: (1) what you changed, (2) verification that the change is correct, (3) any remaining issues.',
   plan: 'You are a planning agent. Analyze the task, explore the codebase, and produce a step-by-step implementation plan. Your output MUST follow this structured format:\n\n## Implementation Plan\n\n### Step N: [Title]\n- **Files to modify**: [list of file paths]\n- **Changes**: [description of what to change]\n- **Dependencies**: [list of step numbers this depends on, or "none"]\n\nAfter all steps, include:\n### Verification\n- [list of verification steps: build commands, test commands, manual checks]\n\nDo NOT make any edits — only investigate and plan. Be specific: cite exact file paths, function names, and line numbers. The main agent will create a todo list from your plan and execute each step.',
 }
 
 const TOOL_ACCESS: Record<SubAgentType, string[]> = {
   explore: ['search', 'context', 'impact', 'dependents', 'dependencies', 'route_map', 'tool_map', 'shape_check', 'api_impact', 'processes', 'process_detail', 'context_manifest', 'context_folder', 'get_graph', 'read_file', 'search_pattern'],
   research: ['search_web', 'context_manifest', 'context_folder', 'read_file', 'search_pattern', 'search'],
-  fix: ['search', 'context', 'impact', 'dependents', 'dependencies', 'read_file', 'search_pattern', 'update', 'write', 'execute', 'search_web'],
   plan: ['search', 'context', 'dependents', 'dependencies', 'context_manifest', 'context_folder', 'read_file', 'search_pattern', 'route_map', 'processes', 'search_web', 'get_graph'],
 }
 
@@ -344,7 +342,6 @@ Use \`dispatch_sub_agents\` to fan out parallel agents for tasks that benefit fr
 
 - **explore**: Investigate code — find symbols, trace dependencies, understand architecture. Read-only.
 - **research**: Look up external info — documentation, APIs, examples via web search.
-- **fix**: Make and verify code edits — reads files, makes changes, then verifies by reading back and running commands.
 - **plan**: Analyze and plan — investigate the codebase and produce a structured implementation plan without making edits.
 
 **When you should spawn sub-agents (not do the work inline):**
@@ -1557,7 +1554,7 @@ function defineAgentTools(qs: AuraQueryService, projectPath: string, managedShel
 
     {
       name: 'dispatch_sub_agents',
-      description: 'Dispatch 2 or more parallel agents. Each agent runs its own tool-calling loop and returns a text summary. Choose the right type for each task: "explore" for investigating code, "research" for web/docs lookup, "fix" for making and verifying edits, "plan" for creating implementation plans. ONLY use this when the question requires investigating 2+ independent areas in parallel. For single-focus questions, call tools directly.',
+      description: 'Dispatch 2 or more parallel agents. Each agent runs its own tool-calling loop and returns a text summary. Choose the right type for each task: "explore" for investigating code, "research" for web/docs lookup, "plan" for creating implementation plans. ONLY use this when the question requires investigating 2+ independent areas in parallel. For single-focus questions, call tools directly.',
       parameters: {
         type: 'object',
         properties: {
@@ -1569,7 +1566,7 @@ function defineAgentTools(qs: AuraQueryService, projectPath: string, managedShel
                 title: { type: 'string', description: 'Short title for this task, e.g. "Explore auth module" or "Fix CSS layout bug"' },
                 task: { type: 'string', description: 'What to investigate or do — a focused question for the agent' },
                 focus: { type: 'string', description: 'Specific focus area — e.g., "upstream dependencies", "API surface", "auth module"' },
-                type: { type: 'string', enum: ['explore', 'research', 'fix', 'plan'], description: 'Agent type: "explore" (investigate code, read-only), "research" (web/docs), "fix" (make and verify edits), "plan" (create implementation plan, read-only)' },
+                type: { type: 'string', enum: ['explore', 'research', 'plan'], description: 'Agent type: "explore" (investigate code, read-only), "research" (web/docs), "plan" (create implementation plan, read-only)' },
               },
               required: ['title', 'task'],
             },
