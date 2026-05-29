@@ -9,7 +9,7 @@ import type { Settings } from '../storage/types.ts'
 // Lazy-imported services — instantiated per project on demand
 import { AuraIndexer } from '../services/aura/indexer.ts'
 import { AuraQueryService } from '../services/aura/graph.ts'
-import { isGitRepository, getGitDiff, getGitHead } from '../services/aura/git.ts'
+import { isGitRepository, getGitDiff, getGitHead, hasFileChangesBetween } from '../services/aura/git.ts'
 import { syncContracts, loadContracts } from '../services/aura/contract-registry.ts'
 import { GroupQueryService } from '../services/aura/group-query.ts'
 import { installSkills, listAvailableSkills } from '../services/skill-installer.ts'
@@ -151,9 +151,21 @@ export function createAuraRouter(
         return
       }
 
-      // Compare with current git HEAD — only re-index if commits changed
+      // Compare with current git HEAD — only re-index if commits changed AND files changed
       const currentHead = await getGitHead(project.workspacePath)
       if (currentHead !== lastCommit) {
+        const hasChanges = await hasFileChangesBetween(project.workspacePath, lastCommit, currentHead)
+        if (!hasChanges) {
+          // HEAD changed but no file diffs (e.g. merge commit) — update saved HEAD, skip re-index
+          try {
+            const metaContent = await fs.readFile(metaPath, 'utf-8')
+            const meta = JSON.parse(metaContent)
+            meta.lastCommit = currentHead
+            await fs.writeFile(metaPath, JSON.stringify(meta, null, 2))
+          } catch { /* ignore meta update failure */ }
+          res.json({ needsReindex: false })
+          return
+        }
         res.json({ needsReindex: true, reason: 'commit_changed', lastCommit, currentHead })
         return
       }

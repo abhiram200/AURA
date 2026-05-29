@@ -4,6 +4,7 @@ import remarkGfm from 'remark-gfm'
 import { computeDiff, type DiffLine } from '../../utils/diffUtils'
 type OrderedEvent =
   | { kind: 'write-tool'; tc: AuraToolCall; order: number }
+  | { kind: 'ask-user'; tc: AuraToolCall; order: number }
   | { kind: 'other-tools'; tcs: AuraToolCall[]; order: number }
   | { kind: 'agents'; agents: AuraSubAgentInfo[]; order: number }
   | { kind: 'single-agent'; agent: AuraSubAgentInfo; order: number }
@@ -11,8 +12,12 @@ type OrderedEvent =
 function buildOrderedEvents(toolCalls: AuraToolCall[], subAgents: AuraSubAgentInfo[]): OrderedEvent[] {
   const events: OrderedEvent[] = []
 
-  // 1. Pin non-write tool calls at the top as a single group
-  const otherTools = toolCalls.filter(tc => !WRITE_TOOLS.has(tc.name))
+  // 1. Emit ask_user events individually, group remaining non-write tools at the top
+  const askUserCalls = toolCalls.filter(tc => tc.name === 'ask_user')
+  const otherTools = toolCalls.filter(tc => !WRITE_TOOLS.has(tc.name) && tc.name !== 'ask_user')
+  for (const tc of askUserCalls) {
+    events.push({ kind: 'ask-user', tc, order: tc.order ?? 0 })
+  }
   if (otherTools.length > 0) {
     events.push({ kind: 'other-tools', tcs: otherTools, order: -1 })
   }
@@ -232,6 +237,34 @@ const SUB_AGENT_TYPE_LABELS: Record<string, string> = {
   plan: 'Planner',
 }
 
+const AskUserSection = memo(function AskUserSection({ tc }: { tc: AuraToolCall }) {
+  const question = (tc.args as { question?: string }).question || ''
+  const options = (tc.args as { options?: unknown }).options
+  const res = tc.result as { answer?: string } | null
+  const answer = res?.answer || (typeof tc.result === 'string' ? tc.result : null)
+  return (
+    <div className="aura-chat__ask-user">
+      <div className="aura-chat__ask-user-question">
+        <span className="aura-chat__ask-user-label">Question</span>
+        <p>{question}</p>
+        {Array.isArray(options) && options.length > 0 && (
+          <div className="aura-chat__ask-user-options">
+            {options.map((opt: string, idx: number) => (
+              <span key={idx} className="aura-chat__ask-user-option">{opt}</span>
+            ))}
+          </div>
+        )}
+      </div>
+      {answer && (
+        <div className="aura-chat__ask-user-answer">
+          <span className="aura-chat__ask-user-label">Answer</span>
+          <p>{answer}</p>
+        </div>
+      )}
+    </div>
+  )
+})
+
 const SubAgentSection = memo(function SubAgentSection({ sa }: { sa: AuraSubAgentInfo }) {
   const statusClass = sa.status === 'completed' ? 'aura-chat__status-text--done'
     : sa.status === 'running' ? 'aura-chat__status-text--running'
@@ -420,6 +453,9 @@ function MessageEvents({ toolCalls, subAgents }: { toolCalls: AuraToolCall[]; su
         if (evt.kind === 'write-tool') {
           return <WriteToolSection key={`w-${i}`} tc={evt.tc} />
         }
+        if (evt.kind === 'ask-user') {
+          return <AskUserSection key={`au-${i}`} tc={evt.tc} />
+        }
         if (evt.kind === 'other-tools') {
           return evt.tcs.length <= 1
             ? <ToolCallSection key={`t-${i}`} tc={evt.tcs[0]} />
@@ -454,6 +490,7 @@ const ChatMessage = memo(function ChatMessage({ msg, onViewShell, liveShells }: 
   type RenderBlock =
     | { kind: 'text'; content: string; key: string }
     | { kind: 'write-tool'; tc: AuraToolCall; key: string }
+    | { kind: 'ask-user'; tc: AuraToolCall; key: string }
     | { kind: 'other-tool-group'; tcs: AuraToolCall[]; key: string }
     | { kind: 'agent-group'; agents: AuraSubAgentInfo[]; key: string }
     | { kind: 'single-agent'; agent: AuraSubAgentInfo; key: string }
@@ -474,13 +511,16 @@ const ChatMessage = memo(function ChatMessage({ msg, onViewShell, liveShells }: 
         if (WRITE_TOOLS.has(tc.name)) {
           blocks.push({ kind: 'write-tool', tc, key: `wt-${i}` })
           i++
+        } else if (tc.name === 'ask_user') {
+          blocks.push({ kind: 'ask-user', tc, key: `au-${i}` })
+          i++
         } else {
-          // Collect consecutive non-write tool calls
+          // Collect consecutive non-write, non-ask_user tool calls
           const group: AuraToolCall[] = [tc]
           let j = i + 1
           while (j < msg.segments.length && msg.segments[j].type === 'tool_call' && msg.segments[j].toolCall) {
             const nextTc = msg.toolCalls?.find(t => t.toolCallId === msg.segments[j].toolCall!.toolCallId) || msg.segments[j].toolCall
-            if (WRITE_TOOLS.has(nextTc.name)) break
+            if (WRITE_TOOLS.has(nextTc.name) || nextTc.name === 'ask_user') break
             group.push(nextTc)
             j++
           }
@@ -526,6 +566,9 @@ const ChatMessage = memo(function ChatMessage({ msg, onViewShell, liveShells }: 
           }
           if (block.kind === 'write-tool') {
             return <WriteToolSection key={block.key} tc={block.tc} />
+          }
+          if (block.kind === 'ask-user') {
+            return <AskUserSection key={block.key} tc={block.tc} />
           }
           if (block.kind === 'other-tool-group') {
             return block.tcs.length === 1
@@ -707,6 +750,8 @@ function ApprovalCard({ request, onRespond }: { request: AuraApprovalRequest; on
   }
 
   if (request.type === 'question') {
+    const [customInput, setCustomInput] = useState('')
+    const [showCustom, setShowCustom] = useState(false)
     return (
       <div className="aura-chat__approval-card">
         <div className="aura-chat__approval-type">Question</div>
@@ -723,6 +768,22 @@ function ApprovalCard({ request, onRespond }: { request: AuraApprovalRequest; on
               {option}
             </button>
           ))}
+          {!showCustom ? (
+            <button className="aura-chat__approval-btn aura-chat__approval-btn--edit" onClick={() => setShowCustom(true)}>Other</button>
+          ) : (
+            <div className="aura-chat__approval-custom">
+              <input
+                className="aura-chat__approval-custom-input"
+                value={customInput}
+                onChange={e => setCustomInput(e.target.value)}
+                onKeyDown={e => { if (e.key === 'Enter' && customInput.trim()) onRespond(true, customInput.trim()) }}
+                placeholder="Type your answer..."
+                autoFocus
+              />
+              <button className="aura-chat__approval-btn aura-chat__approval-btn--approve" onClick={() => { if (customInput.trim()) onRespond(true, customInput.trim()) }} disabled={!customInput.trim()}>Send</button>
+              <button className="aura-chat__approval-btn" onClick={() => { setShowCustom(false); setCustomInput('') }}>Cancel</button>
+            </div>
+          )}
         </div>
       </div>
     )

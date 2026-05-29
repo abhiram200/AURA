@@ -371,10 +371,11 @@ export interface AuraRequestContext {
     range?: { startLine: number; endLine: number }
   } | null
   selectedNodeContext?: {
-    incoming: { name: string; kind: string; edgeType: string; filePath: string }[]
-    outgoing: { name: string; kind: string; edgeType: string; filePath: string }[]
-    members: { name: string; kind: string }[]
-    hierarchy: { name: string; kind: string; relation: string }[]
+    incoming: { id: string; name: string; kind: string; edgeType: string; filePath: string }[]
+    outgoing: { id: string; name: string; kind: string; edgeType: string; filePath: string }[]
+    members: { id: string; name: string; kind: string; filePath: string }[]
+    hierarchy: { id: string; name: string; kind: string; relation: string }[]
+    containedBy: { id: string; name: string; kind: string; filePath: string } | null
   } | null
   graphOverview: {
     nodeCount: number
@@ -382,6 +383,13 @@ export interface AuraRequestContext {
     nodeKinds: Record<string, number>
     edgeTypes: Record<string, number>
   }
+  exploredContext?: {
+    searchResults?: { id: string; name: string; kind: string; filePath: string; score: number }[]
+    impactResult?: { target: string; downstream: { id: string; name: string; kind: string; filePath: string; severity: string }[]; upstream: { id: string; name: string; kind: string; filePath: string; severity: string }[] } | null
+    changeDetection?: { filesChanged: number; changedSymbols: { id: string; name: string; kind: string; filePath: string }[] } | null
+    routeMap?: { routeCount: number; apiCallCount: number; routes: { id: string; name: string; filePath: string }[] } | null
+    processes?: { id: string; name: string; method: string; path: string }[] | null
+  } | null
 }
 
 export interface AuraToolCall {
@@ -457,6 +465,7 @@ export interface AuraChatMessage {
 // ── Prior Messages Builder ────────────────────────────────────────────────────
 
 const WRITE_UPDATE_TOOLS = new Set(['write', 'update'])
+const CONTEXT_TOOLS = new Set(['write', 'update', 'ask_user'])
 
 function getAssistantFullText(msg: AuraChatMessage): string {
   if (msg.role !== 'assistant' || !msg.segments || msg.segments.length === 0) return msg.content
@@ -486,13 +495,13 @@ function buildPriorMessages(chatMessages: AuraChatMessage[]): PriorMessage[] {
     if (msg.role !== 'assistant') continue
 
     const fullText = getAssistantFullText(msg)
-    const writeUpdateTCs = (msg.toolCalls || []).filter(tc => WRITE_UPDATE_TOOLS.has(tc.name))
+    const contextTCs = (msg.toolCalls || []).filter(tc => CONTEXT_TOOLS.has(tc.name))
     const subAgents = msg.subAgents || []
     const hasSubAgents = subAgents.length > 0
 
-    // Only include tool_calls if we have write/update tools or sub-agents
+    // Include tool_calls for write/update, ask_user, and dispatch_sub_agents
     const toolCallsForMsg = []
-    for (const tc of writeUpdateTCs) {
+    for (const tc of contextTCs) {
       toolCallsForMsg.push({
         id: tc.toolCallId || `${tc.name}_${tc.order ?? 0}`,
         function: { name: tc.name, arguments: tc.args },
@@ -513,15 +522,34 @@ function buildPriorMessages(chatMessages: AuraChatMessage[]): PriorMessage[] {
     }
     result.push(entry)
 
-    // Add tool results for write/update tools
-    for (const tc of writeUpdateTCs) {
-      const diffText = formatWriteUpdateDiff(tc as { name: string; args: Record<string, unknown>; result: unknown })
-      result.push({
-        role: 'tool',
-        content: diffText || JSON.stringify({ filePath: (tc.args as Record<string, unknown>)?.filePath || '', applied: true }),
-        tool_call_id: tc.toolCallId || `${tc.name}_${tc.order ?? 0}`,
-        name: tc.name,
-      })
+    // Add tool results for context tools
+    for (const tc of contextTCs) {
+      if (WRITE_UPDATE_TOOLS.has(tc.name)) {
+        const diffText = formatWriteUpdateDiff(tc as { name: string; args: Record<string, unknown>; result: unknown })
+        result.push({
+          role: 'tool',
+          content: diffText || JSON.stringify({ filePath: (tc.args as Record<string, unknown>)?.filePath || '', applied: true }),
+          tool_call_id: tc.toolCallId || `${tc.name}_${tc.order ?? 0}`,
+          name: tc.name,
+        })
+      } else {
+        // ask_user — format as readable Q&A
+        let resultContent: string
+        const res = tc.result as { question?: string; answer?: string } | null
+        if (res?.question && res?.answer) {
+          resultContent = `Q: ${res.question}\nA: ${res.answer}`
+        } else {
+          resultContent = tc.result != null
+            ? (typeof tc.result === 'string' ? tc.result : JSON.stringify(tc.result))
+            : (tc.error || 'No result')
+        }
+        result.push({
+          role: 'tool',
+          content: resultContent,
+          tool_call_id: tc.toolCallId || `${tc.name}_${tc.order ?? 0}`,
+          name: tc.name,
+        })
+      }
     }
 
     // Add sub-agent combined result
@@ -1127,7 +1155,14 @@ export function useAura(projectId: string | null) {
           if (res.ok) {
             const data = await res.json()
             if (gitHeadRef.current && data.head !== gitHeadRef.current) {
-              gitChanged = true
+              // HEAD changed — check if files actually changed (skip merge-only commits)
+              const changesRes = await fetch(`/api/workspace/${projectId}/has-file-changes?oldHead=${encodeURIComponent(gitHeadRef.current)}&newHead=${encodeURIComponent(data.head)}`)
+              if (changesRes.ok) {
+                const changesData = await changesRes.json()
+                gitChanged = changesData.hasChanges
+              } else {
+                gitChanged = true // assume changes on error
+              }
             }
             gitHeadRef.current = data.head
           }
@@ -1205,13 +1240,45 @@ export function useAura(projectId: string | null) {
       for (const n of graphData.nodes) nodeKinds[n.kind] = (nodeKinds[n.kind] || 0) + 1
       for (const e of graphData.edges) edgeTypes[e.type] = (edgeTypes[e.type] || 0) + 1
     }
+    // Build explored context from already-available frontend state
+    const hasExplored = searchResults.length > 0 || impactResult || changeDetectionResult || routeMapResult || (processes && processes.length > 0)
+    const exploredContext: AuraRequestContext['exploredContext'] = hasExplored ? {} : null
+    if (exploredContext) {
+      if (searchResults.length > 0) {
+        exploredContext.searchResults = searchResults.slice(0, 20).map(r => ({ id: r.node.id, name: r.node.name, kind: r.node.kind, filePath: r.node.filePath, score: r.score }))
+      }
+      if (impactResult) {
+        exploredContext.impactResult = {
+          target: impactResult.target,
+          downstream: impactResult.downstream.nodes.slice(0, 15).map(n => ({ id: n.node.id, name: n.node.name, kind: n.node.kind, filePath: n.node.filePath, severity: n.severity })),
+          upstream: impactResult.upstream.nodes.slice(0, 15).map(n => ({ id: n.node.id, name: n.node.name, kind: n.node.kind, filePath: n.node.filePath, severity: n.severity })),
+        }
+      }
+      if (changeDetectionResult) {
+        exploredContext.changeDetection = {
+          filesChanged: changeDetectionResult.files.length,
+          changedSymbols: changeDetectionResult.changedSymbols.slice(0, 20).map(s => ({ id: s.node.id, name: s.node.name, kind: s.node.kind, filePath: s.node.filePath })),
+        }
+      }
+      if (routeMapResult) {
+        exploredContext.routeMap = {
+          routeCount: routeMapResult.routes.length,
+          apiCallCount: routeMapResult.apiCalls.length,
+          routes: routeMapResult.routes.slice(0, 20).map(r => ({ id: r.id, name: r.name, filePath: r.filePath })),
+        }
+      }
+      if (processes && processes.length > 0) {
+        exploredContext.processes = processes.slice(0, 10).map(p => ({ id: p.id, name: p.name, method: p.method, path: p.path }))
+      }
+    }
     const context: AuraRequestContext = {
       selectedNode: selectedNode ? { id: selectedNode.id, name: selectedNode.name, kind: selectedNode.kind, filePath: selectedNode.filePath, range: selectedNode.range } : null,
       selectedNodeContext: nodeContext ? {
-        incoming: nodeContext.incoming.map(i => ({ name: i.node.name, kind: i.node.kind, edgeType: i.edgeType, filePath: i.node.filePath })),
-        outgoing: nodeContext.outgoing.map(o => ({ name: o.node.name, kind: o.node.kind, edgeType: o.edgeType, filePath: o.node.filePath })),
-        members: nodeContext.members.map(m => ({ name: m.name, kind: m.kind })),
-        hierarchy: nodeContext.hierarchy.map(h => ({ name: h.node.name, kind: h.node.kind, relation: h.relation })),
+        incoming: nodeContext.incoming.map(i => ({ id: i.node.id, name: i.node.name, kind: i.node.kind, edgeType: i.edgeType, filePath: i.node.filePath })),
+        outgoing: nodeContext.outgoing.map(o => ({ id: o.node.id, name: o.node.name, kind: o.node.kind, edgeType: o.edgeType, filePath: o.node.filePath })),
+        members: nodeContext.members.map(m => ({ id: m.id, name: m.name, kind: m.kind, filePath: m.filePath })),
+        hierarchy: nodeContext.hierarchy.map(h => ({ id: h.node.id, name: h.node.name, kind: h.node.kind, relation: h.relation })),
+        containedBy: nodeContext.containedBy ? { id: nodeContext.containedBy.id, name: nodeContext.containedBy.name, kind: nodeContext.containedBy.kind, filePath: nodeContext.containedBy.filePath } : null,
       } : null,
       graphOverview: {
         nodeCount: graphData?.nodes.length ?? 0,
@@ -1219,6 +1286,7 @@ export function useAura(projectId: string | null) {
         nodeKinds,
         edgeTypes,
       },
+      exploredContext,
     }
 
     try {
@@ -1309,7 +1377,11 @@ export function useAura(projectId: string | null) {
                     const gitArgs = typeof (data.args as Record<string, unknown>)?.args === 'string'
                       ? (data.args as Record<string, unknown>).args as string
                       : ''
-                    if (gitArgs.split(/\s+/)[0] === 'commit') {
+                    // Detect commit as first subcommand OR chained via && / ;
+                    // e.g. "commit -m ..." or "add -A && git commit -m ..."
+                    const hasCommit = gitArgs.split(/\s+/)[0] === 'commit'
+                      || /(?:&&|;)\s*git\s+commit\b/.test(gitArgs)
+                    if (hasCommit) {
                       pendingGitCommitRef.current.add(data.tool_call_id || `${data.name}_${eventOrder}`)
                     }
                   }
@@ -1413,7 +1485,21 @@ export function useAura(projectId: string | null) {
                 } else if (eventType === 'shell_output') {
                   if (onShellEvent) onShellEvent('shell_output', data)
                 } else if (eventType === 'error') {
-                  msg.content += `\n\n⚠️ Error: ${data.message}`
+                  const errMsg = typeof data.message === 'string' ? data.message : String(data.message)
+                  // Parse 429 rate limit errors for cleaner display
+                  if (errMsg.includes('429')) {
+                    const jsonMatch = errMsg.match(/429\s*(\{.*\})/s)
+                    let rateMsg = errMsg
+                    if (jsonMatch) {
+                      try {
+                        const parsed = JSON.parse(jsonMatch[1])
+                        if (parsed.error) rateMsg = parsed.error
+                      } catch { /* use raw */ }
+                    }
+                    msg.content += `\n\n⚠️ ${rateMsg}`
+                  } else {
+                    msg.content += `\n\n⚠️ Error: ${errMsg}`
+                  }
                 }
 
                 updated[idx] = msg
@@ -1495,6 +1581,13 @@ export function useAura(projectId: string | null) {
           if (tc.result) {
             const diffText = formatWriteUpdateDiff(tc as { name: string; args: Record<string, unknown>; result: unknown })
             tokens += Math.ceil((diffText || '').length / 4)
+          }
+        } else if (CONTEXT_TOOLS.has(tc.name)) {
+          // ask_user — count args + result
+          tokens += Math.ceil(JSON.stringify(tc.args).length / 4)
+          if (tc.result) {
+            const resStr = typeof tc.result === 'string' ? tc.result : JSON.stringify(tc.result)
+            tokens += Math.ceil(resStr.length / 4)
           }
         }
       }

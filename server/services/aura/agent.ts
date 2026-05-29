@@ -556,14 +556,14 @@ function formatContext(context: Record<string, unknown>): string {
     parts.push(`- Node ID: ${sel.id}`)
   }
 
-  // Selected node context (relationships)
-  const selCtx = context.selectedNodeContext as { incoming?: Array<{ name: string; kind: string; edgeType: string; filePath: string }>; outgoing?: Array<{ name: string; kind: string; edgeType: string; filePath: string }>; members?: Array<{ name: string; kind: string }>; hierarchy?: Array<{ name: string; kind: string; relation: string }> } | null | undefined
+  // Selected node context (relationships) — now includes node IDs
+  const selCtx = context.selectedNodeContext as { incoming?: Array<{ id: string; name: string; kind: string; edgeType: string; filePath: string }>; outgoing?: Array<{ id: string; name: string; kind: string; edgeType: string; filePath: string }>; members?: Array<{ id: string; name: string; kind: string; filePath: string }>; hierarchy?: Array<{ id: string; name: string; kind: string; relation: string }>; containedBy?: { id: string; name: string; kind: string; filePath: string } | null } | null | undefined
   if (selCtx) {
     if (selCtx.incoming && selCtx.incoming.length > 0) {
       parts.push('')
       parts.push('**Incoming references to selected node:**')
       for (const ref of selCtx.incoming.slice(0, 10)) {
-        parts.push(`  - ${ref.name} (${ref.kind}) via ${ref.edgeType} — ${ref.filePath}`)
+        parts.push(`  - ${ref.name} (${ref.kind}) via ${ref.edgeType} — ${ref.filePath} [id: ${ref.id}]`)
       }
       if (selCtx.incoming.length > 10) parts.push(`  - ... and ${selCtx.incoming.length - 10} more`)
     }
@@ -571,7 +571,7 @@ function formatContext(context: Record<string, unknown>): string {
       parts.push('')
       parts.push('**Outgoing references from selected node:**')
       for (const ref of selCtx.outgoing.slice(0, 10)) {
-        parts.push(`  - ${ref.name} (${ref.kind}) via ${ref.edgeType} — ${ref.filePath}`)
+        parts.push(`  - ${ref.name} (${ref.kind}) via ${ref.edgeType} — ${ref.filePath} [id: ${ref.id}]`)
       }
       if (selCtx.outgoing.length > 10) parts.push(`  - ... and ${selCtx.outgoing.length - 10} more`)
     }
@@ -579,7 +579,7 @@ function formatContext(context: Record<string, unknown>): string {
       parts.push('')
       parts.push('**Members of selected node:**')
       for (const m of selCtx.members.slice(0, 15)) {
-        parts.push(`  - ${m.name} (${m.kind})`)
+        parts.push(`  - ${m.name} (${m.kind}) in ${m.filePath} [id: ${m.id}]`)
       }
       if (selCtx.members.length > 15) parts.push(`  - ... and ${selCtx.members.length - 15} more`)
     }
@@ -587,8 +587,75 @@ function formatContext(context: Record<string, unknown>): string {
       parts.push('')
       parts.push('**Type hierarchy:**')
       for (const h of selCtx.hierarchy) {
-        parts.push(`  - ${h.name} (${h.kind}) — ${h.relation}`)
+        parts.push(`  - ${h.name} (${h.kind}) — ${h.relation} [id: ${h.id}]`)
       }
+    }
+    if (selCtx.containedBy) {
+      parts.push('')
+      parts.push(`**Contained by:** ${selCtx.containedBy.name} (${selCtx.containedBy.kind}) in ${selCtx.containedBy.filePath} [id: ${selCtx.containedBy.id}]`)
+    }
+  }
+
+  // Explored context — data already available from user's browser session
+  const explored = context.exploredContext as { searchResults?: Array<{ id: string; name: string; kind: string; filePath: string; score: number }>; impactResult?: { target: string; downstream: Array<{ id: string; name: string; kind: string; filePath: string; severity: string }>; upstream: Array<{ id: string; name: string; kind: string; filePath: string; severity: string }> } | null; changeDetection?: { filesChanged: number; changedSymbols: Array<{ id: string; name: string; kind: string; filePath: string }> } | null; routeMap?: { routeCount: number; apiCallCount: number; routes: Array<{ id: string; name: string; filePath: string }> } | null; processes?: Array<{ id: string; name: string; method: string; path: string }> | null } | null | undefined
+  if (explored) {
+    let hasExploredData = false
+
+    if (explored.searchResults && explored.searchResults.length > 0) {
+      parts.push('')
+      parts.push('**Recent search results** (already available, no need to re-search):')
+      for (const r of explored.searchResults) {
+        parts.push(`  - ${r.name} (${r.kind}) in ${r.filePath} [id: ${r.id}]`)
+      }
+      hasExploredData = true
+    }
+
+    if (explored.impactResult) {
+      const imp = explored.impactResult
+      parts.push('')
+      parts.push(`**Impact analysis for ${imp.target}** (already available):`)
+      if (imp.downstream.length > 0) {
+        parts.push('  Downstream (depends on this):')
+        for (const d of imp.downstream) {
+          parts.push(`    - ${d.name} (${d.kind}) in ${d.filePath} [${d.severity}] [id: ${d.id}]`)
+        }
+      }
+      if (imp.upstream.length > 0) {
+        parts.push('  Upstream (this depends on):')
+        for (const u of imp.upstream) {
+          parts.push(`    - ${u.name} (${u.kind}) in ${u.filePath} [${u.severity}] [id: ${u.id}]`)
+        }
+      }
+      hasExploredData = true
+    }
+
+    if (explored.changeDetection && (explored.changeDetection.filesChanged > 0 || explored.changeDetection.changedSymbols.length > 0)) {
+      const cd = explored.changeDetection
+      parts.push('')
+      parts.push(`**Detected changes** (${cd.filesChanged} files changed):`)
+      for (const s of cd.changedSymbols) {
+        parts.push(`  - ${s.name} (${s.kind}) in ${s.filePath} [id: ${s.id}]`)
+      }
+      hasExploredData = true
+    }
+
+    if (explored.routeMap && explored.routeMap.routeCount > 0) {
+      const rm = explored.routeMap
+      parts.push('')
+      parts.push(`**Route map** (${rm.routeCount} routes, ${rm.apiCallCount} API calls):`)
+      for (const r of rm.routes) {
+        parts.push(`  - ${r.name} in ${r.filePath} [id: ${r.id}]`)
+      }
+      hasExploredData = true
+    }
+
+    if (explored.processes && explored.processes.length > 0) {
+      parts.push('')
+      parts.push('**Detected processes:**')
+      for (const p of explored.processes) {
+        parts.push(`  - ${p.method} ${p.path} — ${p.name} [id: ${p.id}]`)
+      }
+      hasExploredData = true
     }
   }
 
@@ -1160,8 +1227,8 @@ function defineAgentTools(qs: AuraQueryService, projectPath: string, managedShel
         const timeoutSeconds = Math.min(120, (args.timeout as number | undefined) ?? 30)
         const timeoutMs = timeoutSeconds * 1000
 
-        // Route git commands to the dedicated git tool
-        if (/^git\s/i.test(command.trim())) {
+        // Route git commands to the dedicated git tool (including chained commands)
+        if (/^git\s/i.test(command.trim()) || /(?:&&|;|\|)\s*git\s/i.test(command)) {
           return { error: `Git commands must use the dedicated "git" tool, not "execute". Use the git tool for all version control operations.` }
         }
 
@@ -1222,6 +1289,15 @@ function defineAgentTools(qs: AuraQueryService, projectPath: string, managedShel
         const validSubcommands = ['add', 'branch', 'checkout', 'commit', 'diff', 'fetch', 'init', 'log', 'merge', 'pull', 'push', 'rebase', 'remote', 'reset', 'restore', 'revert', 'show', 'stash', 'status', 'switch', 'tag', 'worktree', 'reflog', 'blame', 'grep', 'ls-files', 'config']
         if (!validSubcommands.includes(subcommand)) {
           return { error: `Unknown git subcommand: "${subcommand}". Valid subcommands: ${validSubcommands.join(', ')}` }
+        }
+
+        // Validate chained subcommands (e.g. "add -A && git commit -m ...")
+        const chainedParts = gitArgs.split(/\s*&&(?:\s*git\s+|\s+)/).filter(Boolean)
+        for (const part of chainedParts) {
+          const chainSubcmd = part.trim().split(/\s+/)[0]
+          if (chainSubcmd && !validSubcommands.includes(chainSubcmd)) {
+            return { error: `Unknown git subcommand in chain: "${chainSubcmd}". Valid subcommands: ${validSubcommands.join(', ')}` }
+          }
         }
 
         // NOTE: Dangerous git commands (force push, reset --hard, etc.) are checked in the agent loop
@@ -1720,7 +1796,7 @@ export class AuraAgent {
       if (!result) {
         if (loopRetryCount < maxLoopRetries) {
           loopRetryCount++
-          eventSink.emit('token', { content: `[Retrying from last position… (${loopRetryCount}/${maxLoopRetries})] ` })
+          if (loopRetryCount === 1) eventSink.emit('token', { content: `Lost response, retrying…` })
           continue  // Retry from the same position — messages are preserved
         }
         eventSink.emit('done', {})
@@ -1904,6 +1980,10 @@ export class AuraAgent {
         }
         if (!Array.isArray(options)) options = []
 
+        // Emit tool_call so the frontend creates a proper tool call entry
+        const askCallId = askCall.id || `ask_user_${i}`
+        eventSink.emit('tool_call', { name: 'ask_user', args: askCall.args, tool_call_id: askCallId })
+
         const approvalId = `question_${Date.now()}`
         const approval = await this.approvalManager.requestApproval(
           approvalId,
@@ -1916,9 +1996,11 @@ export class AuraAgent {
         messages.push({
           role: 'tool',
           content: answer,
-          tool_call_id: askCall.id || `ask_user_${i}`,
+          tool_call_id: askCallId,
           name: 'ask_user',
         })
+        // Emit tool_result so the frontend updates status and stores the Q&A
+        eventSink.emit('tool_result', { name: 'ask_user', result: { question, answer }, tool_call_id: askCallId })
         result.toolCalls = result.toolCalls.filter(tc => tc.name !== 'ask_user')
       }
 
@@ -2078,11 +2160,16 @@ export class AuraAgent {
         if (!response.ok || !response.body) {
           const errText = await response.text().catch(() => response.statusText)
           lastError = `${response.status} ${errText}`
-          // Retry on server errors (5xx) and rate limits (429), not on client errors (4xx)
-          if (response.status >= 500 || response.status === 429) {
+          // Don't retry on rate limits — show the error immediately
+          if (response.status === 429) {
+            eventSink.emit('error', { message: `Ollama chat failed: ${lastError}` })
+            return null
+          }
+          // Retry on server errors (5xx), not on client errors (4xx)
+          if (response.status >= 500) {
             if (attempt < maxRetries) {
               const delay = Math.min(1000 * Math.pow(2, attempt - 1), 8000)
-              eventSink.emit('token', { content: `[Retrying in ${delay / 1000}s… (${attempt}/${maxRetries})] ` })
+              if (attempt === 1) eventSink.emit('token', { content: `Connection interrupted, retrying…` })
               await new Promise(r => setTimeout(r, delay))
               continue
             }
@@ -2139,7 +2226,7 @@ export class AuraAgent {
 
         if (attempt < maxRetries) {
           const delay = Math.min(1000 * Math.pow(2, attempt - 1), 8000)
-          eventSink.emit('token', { content: `[Connection error, retrying in ${delay / 1000}s… (${attempt}/${maxRetries})] ` })
+          if (attempt === 1) eventSink.emit('token', { content: `Connection error, retrying…` })
           await new Promise(r => setTimeout(r, delay))
           continue
         }

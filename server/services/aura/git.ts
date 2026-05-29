@@ -29,6 +29,15 @@ export async function getGitHead(projectPath: string): Promise<string | null> {
   }
 }
 
+export async function hasFileChangesBetween(projectPath: string, oldHead: string, newHead: string): Promise<boolean> {
+  try {
+    const result = await execGit(['diff', '--name-only', `${oldHead}..${newHead}`], projectPath)
+    return result.trim().length > 0
+  } catch {
+    return true // assume changes on error to avoid skipping needed re-index
+  }
+}
+
 export async function getCurrentBranch(projectPath: string): Promise<string | null> {
   try {
     const result = await execGit(['rev-parse', '--abbrev-ref', 'HEAD'], projectPath)

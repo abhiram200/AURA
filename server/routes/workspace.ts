@@ -220,5 +220,20 @@ export function createWorkspaceRouter(workspaceService: WorkspaceService) {
     }
   })
 
+  // GET /:id/has-file-changes?oldHead=X&newHead=Y - Check if files changed between two commits
+  router.get('/:id/has-file-changes', async (req, res) => {
+    const { oldHead, newHead } = req.query as { oldHead?: string; newHead?: string }
+    if (!oldHead || !newHead) {
+      res.status(400).json({ error: 'oldHead and newHead query params required' })
+      return
+    }
+    try {
+      const hasChanges = await workspaceService.hasFileChangesBetween(req.params.id, oldHead, newHead)
+      res.json({ hasChanges })
+    } catch {
+      res.json({ hasChanges: true }) // assume changes on error
+    }
+  })
+
   return router
 }

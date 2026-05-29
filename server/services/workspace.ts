@@ -231,6 +231,18 @@ export class WorkspaceService {
     }
   }
 
+  async hasFileChangesBetween(projectId: string, oldHead: string, newHead: string): Promise<boolean> {
+    const root = await this.getWorkspaceRoot(projectId)
+    if (!root) return true
+
+    try {
+      const { stdout } = await execFileAsync('git', ['diff', '--name-only', `${oldHead}..${newHead}`], { cwd: root })
+      return stdout.trim().length > 0
+    } catch {
+      return true // assume changes on error
+    }
+  }
+
   async getGitStatus(projectId: string): Promise<Record<string, string>> {
     const root = await this.getWorkspaceRoot(projectId)
     if (!root) throw new Error('Project not found')
