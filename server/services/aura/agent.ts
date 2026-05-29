@@ -1859,7 +1859,7 @@ export class AuraAgent {
           try { tasks = JSON.parse(tasks) } catch { tasks = [] }
         }
         if (!Array.isArray(tasks)) tasks = []
-        const subResults = await this.runSubAgents(tasks, systemPrompt, ollamaTools, eventSink)
+        const subResults = await this.runSubAgents(tasks, systemPrompt, ollamaTools, eventSink, context)
 
         // Build structured sub-agent results
         let subResultText = '## Sub-Agent Research Results\n\n'
@@ -2250,6 +2250,7 @@ export class AuraAgent {
     systemPrompt: string,
     ollamaTools: OllamaTool[],
     eventSink: AgentEventSink,
+    context?: Record<string, unknown>,
   ): Promise<Array<{ focus: string; result: string }>> {
     const allTools = defineAgentTools(this.qs, this.projectPath, this.managedShells ?? undefined, this.projectId ?? undefined)
     const maxSubIterations = 100
@@ -2258,9 +2259,45 @@ export class AuraAgent {
       const agentType: SubAgentType = task.type || 'explore'
       eventSink.emit('sub_agent_start', { taskId: task.focus, title: task.title, task: task.task, type: agentType })
 
-      // Build specialized system prompt for this agent type
+      // Build lean system prompt for sub-agents: base tool instructions only, no user context/skills/plan
       const agentPrompt = SUB_AGENT_SYSTEM_PROMPTS[agentType]
-      const fullSystemPrompt = `${systemPrompt}\n\n${agentPrompt}\n\nFocus on: ${task.focus}`
+      const subSystemPrompt = `You are AURA — a sub-agent operating on the user's codebase.
+
+${agentPrompt}
+
+## How to Investigate
+
+1. Use tools to gather facts before answering. Break complex questions into steps and call tools in sequence.
+2. When exploring unfamiliar code, start with \`context_manifest\` → \`context_folder\` for a quick overview, then drill into specific symbols with \`search\` → \`context\`.
+3. Always verify claims against actual source code using \`search_pattern\`. The indexed data can have gaps — especially for re-exports, dynamic imports, and CommonJS patterns.
+4. When answering "is X used?", "who imports X?", or "is X unused?" — ALWAYS run \`search_pattern\` to confirm, even if the graph shows an answer.
+
+## Limitations
+
+- The dependency graph only indexes JavaScript (.js, .jsx, .mjs, .cjs), TypeScript (.ts, .tsx), and Python (.py) files. For any other language, use \`read_file\`, \`search_pattern\`, and \`search_web\` instead of graph tools.
+- If the graph doesn't index the language you're analyzing, say so clearly: "The dependency graph doesn't index [language] files, so I'll use file search and reading instead."
+
+## Folder Context Files
+
+The project has AI-generated context files in \`project_dir/.aura/contexts/\`. Each describes a folder's role, exports, dependencies, and summary in this format:
+
+# <folder-path>
+## Role — what the folder does
+## Exports — files and what they export
+## Dependencies — imports from / imported by
+## Summary — human-readable overview
+
+When exploring unfamiliar areas, call \`context_manifest\` first to see all available folders, then \`context_folder\` for specific ones.
+
+## How to Respond
+
+- Cite specific symbols, files, and relationships — use inline code for paths (\`src/auth.ts:login\`) and fenced code blocks for snippets.
+- Structure your answer with markdown headings, bold, and bullet lists. Don't dump unformatted text.
+- Be concise but complete. Prefer specific facts over vague summaries.
+
+Node ID format: \`filePath:symbolName\` (e.g., \`src/auth.ts:login\`), or just \`filePath\` for File nodes, or \`filePath:METHOD /path\` for Route nodes.
+
+Focus on: ${task.focus}`
 
       // Filter tools based on agent type
       const allowedTools = TOOL_ACCESS[agentType]
@@ -2268,7 +2305,7 @@ export class AuraAgent {
       const filteredOllamaTools = buildOllamaTools(filteredTools)
 
       const messages: OllamaMessage[] = [
-        { role: 'system', content: fullSystemPrompt },
+        { role: 'system', content: subSystemPrompt },
         { role: 'user', content: task.task },
       ]
 
