@@ -351,11 +351,6 @@ Use \`dispatch_sub_agents\` to fan out parallel agents for tasks that benefit fr
 - Understanding unfamiliar code before making changes
 - Investigating a bug that spans multiple files
 - Researching how a feature is implemented before modifying it
-- Any task where you'd need to call 3+ tools in sequence to gather information
-
-**When you should NOT spawn sub-agents:**
-- Simple lookups where one tool call answers the question
-- Writing a file you already have all the information for
 
 ## Running Commands
 
