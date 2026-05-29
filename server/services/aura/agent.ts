@@ -1554,7 +1554,7 @@ function defineAgentTools(qs: AuraQueryService, projectPath: string, managedShel
 
     {
       name: 'dispatch_sub_agents',
-      description: 'Dispatch 2 or more parallel agents. Each agent runs its own tool-calling loop and returns a text summary. Choose the right type for each task: "explore" for investigating code, "research" for web/docs lookup, "plan" for creating implementation plans. ONLY use this when the question requires investigating 2+ independent areas in parallel. For single-focus questions, call tools directly.',
+      description: 'Spawn one or more sub-agents to investigate the codebase in parallel. Each agent runs its own tool-calling loop and returns a detailed summary. Use this when a task requires exploring multiple areas of the codebase, tracing relationships across files, or researching something that would take multiple tool calls to understand. Choose the right type: "explore" for investigating code, "research" for web/docs lookup, "plan" for creating implementation plans.',
       parameters: {
         type: 'object',
         properties: {
@@ -1563,14 +1563,14 @@ function defineAgentTools(qs: AuraQueryService, projectPath: string, managedShel
             items: {
               type: 'object',
               properties: {
-                title: { type: 'string', description: 'Short title for this task, e.g. "Explore auth module" or "Fix CSS layout bug"' },
-                task: { type: 'string', description: 'What to investigate or do — a focused question for the agent' },
+                title: { type: 'string', description: 'Short title for this task, e.g. "Explore auth module" or "Trace API dependencies"' },
+                task: { type: 'string', description: 'What to investigate — a focused question for the agent' },
                 focus: { type: 'string', description: 'Specific focus area — e.g., "upstream dependencies", "API surface", "auth module"' },
                 type: { type: 'string', enum: ['explore', 'research', 'plan'], description: 'Agent type: "explore" (investigate code, read-only), "research" (web/docs), "plan" (create implementation plan, read-only)' },
               },
               required: ['title', 'task'],
             },
-            description: 'Array of 2+ tasks for parallel agents',
+            description: 'Tasks for sub-agents to work on in parallel',
           },
         },
         required: ['tasks'],
