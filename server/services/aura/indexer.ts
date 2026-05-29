@@ -2,6 +2,7 @@ import path from 'path'
 import fs from 'fs/promises'
 import fsSync from 'fs'
 import crypto from 'crypto'
+import { execFile } from 'child_process'
 import ignore from 'ignore'
 import { AuraParser } from './parser.ts'
 import { AuraTsResolver } from './ts-resolver.ts'
@@ -25,6 +26,14 @@ import { BM25SearchEngine } from './search/bm25.ts'
 import { EmbeddingService } from './search/embedding.ts'
 import { ContextGenerator } from './context-generator.ts'
 import { ProcessTracer } from './process-tracer.ts'
+
+const execFileAsync = (cmd: string, args: string[], options: import('child_process').ExecFileOptions) =>
+  new Promise<{ stdout: string; stderr: string }>((resolve, reject) => {
+    execFile(cmd, args, options, (err, stdout, stderr) => {
+      if (err) reject(err)
+      else resolve({ stdout: stdout || '', stderr: stderr || '' })
+    })
+  })
 
 type StatusListener = (status: IndexingStatus) => void
 
@@ -315,6 +324,17 @@ export class AuraIndexer {
 
     // Ensure .aura/ is in .gitignore
     await this.ensureGitignore()
+
+    // Create .aura/.gitignore to ignore all contents (double protection)
+    const auraGitignore = path.join(auraDir, '.gitignore')
+    try {
+      await fs.access(auraGitignore)
+    } catch {
+      await fs.writeFile(auraGitignore, '*\n', 'utf-8')
+    }
+
+    // Untrack .aura/ if it was committed before .gitignore was set up
+    await this.untrackAuraDir()
 
     const graphPath = path.join(auraDir, 'graph.json')
     await fs.writeFile(graphPath, JSON.stringify(this.graph, null, 2), 'utf-8')
@@ -953,6 +973,26 @@ export class AuraIndexer {
     if (needsAppend.length > 0) {
       const addition = (content && !content.endsWith('\n') ? '\n' : '') + '\n# AI tools\n' + needsAppend.join('\n') + '\n'
       await fs.writeFile(gitignorePath, content + addition, 'utf-8')
+    }
+  }
+
+  private async untrackAuraDir(): Promise<void> {
+    // If .aura/ files are already tracked by git, remove them from the index
+    // without deleting the files on disk. One-time fix for repos where .aura/
+    // was committed before .gitignore was set up.
+    try {
+      const { stdout } = await execFileAsync('git', ['ls-files', '.aura/'], {
+        cwd: this.projectPath,
+        timeout: 5000,
+      })
+      if (stdout.trim()) {
+        await execFileAsync('git', ['rm', '-r', '--cached', '.aura/'], {
+          cwd: this.projectPath,
+          timeout: 10000,
+        })
+      }
+    } catch {
+      // Not a git repo or no tracked .aura/ files — ignore
     }
   }
 

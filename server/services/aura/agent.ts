@@ -1303,7 +1303,13 @@ function defineAgentTools(qs: AuraQueryService, projectPath: string, managedShel
         // NOTE: Dangerous git commands (force push, reset --hard, etc.) are checked in the agent loop
         // via DANGEROUS_COMMAND_DESCRIPTIONS — they route to the approval system instead of being hard-blocked.
 
-        const fullCommand = `git ${gitArgs}`
+        // Auto-exclude .aura/ from git add to prevent indexer files from interfering with commits
+        let sanitizedArgs = gitArgs
+        if (subcommand === 'add') {
+          sanitizedArgs = `${gitArgs} -- . ':!.aura'`
+        }
+
+        const fullCommand = `git ${sanitizedArgs}`
         try {
           const { stdout, stderr } = await execFileAsync(fullCommand, [], {
             cwd: projectPath,
