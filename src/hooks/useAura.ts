@@ -611,7 +611,7 @@ export function useAura(projectId: string | null) {
   const gitHeadRef = useRef<string | null>(null)
   const idleTimerRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const pendingGitCommitRef = useRef<Set<string>>(new Set()) // tool_call_ids of git commit attempts
-  const pendingRetryRef = useRef<string | null>(null) // prompt to retry after indexing completes
+  const pendingRetryRef = useRef<{ assistantId: string; prompt: string } | null>(null) // retry after indexing
 
   // ── Helpers ──────────────────────────────────────────────────────────────
 
@@ -742,10 +742,10 @@ export function useAura(projectId: string | null) {
               }
               setLoading(false)
               // Retry pending ask if one was queued
-              const pendingPrompt = pendingRetryRef.current
-              if (pendingPrompt) {
+              const pending = pendingRetryRef.current
+              if (pending) {
                 pendingRetryRef.current = null
-                askRef.current(pendingPrompt)
+                retryAskRef.current(pending.assistantId, pending.prompt)
               }
             } else if (status.phase === 'error') {
               clearAllPolling()
@@ -1320,7 +1320,7 @@ export function useAura(projectId: string | null) {
             }
             return updated
           })
-          pendingRetryRef.current = prompt
+          pendingRetryRef.current = { assistantId, prompt }
           startIndexing(projectId)
           return
         }
@@ -1554,6 +1554,202 @@ export function useAura(projectId: string | null) {
 
   const askRef = useRef(ask)
   askRef.current = ask
+
+  // Retry a failed message into an existing assistant slot (used after re-indexing)
+  const retryAsk = useCallback(async (assistantId: string, prompt: string) => {
+    if (!projectId) return
+    setIsStreaming(true)
+    setChatError(null)
+
+    // Clear the "Re-indexing..." message and reset the assistant message for streaming
+    setChatMessages(prev => {
+      const updated = [...prev]
+      const idx = updated.findIndex(m => m.id === assistantId)
+      if (idx !== -1) {
+        updated[idx] = { ...updated[idx], content: '', toolCalls: [], subAgents: [], segments: [] }
+      }
+      return updated
+    })
+
+    // Build context (same as ask())
+    const nodeKinds: Record<string, number> = {}
+    const edgeTypes: Record<string, number> = {}
+    if (graphData) {
+      for (const n of graphData.nodes) nodeKinds[n.kind] = (nodeKinds[n.kind] || 0) + 1
+      for (const e of graphData.edges) edgeTypes[e.type] = (edgeTypes[e.type] || 0) + 1
+    }
+    const hasExplored = searchResults.length > 0 || impactResult || changeDetectionResult || routeMapResult || (processes && processes.length > 0)
+    const exploredContext: AuraRequestContext['exploredContext'] = hasExplored ? {} : null
+    if (exploredContext) {
+      if (searchResults.length > 0) exploredContext.searchResults = searchResults.slice(0, 20).map(r => ({ id: r.node.id, name: r.node.name, kind: r.node.kind, filePath: r.node.filePath, score: r.score }))
+      if (impactResult) exploredContext.impactResult = { target: impactResult.target, downstream: impactResult.downstream.nodes.slice(0, 15).map(n => ({ id: n.node.id, name: n.node.name, kind: n.node.kind, filePath: n.node.filePath, severity: n.severity })), upstream: impactResult.upstream.nodes.slice(0, 15).map(n => ({ id: n.node.id, name: n.node.name, kind: n.node.kind, filePath: n.node.filePath, severity: n.severity })) }
+      if (changeDetectionResult) exploredContext.changeDetection = { filesChanged: changeDetectionResult.files.length, changedSymbols: changeDetectionResult.changedSymbols.slice(0, 20).map(s => ({ id: s.node.id, name: s.node.name, kind: s.node.kind, filePath: s.node.filePath })) }
+      if (routeMapResult) exploredContext.routeMap = { routeCount: routeMapResult.routes.length, apiCallCount: routeMapResult.apiCalls.length, routes: routeMapResult.routes.slice(0, 20).map(r => ({ id: r.id, name: r.name, filePath: r.filePath })) }
+      if (processes && processes.length > 0) exploredContext.processes = processes.slice(0, 10).map(p => ({ id: p.id, name: p.name, method: p.method, path: p.path }))
+    }
+    const context: AuraRequestContext = {
+      selectedNode: selectedNode ? { id: selectedNode.id, name: selectedNode.name, kind: selectedNode.kind, filePath: selectedNode.filePath, range: selectedNode.range } : null,
+      selectedNodeContext: nodeContext ? {
+        incoming: nodeContext.incoming.map(i => ({ id: i.node.id, name: i.node.name, kind: i.node.kind, edgeType: i.edgeType, filePath: i.node.filePath })),
+        outgoing: nodeContext.outgoing.map(o => ({ id: o.node.id, name: o.node.name, kind: o.node.kind, edgeType: o.edgeType, filePath: o.node.filePath })),
+        members: nodeContext.members.map(m => ({ id: m.id, name: m.name, kind: m.kind, filePath: m.filePath })),
+        hierarchy: nodeContext.hierarchy.map(h => ({ id: h.node.id, name: h.node.name, kind: h.node.kind, relation: h.relation })),
+        containedBy: nodeContext.containedBy ? { id: nodeContext.containedBy.id, name: nodeContext.containedBy.name, kind: nodeContext.containedBy.kind, filePath: nodeContext.containedBy.filePath } : null,
+      } : null,
+      graphOverview: { nodeCount: graphData?.nodes.length ?? 0, edgeCount: graphData?.edges.length ?? 0, nodeKinds, edgeTypes },
+      exploredContext,
+    }
+    const priorMessages = buildPriorMessages(chatMessages)
+
+    try {
+      const res = await fetch(`/api/aura/ask/${projectId}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ prompt, context, priorMessages }),
+      })
+
+      if (!res.ok) {
+        // On second failure, give up and show error
+        const errBody = await res.json().catch(() => ({}))
+        throw new Error(errBody.error || `Ask failed (${res.status})`)
+      }
+
+      const reader = res.body?.getReader()
+      if (!reader) throw new Error('No response body')
+
+      const decoder = new TextDecoder()
+      let buffer = ''
+      let currentEvent = ''
+      let eventOrder = 0
+
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+
+        buffer += decoder.decode(value, { stream: true })
+        const lines = buffer.split('\n')
+        buffer = lines.pop() || ''
+        for (const line of lines) {
+          if (line.startsWith('event: ')) {
+            currentEvent = line.substring(7).trim()
+          } else if (line.startsWith('data: ') && currentEvent) {
+            try {
+              const data = JSON.parse(line.substring(6))
+              const eventType = currentEvent
+
+              if (eventType === 'context_usage') {
+                if (data.systemTokens) setSystemPromptTokens(data.systemTokens as number)
+                if (data.contextWindow) setContextWindowSize(data.contextWindow as number)
+                currentEvent = ''
+                continue
+              }
+
+              setChatMessages(prev => {
+                const updated = [...prev]
+                const idx = updated.findIndex(m => m.id === assistantId)
+                if (idx === -1) return prev
+                const msg = { ...updated[idx] }
+                // Reuse the same streaming logic as ask()
+                const segments = [...(msg.segments || [])]
+
+                // --- Token ---
+                if (eventType === 'token') {
+                  msg.content = (msg.content || '') + (data.token || '')
+                  segments.push({ type: 'text', content: data.token || '', order: eventOrder++ })
+                  msg.segments = segments
+                // --- Tool call ---
+                } else if (eventType === 'tool_call') {
+                  // (same handling as ask — but for retry we just need basic token/tool streaming)
+                  const newTc: AuraToolCall = { id: data.tool_call_id || `${data.name}_${eventOrder}`, name: data.name, args: data.args, status: 'running', order: eventOrder++ }
+                  msg.toolCalls = [...(msg.toolCalls || []), newTc]
+                  msg.content = ''
+                  segments.push({ type: 'tool_call', toolCall: newTc, order: newTc.order! })
+                  msg.segments = segments
+                // --- Tool result ---
+                } else if (eventType === 'tool_result') {
+                  const tcId = data.tool_call_id
+                  const matchedName = data.name as string | undefined
+                  const matchAnyFn = (tc: AuraToolCall) => tcId ? tc.toolCallId === tcId : (matchedName != null && tc.name === matchedName)
+                  const updatedToolCalls = [...(msg.toolCalls || [])]
+                  const tcIdx = updatedToolCalls.findIndex(matchAnyFn)
+                  if (tcIdx !== -1) {
+                    const tc = { ...updatedToolCalls[tcIdx] }
+                    tc.status = data.error ? 'error' : 'completed'
+                    tc.result = data.result || data.error || ''
+                    updatedToolCalls[tcIdx] = tc
+                    msg.toolCalls = updatedToolCalls
+                  }
+                  const updatedTc = updatedToolCalls.find(matchAnyFn)
+                  if (updatedTc) {
+                    const segMatchFn = (s: MessageSegment) => s.type === 'tool_call' && s.toolCall != null && matchAnyFn(s.toolCall)
+                    msg.segments = (msg.segments || []).map(s => segMatchFn(s) ? { ...s, toolCall: updatedTc } : s)
+                  }
+                // --- Sub-agent ---
+                } else if (eventType === 'sub_agent_start') {
+                  const newSa: AuraSubAgentInfo = { taskId: data.taskId, title: data.title || '', task: data.task, type: data.type || 'explore', status: 'running' as const, order: eventOrder++ }
+                  msg.subAgents = [...(msg.subAgents || []), newSa]
+                } else if (eventType === 'sub_agent_result') {
+                  const saIdx = (msg.subAgents || []).findIndex(sa => sa.taskId === data.taskId)
+                  if (saIdx !== -1) {
+                    const subAgents = [...(msg.subAgents || [])]
+                    subAgents[saIdx] = { ...subAgents[saIdx], status: 'completed', result: data.result }
+                    msg.subAgents = subAgents
+                  }
+                // --- Ask user ---
+                } else if (eventType === 'ask_user') {
+                  const questionTc: AuraToolCall = { id: data.tool_call_id || `ask_user_${eventOrder}`, name: 'ask_user', args: data.args, status: 'pending_approval' as const, order: eventOrder++ }
+                  msg.toolCalls = [...(msg.toolCalls || []), questionTc]
+                  setPendingApproval({ id: questionTc.id, question: data.args })
+                  msg.content = ''
+                  segments.push({ type: 'tool_call', toolCall: questionTc, order: questionTc.order! })
+                  msg.segments = segments
+                // --- Approval result ---
+                } else if (eventType === 'approval_result') {
+                  const approvalId = data.approval_id as string
+                  setPendingApproval(prev => {
+                    if (prev && prev.id === approvalId) return null
+                    return prev
+                  })
+                // --- Todo update ---
+                } else if (eventType === 'todo_update') {
+                  // skip in retry — todo state isn't critical for retry
+                // --- Error ---
+                } else if (eventType === 'error') {
+                  setChatError(data.message || 'An error occurred')
+                // --- Done ---
+                } else if (eventType === 'done') {
+                  // stream finished
+                }
+
+                updated[idx] = msg
+                return updated
+              })
+
+              currentEvent = ''
+            } catch {
+              // Skip malformed data
+            }
+          }
+        }
+      }
+    } catch (err) {
+      setChatError(err instanceof Error ? err.message : 'Ask failed')
+      setChatMessages(prev => {
+        const updated = [...prev]
+        const idx = updated.findIndex(m => m.id === assistantId)
+        if (idx !== -1) {
+          updated[idx] = { ...updated[idx], content: updated[idx].content || `Error: ${err instanceof Error ? err.message : 'Ask failed'}` }
+        }
+        return updated
+      })
+    } finally {
+      setIsStreaming(false)
+      saveChat()
+    }
+  }, [projectId, graphData, selectedNode, nodeContext, chatMessages, saveChat, searchResults, impactResult, changeDetectionResult, routeMapResult, processes])
+
+  const retryAskRef = useRef(retryAsk)
+  retryAskRef.current = retryAsk
 
   const clearChat = useCallback(() => {
     setChatMessages([])
