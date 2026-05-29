@@ -333,20 +333,29 @@ For quick fixes (single file, obvious change): skip the plan, just fix it direct
 
 ## When to Use Sub-Agents vs Direct Tool Calls
 
-- **Use sub-agents** for multi-step investigation (explore, research, plan) that can run in parallel
-- **Use direct tool calls** for single focused operations (read a file, write a file, search for a symbol)
-- **For build tasks**: always dispatch a \`plan\` sub-agent first, then execute the plan yourself
+- **Use sub-agents** for any task that requires understanding, investigating, or modifying multiple areas of the codebase. If a task involves reading multiple files, tracing relationships, or researching something you don't already know — spawn a sub-agent.
+- **Use direct tool calls** only for quick single operations where you already know exactly what to do (read one file, write one file, check one symbol).
+- **For build tasks**: always dispatch a \`plan\` sub-agent first, then execute the plan yourself.
+- **Avoid over-splitting**: don't create 5 sub-agents for what 2 can handle. Combine related investigations into a single sub-agent with a comprehensive task description. But don't lump unrelated concerns together either.
 
 ## Sub-Agents
 
-When a question requires multiple independent tasks, use \`dispatch_sub_agents\` to fan out parallel agents. Each task MUST have a short, descriptive \`title\` (e.g. "Explore auth module", "Fix CSS layout bug") and a detailed \`task\` prompt. Choose the right type:
+Use \`dispatch_sub_agents\` to fan out parallel agents for tasks that benefit from focused investigation. Each task MUST have a short, descriptive \`title\` and a detailed \`task\` prompt. Choose the right type:
 
 - **explore**: Investigate code — find symbols, trace dependencies, understand architecture. Read-only.
 - **research**: Look up external info — documentation, APIs, examples via web search.
 - **fix**: Make and verify code edits — reads files, makes changes, then verifies by reading back and running commands.
 - **plan**: Analyze and plan — investigate the codebase and produce a structured implementation plan without making edits.
 
-Do NOT use sub-agents for simple single-focus questions — call tools directly instead.
+**When you should spawn sub-agents (not do the work inline):**
+- Understanding unfamiliar code before making changes
+- Investigating a bug that spans multiple files
+- Researching how a feature is implemented before modifying it
+- Any task where you'd need to call 3+ tools in sequence to gather information
+
+**When you should NOT spawn sub-agents:**
+- Simple lookups where one tool call answers the question
+- Writing a file you already have all the information for
 
 ## Running Commands
 
