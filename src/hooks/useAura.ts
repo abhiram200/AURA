@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
+import { formatWriteUpdateDiff } from '../utils/diffUtils'
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -451,6 +452,99 @@ export interface AuraChatMessage {
   shells?: AuraShellEvent[]
   segments?: MessageSegment[]
   timestamp: number
+}
+
+// ── Prior Messages Builder ────────────────────────────────────────────────────
+
+const WRITE_UPDATE_TOOLS = new Set(['write', 'update'])
+
+function getAssistantFullText(msg: AuraChatMessage): string {
+  if (msg.role !== 'assistant' || !msg.segments || msg.segments.length === 0) return msg.content
+  return msg.segments
+    .filter(s => s.type === 'text' && s.content)
+    .map(s => s.content!)
+    .join('')
+}
+
+interface PriorMessage {
+  role: 'user' | 'assistant' | 'tool'
+  content: string
+  tool_calls?: Array<{ id?: string; function: { name: string; arguments: Record<string, unknown> } }>
+  tool_call_id?: string
+  name?: string
+}
+
+function buildPriorMessages(chatMessages: AuraChatMessage[]): PriorMessage[] {
+  const result: PriorMessage[] = []
+
+  for (const msg of chatMessages) {
+    if (msg.role === 'user') {
+      result.push({ role: 'user', content: msg.content })
+      continue
+    }
+
+    if (msg.role !== 'assistant') continue
+
+    const fullText = getAssistantFullText(msg)
+    const writeUpdateTCs = (msg.toolCalls || []).filter(tc => WRITE_UPDATE_TOOLS.has(tc.name))
+    const subAgents = msg.subAgents || []
+    const hasSubAgents = subAgents.length > 0
+
+    // Only include tool_calls if we have write/update tools or sub-agents
+    const toolCallsForMsg = []
+    for (const tc of writeUpdateTCs) {
+      toolCallsForMsg.push({
+        id: tc.toolCallId || `${tc.name}_${tc.order ?? 0}`,
+        function: { name: tc.name, arguments: tc.args },
+      })
+    }
+    if (hasSubAgents) {
+      // Find dispatch_sub_agents tool call if it exists
+      const dispatchTC = (msg.toolCalls || []).find(tc => tc.name === 'dispatch_sub_agents')
+      toolCallsForMsg.push({
+        id: dispatchTC?.toolCallId || 'dispatch_sub_agents',
+        function: { name: 'dispatch_sub_agents', arguments: {} },
+      })
+    }
+
+    const entry: PriorMessage = { role: 'assistant', content: fullText }
+    if (toolCallsForMsg.length > 0) {
+      entry.tool_calls = toolCallsForMsg
+    }
+    result.push(entry)
+
+    // Add tool results for write/update tools
+    for (const tc of writeUpdateTCs) {
+      const diffText = formatWriteUpdateDiff(tc as { name: string; args: Record<string, unknown>; result: unknown })
+      result.push({
+        role: 'tool',
+        content: diffText || JSON.stringify({ filePath: (tc.args as Record<string, unknown>)?.filePath || '', applied: true }),
+        tool_call_id: tc.toolCallId || `${tc.name}_${tc.order ?? 0}`,
+        name: tc.name,
+      })
+    }
+
+    // Add sub-agent combined result
+    if (hasSubAgents) {
+      const dispatchTC = (msg.toolCalls || []).find(tc => tc.name === 'dispatch_sub_agents')
+      const completedSAs = subAgents.filter(sa => sa.status === 'completed')
+      let subText = '## Sub-Agent Research Results\n\n'
+      for (const sa of completedSAs) {
+        subText += `### ${sa.title}\n${sa.result || 'No result'}\n\n---\n\n`
+      }
+      if (completedSAs.length === 0) {
+        subText = 'Sub-agents still running or no results available.'
+      }
+      result.push({
+        role: 'tool',
+        content: subText,
+        tool_call_id: dispatchTC?.toolCallId || 'dispatch_sub_agents',
+        name: 'dispatch_sub_agents',
+      })
+    }
+  }
+
+  return result
 }
 
 // ── Hook ─────────────────────────────────────────────────────────────────────
@@ -1129,7 +1223,7 @@ export function useAura(projectId: string | null) {
 
     try {
       // Send prior messages so the agent has conversation memory
-      const priorMessages = chatMessages.map(m => ({ role: m.role, content: m.content }))
+      const priorMessages = buildPriorMessages(chatMessages)
 
       const res = await fetch(`/api/aura/ask/${projectId}`, {
         method: 'POST',
@@ -1181,17 +1275,17 @@ export function useAura(projectId: string | null) {
 
                 if (eventType === 'token') {
                   msg.content += data.content || ''
-                  // Update last text segment or create one
-                  const segments = msg.segments || []
+                  // Create new array to avoid mutating previous state (StrictMode double-invokes updaters)
+                  const segments = [...(msg.segments || [])]
                   if (segments.length > 0 && segments[segments.length - 1].type === 'text') {
                     segments[segments.length - 1] = { ...segments[segments.length - 1], content: msg.content }
                   } else {
                     segments.push({ type: 'text', content: msg.content, order: eventOrder++ })
                   }
-                  msg.segments = [...segments]
+                  msg.segments = segments
                 } else if (eventType === 'tool_call') {
                   // Save any accumulated text as a segment, then add tool_call segment
-                  const segments = msg.segments || []
+                  const segments = [...(msg.segments || [])]
                   if (msg.content.trim()) {
                     // If last segment is text, just keep it; otherwise add new text segment
                     if (segments.length === 0 || segments[segments.length - 1].type !== 'text') {
@@ -1222,7 +1316,7 @@ export function useAura(projectId: string | null) {
                   msg.toolCalls = [...(msg.toolCalls || []), newTc]
                   msg.content = '' // Reset content — text before this tool is now in segments
                   segments.push({ type: 'tool_call', toolCall: newTc, order: newTc.order! })
-                  msg.segments = [...segments]
+                  msg.segments = segments
                 } else if (eventType === 'tool_result') {
                   const tcId = data.tool_call_id
                   const matchedName = data.name as string | undefined
@@ -1266,8 +1360,8 @@ export function useAura(projectId: string | null) {
                     order: eventOrder++,
                   }
                   msg.subAgents = [...(msg.subAgents || []), newSa]
-                  // Save any text as segment, then add sub_agent_start segment
-                  const segments = msg.segments || []
+                  // Create new array to avoid mutating previous state (StrictMode double-invokes updaters)
+                  const segments = [...(msg.segments || [])]
                   if (msg.content.trim()) {
                     if (segments.length === 0 || segments[segments.length - 1].type !== 'text') {
                       segments.push({ type: 'text', content: msg.content, order: eventOrder++ })
@@ -1275,7 +1369,7 @@ export function useAura(projectId: string | null) {
                   }
                   msg.content = ''
                   segments.push({ type: 'sub_agent_start', subAgent: newSa, order: newSa.order! })
-                  msg.segments = [...segments]
+                  msg.segments = segments
                 } else if (eventType === 'sub_agent_result') {
                   msg.subAgents = (msg.subAgents || []).map((sa: AuraSubAgentInfo) =>
                     sa.taskId === data.taskId
@@ -1390,9 +1484,26 @@ export function useAura(projectId: string | null) {
 
   const contextUsagePercent = useMemo(() => {
     if (contextWindowSize === 0) return 0
-    // Count user/assistant message content only (no tools, no sub-agents)
     const messageTokens = chatMessages.reduce((sum, m) => {
-      return sum + Math.ceil(m.content.length / 4)
+      if (m.role === 'user') return sum + Math.ceil(m.content.length / 4)
+      // For assistant messages, use segments as authoritative text source
+      let tokens = Math.ceil(getAssistantFullText(m).length / 4)
+      // Add write/update tool result tokens (diff-formatted)
+      for (const tc of (m.toolCalls || [])) {
+        if (WRITE_UPDATE_TOOLS.has(tc.name)) {
+          tokens += Math.ceil(JSON.stringify(tc.args).length / 4)
+          if (tc.result) {
+            const diffText = formatWriteUpdateDiff(tc as { name: string; args: Record<string, unknown>; result: unknown })
+            tokens += Math.ceil((diffText || '').length / 4)
+          }
+        }
+      }
+      // Add sub-agent result tokens
+      for (const sa of (m.subAgents || [])) {
+        if (sa.result) tokens += Math.ceil(sa.result.length / 4)
+        tokens += Math.ceil(sa.title.length / 4) + Math.ceil(sa.task.length / 4)
+      }
+      return sum + tokens
     }, 0)
     const total = systemPromptTokens + messageTokens
     return Math.min(100, Math.round((total / contextWindowSize) * 100))

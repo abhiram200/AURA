@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useMemo, useRef, memo, type KeyboardEvent } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
+import { computeDiff, type DiffLine } from '../../utils/diffUtils'
 type OrderedEvent =
   | { kind: 'write-tool'; tc: AuraToolCall; order: number }
   | { kind: 'other-tools'; tcs: AuraToolCall[]; order: number }
@@ -51,129 +52,6 @@ function buildOrderedEvents(toolCalls: AuraToolCall[], subAgents: AuraSubAgentIn
 }
 import type { ManagedShellState } from '../../hooks/useManagedShells'
 import { ShellBlock } from './ShellBlock'
-
-interface DiffLine {
-  type: 'add' | 'remove' | 'context'
-  content: string
-  oldLineNo?: number
-  newLineNo?: number
-}
-
-function computeDiff(oldText: string, newText: string): DiffLine[] {
-  const oldLines = oldText.split('\n')
-  const newLines = newText.split('\n')
-
-  const { lcs } = lcsMatrix(oldLines, newLines)
-  const full = buildDiffLines(oldLines, newLines, lcs, 0, 0)
-  return collapseToHunks(full, 5)
-}
-
-function collapseToHunks(lines: DiffLine[], context: number): DiffLine[] {
-  // Find indices of all changed lines
-  const changeIdxs: number[] = []
-  for (let i = 0; i < lines.length; i++) {
-    if (lines[i].type !== 'context') changeIdxs.push(i)
-  }
-
-  if (changeIdxs.length === 0) return []
-
-  // Build ranges: each change gets `context` lines of surrounding context
-  // Merge overlapping/adjacent ranges
-  const ranges: [number, number][] = []
-  for (const ci of changeIdxs) {
-    const start = Math.max(0, ci - context)
-    const end = Math.min(lines.length - 1, ci + context)
-    if (ranges.length === 0 || start > ranges[ranges.length - 1][1] + 1) {
-      ranges.push([start, end])
-    } else {
-      ranges[ranges.length - 1][1] = Math.max(ranges[ranges.length - 1][1], end)
-    }
-  }
-
-  const result: DiffLine[] = []
-  for (let r = 0; r < ranges.length; r++) {
-    const [start, end] = ranges[r]
-    if (r > 0) {
-      result.push({ type: 'context', content: '⋯' })
-    }
-    for (let i = start; i <= end; i++) {
-      result.push(lines[i])
-    }
-  }
-  return result
-}
-
-function lcsMatrix(a: string[], b: string[]) {
-  const m = a.length
-  const n = b.length
-  // For very large files, skip full LCS (O(n²) memory) and fall back to simple diff
-  if (m > 2000 || n > 2000) {
-    return { lcs: new Set<string>() }
-  }
-
-  let prev = new Uint16Array(n + 1)
-  const dp: Uint16Array[] = [new Uint16Array(n + 1)]
-
-  for (let i = 1; i <= m; i++) {
-    const curr = new Uint16Array(n + 1)
-    for (let j = 1; j <= n; j++) {
-      if (a[i - 1] === b[j - 1]) {
-        curr[j] = prev[j - 1] + 1
-      } else {
-        curr[j] = Math.max(prev[j], curr[j - 1])
-      }
-    }
-    dp.push(new Uint16Array(curr))
-    prev = curr
-  }
-
-  const lcsSet = new Set<string>()
-  let i = m, j = n
-  while (i > 0 && j > 0) {
-    if (a[i - 1] === b[j - 1]) {
-      lcsSet.add(`${i - 1},${j - 1}`)
-      i--; j--
-    } else if (dp[i - 1][j]! >= dp[i][j - 1]!) {
-      i--
-    } else {
-      j--
-    }
-  }
-  return { lcs: lcsSet }
-}
-
-function buildDiffLines(oldLines: string[], newLines: string[], lcs: Set<string>, startOld: number, startNew: number): DiffLine[] {
-  const result: DiffLine[] = []
-  let oi = 0, ni = 0
-  const lcsPairs = Array.from(lcs).map(s => s.split(',').map(Number)).sort((a, b) => a[0] - b[0])
-
-  for (const [oIdx, nIdx] of lcsPairs) {
-    // Removed lines
-    while (oi < oIdx) {
-      result.push({ type: 'remove', content: oldLines[oi], oldLineNo: startOld + oi + 1 })
-      oi++
-    }
-    // Added lines
-    while (ni < nIdx) {
-      result.push({ type: 'add', content: newLines[ni], newLineNo: startNew + ni + 1 })
-      ni++
-    }
-    // Context line
-    result.push({ type: 'context', content: oldLines[oi], oldLineNo: startOld + oi + 1, newLineNo: startNew + ni + 1 })
-    oi++; ni++
-  }
-  // Remaining removed
-  while (oi < oldLines.length) {
-    result.push({ type: 'remove', content: oldLines[oi], oldLineNo: startOld + oi + 1 })
-    oi++
-  }
-  // Remaining added
-  while (ni < newLines.length) {
-    result.push({ type: 'add', content: newLines[ni], newLineNo: startNew + ni + 1 })
-    ni++
-  }
-  return result
-}
 
 const WRITE_TOOLS = new Set(['write', 'update'])
 

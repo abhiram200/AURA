@@ -916,7 +916,13 @@ export function createAuraRouter(
     const { prompt, context, priorMessages } = req.body as {
       prompt?: string
       context?: Record<string, unknown>
-      priorMessages?: Array<{ role: string; content: string }>
+      priorMessages?: Array<{
+        role: string
+        content: string
+        tool_calls?: Array<{ id?: string; function: { name: string; arguments: Record<string, unknown> } }>
+        tool_call_id?: string
+        name?: string
+      }>
     }
     const mode = req.query.mode as string | undefined
 

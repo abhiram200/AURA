@@ -23,8 +23,17 @@ function estimateTokens(text: string): number {
   return Math.ceil(text.length / CHARS_PER_TOKEN)
 }
 
-function estimateMessagesTokens(messages: Array<{ role: string; content: string }>): number {
-  return messages.reduce((sum, m) => sum + estimateTokens(m.content), 0)
+function estimateMessagesTokens(messages: Array<{ role: string; content: string; tool_calls?: Array<{ function: { name: string; arguments: Record<string, unknown> } }> }>): number {
+  return messages.reduce((sum, m) => {
+    let tokens = estimateTokens(m.content)
+    if (m.tool_calls) {
+      for (const tc of m.tool_calls) {
+        tokens += estimateTokens(tc.function.name)
+        tokens += estimateTokens(JSON.stringify(tc.function.arguments))
+      }
+    }
+    return sum + tokens
+  }, 0)
 }
 
 // ── Context compaction ──────────────────────────────────────────────────────
@@ -1560,7 +1569,7 @@ export class AuraAgent {
     }
   }
 
-  async run(prompt: string, eventSink: AgentEventSink, context?: Record<string, unknown>, priorMessages?: Array<{ role: string; content: string }>): Promise<void> {
+  async run(prompt: string, eventSink: AgentEventSink, context?: Record<string, unknown>, priorMessages?: Array<{ role: string; content: string; tool_calls?: Array<{ id?: string; function: { name: string; arguments: Record<string, unknown> } }>; tool_call_id?: string; name?: string }>): Promise<void> {
     this.abortController = new AbortController()
 
     // Check Ollama availability
@@ -1656,7 +1665,14 @@ export class AuraAgent {
 
     for (const m of priorMsgs) {
       if (m.role === 'user' || m.role === 'assistant') {
-        messages.push({ role: m.role, content: m.content })
+        const msg: Record<string, unknown> = { role: m.role, content: m.content }
+        if (m.tool_calls) msg.tool_calls = m.tool_calls
+        messages.push(msg as OllamaMessage)
+      } else if (m.role === 'tool') {
+        const msg: Record<string, unknown> = { role: 'tool', content: m.content }
+        if (m.tool_call_id) msg.tool_call_id = m.tool_call_id
+        if (m.name) msg.name = m.name
+        messages.push(msg as OllamaMessage)
       }
     }
 
