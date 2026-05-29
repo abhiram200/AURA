@@ -199,7 +199,11 @@ const WriteToolSection = memo(function WriteToolSection({ tc }: { tc: AuraToolCa
         </span>
         {diffLines && !diffLines.created && (
           <span className="aura-chat__write-tool-stats">
-            +{diffLines.adds} -{diffLines.removes}
+            {diffLines.adds > 0 && diffLines.removes > 0
+              ? `added ${diffLines.adds} lines, removed ${diffLines.removes} lines`
+              : diffLines.adds > 0
+                ? `added ${diffLines.adds} line${diffLines.adds !== 1 ? 's' : ''}`
+                : `removed ${diffLines.removes} line${diffLines.removes !== 1 ? 's' : ''}`}
           </span>
         )}
       </summary>
