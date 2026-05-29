@@ -611,6 +611,7 @@ export function useAura(projectId: string | null) {
   const gitHeadRef = useRef<string | null>(null)
   const idleTimerRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const pendingGitCommitRef = useRef<Set<string>>(new Set()) // tool_call_ids of git commit attempts
+  const pendingRetryRef = useRef<string | null>(null) // prompt to retry after indexing completes
 
   // ── Helpers ──────────────────────────────────────────────────────────────
 
@@ -740,10 +741,18 @@ export function useAura(projectId: string | null) {
                 setGraphData(graph)
               }
               setLoading(false)
+              // Retry pending ask if one was queued
+              const pendingPrompt = pendingRetryRef.current
+              if (pendingPrompt) {
+                pendingRetryRef.current = null
+                askRef.current(pendingPrompt)
+              }
             } else if (status.phase === 'error') {
               clearAllPolling()
               setError(status.error || 'Indexing failed')
               setLoading(false)
+              // Clear pending retry if indexing failed
+              pendingRetryRef.current = null
             }
           } catch {
             // Polling error — don't crash, just skip
@@ -1301,6 +1310,20 @@ export function useAura(projectId: string | null) {
 
       if (!res.ok) {
         const errBody = await res.json().catch(() => ({}))
+        // Auto-retry: if graph not available, trigger re-index and retry after completion
+        if (res.status === 503 && errBody.needsReindex && projectId) {
+          setChatMessages(prev => {
+            const updated = [...prev]
+            const idx = updated.findIndex(m => m.id === assistantId)
+            if (idx !== -1) {
+              updated[idx] = { ...updated[idx], content: 'Re-indexing project... your message will be sent once ready.' }
+            }
+            return updated
+          })
+          pendingRetryRef.current = prompt
+          startIndexing(projectId)
+          return
+        }
         throw new Error(errBody.error || `Ask failed (${res.status})`)
       }
 
@@ -1528,6 +1551,9 @@ export function useAura(projectId: string | null) {
       saveChat()
     }
   }, [projectId, graphData, selectedNode, nodeContext, chatMessages, saveChat])
+
+  const askRef = useRef(ask)
+  askRef.current = ask
 
   const clearChat = useCallback(() => {
     setChatMessages([])

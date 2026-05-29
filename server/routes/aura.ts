@@ -951,7 +951,30 @@ export function createAuraRouter(
 
     const qs = queryMap.get(projectId)
     if (!qs || !qs.isLoaded()) {
-      res.status(404).json({ error: 'Graph not available. Start indexing first.' })
+      // Trigger re-indexing in the background if not already running
+      const indexer = indexerMap.get(projectId)
+      if (indexer) {
+        const status = indexer.getStatus()
+        if (status.phase === 'idle' || status.phase === 'error') {
+          indexer.indexProject()
+            .then(async () => {
+              let qsNew = queryMap.get(projectId)
+              if (!qsNew) {
+                const config = await getAuraConfig()
+                qsNew = new AuraQueryService(project.workspacePath, config)
+                queryMap.set(projectId, qsNew)
+              }
+              await qsNew.load()
+              const { bm25, embedding } = indexer.getSearchEngines()
+              qsNew.setSearchEngines(bm25, embedding)
+              indexer.setWatching()
+            })
+            .catch((err) => {
+              console.error(`Background re-indexing failed for project ${projectId}:`, err)
+            })
+        }
+      }
+      res.status(503).json({ error: 'Graph not available', needsReindex: true })
       return
     }
 
