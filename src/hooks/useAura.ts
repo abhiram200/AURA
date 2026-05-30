@@ -656,10 +656,6 @@ export function useAura(projectId: string | null) {
   activeChatIdRef.current = activeChatId
 
   const pollIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
-  const editsSinceLastIndexRef = useRef(false)
-  const lastActivityRef = useRef(Date.now())
-  const gitHeadRef = useRef<string | null>(null)
-  const idleTimerRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const pendingGitCommitRef = useRef<Set<string>>(new Set()) // tool_call_ids of git commit attempts
   const pendingRetryRef = useRef<{ assistantId: string; prompt: string } | null>(null) // retry after indexing
 
@@ -683,13 +679,10 @@ export function useAura(projectId: string | null) {
     setError(null)
   }, [])
 
-  // ── Activity Tracking & Idle Re-index ─────────────────────────────────────
+  // ── Activity Tracking ─────────────────────────────────────────────────────────
 
-  const reportActivity = useCallback((type: 'edit' | 'interaction' = 'interaction') => {
-    lastActivityRef.current = Date.now()
-    if (type === 'edit') {
-      editsSinceLastIndexRef.current = true
-    }
+  const reportActivity = useCallback((_type: 'edit' | 'interaction' = 'interaction') => {
+    // No-op: idle re-indexing removed, but kept for API compatibility
   }, [])
 
   // ── Chat Persistence ─────────────────────────────────────────────────────────
@@ -758,17 +751,6 @@ export function useAura(projectId: string | null) {
   const startIndexing = useCallback(async (pid: string) => {
     setLoading(true)
     setError(null)
-    editsSinceLastIndexRef.current = false
-    // Refresh git HEAD after re-index
-    ;(async () => {
-      try {
-        const res = await fetch(`/api/workspace/${pid}/git-head`)
-        if (res.ok) {
-          const data = await res.json()
-          gitHeadRef.current = data.head
-        }
-      } catch { /* ignore */ }
-    })()
     try {
       const res = await fetch(`/api/aura/index/${pid}`, { method: 'POST' })
       if (!res.ok) {
@@ -1183,78 +1165,11 @@ export function useAura(projectId: string | null) {
     }
   }, [projectId, clearAllPolling, resetState, startIndexing])
 
-  // ── Idle Re-index Timer (5 min) ────────────────────────────────────────────
-
-  useEffect(() => {
-    if (!projectId) return
-
-    // Capture initial git HEAD for change detection
-    let cancelled = false
-    ;(async () => {
-      try {
-        const res = await fetch(`/api/workspace/${projectId}/git-head`)
-        if (res.ok && !cancelled) {
-          const data = await res.json()
-          gitHeadRef.current = data.head
-        }
-      } catch { /* ignore */ }
-    })()
-
-    // Check every 30s: if idle for 5+ min and edits since last index, re-index
-    const IDLE_MS = 5 * 60 * 1000
-    const CHECK_MS = 30 * 1000
-
-    idleTimerRef.current = setInterval(() => {
-      if (!projectId) return
-      const idle = Date.now() - lastActivityRef.current
-      if (idle < IDLE_MS) return
-
-      // Check git HEAD change (catches manual terminal commits)
-      ;(async () => {
-        let gitChanged = false
-        try {
-          const res = await fetch(`/api/workspace/${projectId}/git-head`)
-          if (res.ok) {
-            const data = await res.json()
-            if (gitHeadRef.current && data.head !== gitHeadRef.current) {
-              // HEAD changed — check if files actually changed (skip merge-only commits)
-              const changesRes = await fetch(`/api/workspace/${projectId}/has-file-changes?oldHead=${encodeURIComponent(gitHeadRef.current)}&newHead=${encodeURIComponent(data.head)}`)
-              if (changesRes.ok) {
-                const changesData = await changesRes.json()
-                gitChanged = changesData.hasChanges
-              } else {
-                gitChanged = true // assume changes on error
-              }
-            }
-            gitHeadRef.current = data.head
-          }
-        } catch { /* ignore */ }
-
-        if (editsSinceLastIndexRef.current || gitChanged) {
-          editsSinceLastIndexRef.current = false
-          startIndexing(projectId)
-        }
-      })()
-    }, CHECK_MS)
-
-    return () => {
-      cancelled = true
-      if (idleTimerRef.current !== null) {
-        clearInterval(idleTimerRef.current)
-        idleTimerRef.current = null
-      }
-    }
-  }, [projectId, startIndexing])
-
   // ── Cleanup on unmount ───────────────────────────────────────────────────
 
   useEffect(() => {
     return () => {
       clearAllPolling()
-      if (idleTimerRef.current !== null) {
-        clearInterval(idleTimerRef.current)
-        idleTimerRef.current = null
-      }
     }
   }, [clearAllPolling])
 
