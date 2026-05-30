@@ -409,9 +409,12 @@ export interface AuraSubAgentInfo {
   title: string
   task: string
   type?: string
-  status: 'running' | 'completed'
+  status: 'running' | 'completed' | 'error'
   result?: string
   order?: number
+  toolsUsed?: number
+  tokensUsed?: number
+  startTime?: number
 }
 
 export interface AuraTodoItem {
@@ -1467,6 +1470,9 @@ export function useAura(projectId: string | null) {
                       type: data.type || 'explore',
                       status: 'running' as const,
                       order: eventOrder++,
+                      startTime: data.startTime || Date.now(),
+                      toolsUsed: 0,
+                      tokensUsed: 0,
                     }
                     msg.subAgents = [...(msg.subAgents || []), newSa]
                     // Create new array to avoid mutating previous state (StrictMode double-invokes updaters)
@@ -1483,14 +1489,14 @@ export function useAura(projectId: string | null) {
                 } else if (eventType === 'sub_agent_result') {
                   msg.subAgents = (msg.subAgents || []).map((sa: AuraSubAgentInfo) =>
                     sa.taskId === data.taskId
-                      ? { ...sa, result: data.result, status: 'completed' as const }
+                      ? { ...sa, result: data.result, status: (data.status === 'error' ? 'error' : 'completed') as const, toolsUsed: data.toolsUsed ?? sa.toolsUsed, tokensUsed: data.tokensUsed ?? sa.tokensUsed }
                       : sa
                   )
                   // Update segment too
                   const saSegments = msg.segments || []
                   msg.segments = saSegments.map(s =>
                     s.type === 'sub_agent_start' && s.subAgent?.taskId === data.taskId
-                      ? { ...s, subAgent: { ...s.subAgent!, result: data.result, status: 'completed' as const } }
+                      ? { ...s, subAgent: { ...s.subAgent!, result: data.result, status: (data.status === 'error' ? 'error' : 'completed') as const, toolsUsed: data.toolsUsed ?? s.subAgent!.toolsUsed, tokensUsed: data.tokensUsed ?? s.subAgent!.tokensUsed } }
                       : s
                   )
                 } else if (eventType === 'todo_update') {

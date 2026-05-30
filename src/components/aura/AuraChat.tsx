@@ -274,12 +274,44 @@ const SubAgentSection = memo(function SubAgentSection({ sa }: { sa: AuraSubAgent
     : sa.status === 'running' ? 'aura-chat__status-text--running'
     : 'aura-chat__status-text--error'
   const typeLabel = SUB_AGENT_TYPE_LABELS[sa.type || 'explore'] || 'Agent'
+  const label = sa.title ? `${typeLabel}(${sa.title})` : `${typeLabel}(${sa.task.split('\n')[0].slice(0, 60)}…)`
+
+  // Elapsed time for running agents
+  const [elapsed, setElapsed] = useState<number>(0)
+  useEffect(() => {
+    if (sa.status !== 'running' || !sa.startTime) return
+    const update = () => setElapsed(Math.round((Date.now() - sa.startTime!) / 1000))
+    update()
+    const timer = setInterval(update, 1000)
+    return () => clearInterval(timer)
+  }, [sa.status, sa.startTime])
+
+  // Format tokens: >= 1000 → XK, else just the number
+  const formatTokens = (tokens: number | undefined) => {
+    if (tokens == null || tokens === 0) return ''
+    if (tokens >= 1000) return `${Math.round(tokens / 1024 * 10) / 10}K`
+    return String(tokens)
+  }
+
+  let meta = ''
+  if (sa.status === 'running' && sa.startTime) {
+    const mins = Math.floor(elapsed / 60)
+    const secs = elapsed % 60
+    meta = mins > 0 ? `${mins}m ${secs}s` : `${secs}s`
+  } else if (sa.status === 'completed' || sa.status === 'error') {
+    const parts: string[] = []
+    if (sa.toolsUsed != null && sa.toolsUsed > 0) parts.push(`${sa.toolsUsed} Tool${sa.toolsUsed !== 1 ? 's' : ''}`)
+    const tokenStr = formatTokens(sa.tokensUsed)
+    if (tokenStr) parts.push(`${tokenStr} tokens`)
+    meta = parts.join(' · ')
+  }
+
   return (
     <details className="aura-chat__sub-agent">
       <summary className="aura-chat__sub-agent-header">
         <StatusDot status={sa.status} />
         <span className={`aura-chat__sub-agent-task ${statusClass}`}>
-          {sa.title ? `${typeLabel}(${sa.title})` : `${typeLabel}(${sa.task.split('\n')[0].slice(0, 60)}…)`}
+          {label}{meta ? ` · ${meta}` : ''}
         </span>
       </summary>
       {sa.result && (
@@ -292,6 +324,12 @@ const SubAgentSection = memo(function SubAgentSection({ sa }: { sa: AuraSubAgent
 })
 
 function SubAgentsGroup({ subAgents }: { subAgents: AuraSubAgentInfo[] }) {
+  // Format tokens for group display
+  const formatTokens = (tokens: number) => {
+    if (tokens >= 1000) return `${Math.round(tokens / 1024 * 10) / 10}K`
+    return String(tokens)
+  }
+
   if (subAgents.length <= 1) {
     return (
       <div className="aura-chat__sub-agents">
@@ -309,7 +347,18 @@ function SubAgentsGroup({ subAgents }: { subAgents: AuraSubAgentInfo[] }) {
   if (running > 0) statusLabel = `${running} running`
   else if (completed === subAgents.length) statusLabel = 'all done'
 
-  const label = `${subAgents.length} agents${statusLabel ? ` · ${statusLabel}` : ''}`
+  // Aggregate tools and tokens for completed agents
+  const totalTools = subAgents.reduce((sum, sa) => sum + (sa.toolsUsed ?? 0), 0)
+  const totalTokens = subAgents.reduce((sum, sa) => sum + (sa.tokensUsed ?? 0), 0)
+
+  const parts: string[] = [`${subAgents.length} agents`]
+  if (statusLabel) parts.push(statusLabel)
+  if (running === 0 && totalTools > 0) {
+    parts.push(`${totalTools} Tool${totalTools !== 1 ? 's' : ''}`)
+    if (totalTokens > 0) parts.push(`${formatTokens(totalTokens)} tokens`)
+  }
+
+  const label = parts.join(' · ')
   const groupStatus = running > 0 ? 'running' : 'completed'
   const groupStatusClass = groupStatus === 'completed' ? 'aura-chat__status-text--done' : 'aura-chat__status-text--running'
 

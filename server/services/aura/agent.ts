@@ -2663,7 +2663,7 @@ export class AuraAgent {
     const runOne = async (taskIndex: number, task: SubAgentTask): Promise<string> => {
       const agentType: SubAgentType = task.type || 'explore'
       const taskId = `sa_${taskIndex}_${task.focus}`
-      eventSink.emit('sub_agent_start', { taskId, title: task.title, task: task.task, type: agentType })
+      eventSink.emit('sub_agent_start', { taskId, title: task.title, task: task.task, type: agentType, startTime: Date.now() })
 
       // Build lean system prompt for sub-agents: base tool instructions only, no user context/skills/plan
       const agentPrompt = SUB_AGENT_SYSTEM_PROMPTS[agentType]
@@ -2722,20 +2722,23 @@ Focus on: ${task.focus}`
       messages.push({ role: 'user', content: task.task })
 
       let lastContent = ''
+      let toolsUsed = 0
       for (let i = 0; i < maxSubIterations; i++) {
         const subSink = new SilentEventSink()
         const result = await this.streamChat(messages, filteredOllamaTools, subSink)
         if (result?.content) lastContent = result.content
 
         if (!result || result.toolCalls.length === 0) {
-          eventSink.emit('sub_agent_result', { taskId, result: result?.content || 'No findings' })
+          const tokensUsed = estimateMessagesTokens(messages)
+          eventSink.emit('sub_agent_result', { taskId, result: result?.content || 'No findings', toolsUsed, tokensUsed })
           return result?.content || 'No findings'
         }
 
         // On the last iteration, return whatever content the model produced alongside tool calls
         if (i === maxSubIterations - 1) {
           const summary = lastContent || 'Sub-agent ran out of iterations before producing a final summary'
-          eventSink.emit('sub_agent_result', { taskId, result: summary })
+          const tokensUsed = estimateMessagesTokens(messages)
+          eventSink.emit('sub_agent_result', { taskId, result: summary, toolsUsed, tokensUsed })
           return summary
         }
 
@@ -2746,6 +2749,7 @@ Focus on: ${task.focus}`
         })
 
         for (const tc of result.toolCalls) {
+          toolsUsed++
           const tool = filteredTools.find(t => t.name === tc.name)
           if (!tool) continue
           try {
@@ -2759,7 +2763,8 @@ Focus on: ${task.focus}`
       }
 
       // Unreachable, but just in case
-      eventSink.emit('sub_agent_result', { taskId, result: lastContent || 'No findings' })
+      const tokensUsed = estimateMessagesTokens(messages)
+      eventSink.emit('sub_agent_result', { taskId, result: lastContent || 'No findings', toolsUsed, tokensUsed })
       return lastContent || 'No findings'
     }
 
@@ -2767,6 +2772,19 @@ Focus on: ${task.focus}`
     const results = await Promise.allSettled(
       tasks.map((task, index) => runOne(index, task)),
     )
+
+    // Emit result events for any rejected sub-agents (fulfilled ones already emitted inside runOne)
+    results.forEach((r, i) => {
+      if (r.status === 'rejected') {
+        eventSink.emit('sub_agent_result', {
+          taskId: `sa_${i}_${tasks[i].focus}`,
+          result: r.reason instanceof Error ? r.reason.message : 'Sub-agent failed',
+          status: 'error',
+          toolsUsed: 0,
+          tokensUsed: 0,
+        })
+      }
+    })
 
     return results.map((r, i) => ({
       focus: tasks[i].focus,
