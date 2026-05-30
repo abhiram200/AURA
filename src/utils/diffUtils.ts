@@ -1,5 +1,5 @@
 export interface DiffLine {
-  type: 'add' | 'remove' | 'context'
+  type: 'add' | 'remove' | 'context' | 'file-start' | 'file-end'
   content: string
   oldLineNo?: number
   newLineNo?: number
@@ -31,14 +31,36 @@ export function collapseToHunks(lines: DiffLine[], context: number): DiffLine[] 
     }
   }
 
+  // Determine total context lines in the full diff (not just the collapsed output)
+  // to know if a hunk touches the start or end of the file
+  const totalContextLines = lines.filter(l => l.type === 'context').length
+  const totalLines = lines.length
+
   const result: DiffLine[] = []
   for (let r = 0; r < ranges.length; r++) {
     const [start, end] = ranges[r]
     if (r > 0) {
       result.push({ type: 'context', content: '⋯' })
     }
+    // If the hunk starts at line 0 (first line of the diff), the file has less than
+    // 3 lines of context before the first change → show "start of file" marker
+    if (start === 0) {
+      // Check if the first change in this hunk has less than `context` lines before it
+      const firstChangeInHunk = changeIdxs.find(ci => ci >= start && ci <= end)!
+      if (firstChangeInHunk < context) {
+        result.push({ type: 'file-start', content: 'start of file' })
+      }
+    }
     for (let i = start; i <= end; i++) {
       result.push(lines[i])
+    }
+    // If the hunk ends at the last line of the diff, the file has less than
+    // 3 lines of context after the last change → show "end of file" marker
+    if (end === totalLines - 1) {
+      const lastChangeInHunk = changeIdxs.filter(ci => ci >= start && ci <= end).pop()!
+      if (lastChangeInHunk > totalLines - 1 - context) {
+        result.push({ type: 'file-end', content: 'end of file' })
+      }
     }
   }
   return result

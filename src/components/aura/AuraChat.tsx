@@ -210,6 +210,14 @@ const WriteToolSection = memo(function WriteToolSection({ tc }: { tc: AuraToolCa
       {tc.status === 'completed' && diffLines && diffLines.lines.length > 0 && (
         <div className="aura-chat__write-tool-diff">
           {diffLines.lines.map((line, i) => (
+            line.type === 'file-start' || line.type === 'file-end' ? (
+              <div key={i} className={`aura-chat__diff-line aura-chat__diff-line--boundary`}>
+                <span className="aura-chat__diff-line-no" />
+                <span className="aura-chat__diff-line-no" />
+                <span className="aura-chat__diff-prefix" />
+                <span className="aura-chat__diff-boundary">{line.content}</span>
+              </div>
+            ) : (
             <div key={i} className={`aura-chat__diff-line aura-chat__diff-line--${line.type}`}>
               <span className="aura-chat__diff-line-no">
                 {line.type === 'add' ? (line.newLineNo ?? '') : (line.oldLineNo ?? '')}
@@ -222,6 +230,7 @@ const WriteToolSection = memo(function WriteToolSection({ tc }: { tc: AuraToolCa
               </span>
               <span className="aura-chat__diff-content">{line.content}</span>
             </div>
+            )
           ))}
         </div>
       )}

@@ -1937,6 +1937,18 @@
   background: transparent;
 }
 
+.aura-chat__diff-line--boundary {
+  background: transparent;
+}
+
+.aura-chat__diff-boundary {
+  color: #6e7681;
+  font-style: italic;
+  font-size: 11px;
+  white-space: pre;
+  padding: 2px 0;
+}
+
 .aura-chat__diff-line-no {
   color: #484848;
   text-align: right;
