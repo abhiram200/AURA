@@ -61,7 +61,7 @@ export function createAuraRouter(
       })(),
       chatModel: settings?.defaultProjectModel || settings?.defaultModel || process.env.OLLAMA_MODEL || 'glm-5.1:cloud',
       embedModel: settings?.defaultEmbeddingModel || 'mxbai-embed-large:335m',
-      contextWindow: settings?.contextWindowSize || 8192,
+      contextWindow: settings?.contextWindowSize || 200_000,
     }
   }
 
@@ -480,7 +480,7 @@ export function createAuraRouter(
       res.json({ folders: {}, generatedAt: null, ollamaWasAvailable: false, model: fallbackConfig.chatModel })
       return
     }
-    res.json(manifest)
+    res.set('Cache-Control', 'max-age=3600').json(manifest)
   })
 
   // GET /api/aura/contexts/:projectId/root — Get root project context
@@ -496,7 +496,7 @@ export function createAuraRouter(
       res.status(404).json({ error: 'Root context not found' })
       return
     }
-    res.type('text/markdown').send(context)
+    res.set('Cache-Control', 'max-age=3600').type('text/markdown').send(context)
   })
 
   // GET /api/aura/contexts/:projectId/*folderPath — Get context for a specific folder
@@ -508,14 +508,14 @@ export function createAuraRouter(
       res.status(404).json({ error: 'Graph not available. Start indexing first.' })
       return
     }
-    // Convert URL path back to folder path (src_components_canvas -> src/components/canvas)
-    const decodedPath = folderPath ? folderPath.replace(/_/g, '/') : '.'
+    // Convert URL path back to folder path (src__SLASH__components__SLASH__canvas -> src/components/canvas)
+    const decodedPath = folderPath ? folderPath.replace(/__SLASH__/g, '/') : '.'
     const context = qs.getContextForFolder(decodedPath)
     if (!context) {
       res.status(404).json({ error: 'Context not found for this folder' })
       return
     }
-    res.type('text/markdown').send(context)
+    res.set('Cache-Control', 'max-age=3600').type('text/markdown').send(context)
   })
 
   // ── Group endpoints ─────────────────────────────────────────────────────────
@@ -925,7 +925,7 @@ export function createAuraRouter(
   // Query param ?mode=json returns a single JSON response instead of SSE stream
   router.post('/ask/:projectId', async (req, res) => {
     const { projectId } = req.params
-    const { prompt, context, priorMessages } = req.body as {
+    const { prompt, context, priorMessages, sourceMessageIds } = req.body as {
       prompt?: string
       context?: Record<string, unknown>
       priorMessages?: Array<{
@@ -935,6 +935,7 @@ export function createAuraRouter(
         tool_call_id?: string
         name?: string
       }>
+      sourceMessageIds?: string[]
     }
     const mode = req.query.mode as string | undefined
 
@@ -980,7 +981,10 @@ export function createAuraRouter(
 
     const { AuraAgent } = await import('../services/aura/agent.ts')
     const config = await getAuraConfig()
-    const agent = new AuraAgent(qs, project.workspacePath, config.ollamaBaseUrl, config.chatModel, config.contextWindow, managedShellService, projectId)
+    // Get chat ID for compaction persistence (best-effort — may not exist yet)
+    const chatSession = await chatService.get(project.workspacePath)
+    const chatId = chatSession?.id ?? null
+    const agent = new AuraAgent(qs, project.workspacePath, config.ollamaBaseUrl, config.chatModel, config.contextWindow, managedShellService, projectId, chatService, chatId)
 
     // JSON mode — collect all SSE events and return a single response
     if (mode === 'json') {
@@ -988,7 +992,7 @@ export function createAuraRouter(
       const sink = new CollectingEventSink()
 
       try {
-        await agent.run(prompt, sink, context, priorMessages)
+        await agent.run(prompt, sink, context, priorMessages, sourceMessageIds)
       } catch (err) {
         res.status(500).json({ error: err instanceof Error ? err.message : 'Agent failed' })
         return
@@ -1033,7 +1037,7 @@ export function createAuraRouter(
     })
 
     try {
-      await agent.run(prompt, eventSink, context, priorMessages)
+      await agent.run(prompt, eventSink, context, priorMessages, sourceMessageIds)
     } catch (err) {
       if (!aborted) {
         eventSink.emit(AgentEventType.Error, { message: err instanceof Error ? err.message : 'Agent failed' })
@@ -1072,7 +1076,7 @@ export function createAuraRouter(
     res.json(chat)
   })
 
-  // PATCH /api/aura/chats/:projectId/:chatId — Save messages
+  // PATCH /api/aura/chats/:projectId/:chatId — Save messages and compaction checkpoints
   router.patch('/chats/:projectId/:chatId', async (req, res) => {
     const { projectId, chatId } = req.params
     const project = await projectService.get(projectId)
@@ -1080,13 +1084,18 @@ export function createAuraRouter(
       res.status(404).json({ error: 'Project not found' })
       return
     }
-    const { messages } = req.body as { messages: unknown[] }
+    const { messages, compactionCheckpoints } = req.body as { messages?: unknown[]; compactionCheckpoints?: unknown[] }
     const existing = await chatService.get(project.workspacePath)
     if (!existing || existing.id !== chatId) {
       res.status(404).json({ error: 'Chat not found' })
       return
     }
-    existing.messages = messages as AuraChatSession['messages']
+    if (messages) {
+      existing.messages = messages as AuraChatSession['messages']
+    }
+    if (compactionCheckpoints) {
+      existing.compactionCheckpoints = compactionCheckpoints as AuraChatSession['compactionCheckpoints']
+    }
     await chatService.save(project.workspacePath, existing)
     res.json(existing)
   })

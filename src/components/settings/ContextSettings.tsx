@@ -1,4 +1,4 @@
-const MIN_TOKENS = 8192
+const MIN_TOKENS = 131072 // 128K
 const MAX_TOKENS = 1_048_576 // 1M
 
 function sliderToTokens(position: number): number {
@@ -47,7 +47,7 @@ export function ContextSettings({
         <span className="context-settings__value">{formatTokenCount(contextWindowSize)}</span>
       </div>
       <div className="context-settings__slider-row">
-        <span className="context-settings__tick">8K</span>
+        <span className="context-settings__tick">128K</span>
         <input
           type="range"
           min="0"

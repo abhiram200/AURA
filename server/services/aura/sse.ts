@@ -9,6 +9,9 @@ export enum AgentEventType {
   TodoUpdate = 'todo_update',
   ApprovalRequest = 'approval_request',
   PlanCompleted = 'plan_completed',
+  ContextUsage = 'context_usage',
+  Status = 'status',
+  Compaction = 'compaction',
   Done = 'done',
   Error = 'error',
   ShellSpawned = 'shell_spawned',
@@ -101,6 +104,11 @@ export class CollectingEventSink implements AgentEventSink {
         break
       case AgentEventType.Error:
         this.errors.push(d.message as string)
+        break
+      case AgentEventType.ContextUsage:
+      case AgentEventType.Status:
+      case AgentEventType.Compaction:
+        // These are informational events — no action needed in JSON mode
         break
     }
   }

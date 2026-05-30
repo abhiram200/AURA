@@ -335,12 +335,12 @@ export function SettingsPanel({
                           type="range"
                           min="0"
                           max="100"
-                          value={Math.round(Math.log(settings.contextWindowSize / 8192) / Math.log(1048576 / 8192) * 100)}
+                          value={Math.round(Math.log(settings.contextWindowSize / 131072) / Math.log(1048576 / 131072) * 100)}
                           onChange={(e) => {
                             const t = parseInt(e.target.value, 10) / 100
-                            const raw = Math.round(8192 * Math.pow(1048576 / 8192, t))
+                            const raw = Math.round(131072 * Math.pow(1048576 / 131072, t))
                             // Snap to nearest marker if within ~10% threshold
-                            const markers = [8192, 16384, 32768, 65536, 131072, 262144, 1048576]
+                            const markers = [131072, 262144, 524288, 1048576]
                             const snapped = markers.find(m => Math.abs(raw - m) / m < 0.1)
                             onSettingsChange({ contextWindowSize: snapped || raw })
                           }}
@@ -348,12 +348,9 @@ export function SettingsPanel({
                         />
                       </div>
                       <div className="context-settings__markers">
-                        <span className="context-settings__marker" style={{ left: '0%' }}>8K</span>
-                        <span className="context-settings__marker" style={{ left: `${Math.round(Math.log(16384 / 8192) / Math.log(1048576 / 8192) * 100)}%` }}>16K</span>
-                        <span className="context-settings__marker" style={{ left: `${Math.round(Math.log(32768 / 8192) / Math.log(1048576 / 8192) * 100)}%` }}>32K</span>
-                        <span className="context-settings__marker" style={{ left: `${Math.round(Math.log(65536 / 8192) / Math.log(1048576 / 8192) * 100)}%` }}>64K</span>
-                        <span className="context-settings__marker" style={{ left: `${Math.round(Math.log(131072 / 8192) / Math.log(1048576 / 8192) * 100)}%` }}>128K</span>
-                        <span className="context-settings__marker" style={{ left: `${Math.round(Math.log(262144 / 8192) / Math.log(1048576 / 8192) * 100)}%` }}>256K</span>
+                        <span className="context-settings__marker" style={{ left: '0%' }}>128K</span>
+                        <span className="context-settings__marker" style={{ left: `${Math.round(Math.log(262144 / 131072) / Math.log(1048576 / 131072) * 100)}%` }}>256K</span>
+                        <span className="context-settings__marker" style={{ left: `${Math.round(Math.log(524288 / 131072) / Math.log(1048576 / 131072) * 100)}%` }}>512K</span>
                         <span className="context-settings__marker" style={{ left: '100%' }}>1M</span>
                       </div>
                     </div>

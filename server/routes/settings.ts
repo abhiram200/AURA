@@ -4,7 +4,7 @@ import type { Settings, UserPreferences } from '../storage/types.ts'
 
 const DEFAULT_SETTINGS: Settings = {
   defaultModel: '',
-  contextWindowSize: 8192,
+  contextWindowSize: 131072,
   autoExtractMemory: true,
   preferences: {
     responseDetail: null,
@@ -35,8 +35,9 @@ export function createSettingsRouter(store: FileStore) {
       settings = { ...DEFAULT_SETTINGS }
       await store.write('settings.json', settings)
     }
-    // Migrate: old contextWindowSize was message count (max ~30), new is token count (min 4096)
-    if (settings.contextWindowSize < 1024) {
+    // Migrate: old contextWindowSize was message count (max ~30) or old default 8192
+    // New minimum is 128K (131072)
+    if (settings.contextWindowSize < 131072) {
       settings.contextWindowSize = DEFAULT_SETTINGS.contextWindowSize
       await store.write('settings.json', settings)
     }
@@ -63,6 +64,11 @@ export function createSettingsRouter(store: FileStore) {
     }
     if (settings.ollamaBaseUrl === undefined) {
       settings.ollamaBaseUrl = ''
+      await store.write('settings.json', settings)
+    }
+    // Migration: remove deprecated builderContextWindowSize (builder now uses contextWindowSize from the slider)
+    if ('builderContextWindowSize' in settings) {
+      delete (settings as Record<string, unknown>).builderContextWindowSize
       await store.write('settings.json', settings)
     }
     res.json(settings)

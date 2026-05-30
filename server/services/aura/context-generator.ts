@@ -11,9 +11,10 @@ import type {
 } from './types.ts'
 import { AuraNodeKind, AuraEdgeType } from './types.ts'
 
-const CHAT_TIMEOUT = 60000
+const CHAT_TIMEOUT = 30000
 const MAX_CONCURRENT = 3
 const AVAILABILITY_CACHE_MS = 60000
+const CONTEXT_CACHE_MAX = 50
 
 export class ContextGenerator {
   private ollamaBaseUrl: string
@@ -21,6 +22,7 @@ export class ContextGenerator {
   private available = false
   private lastAvailabilityCheck = 0
   private availabilityCacheResult = false
+  private contextCache = new Map<string, string>()
 
   constructor(ollamaBaseUrl?: string, chatModel?: string) {
     this.ollamaBaseUrl = ollamaBaseUrl || process.env.OLLAMA_BASE_URL || 'http://localhost:11434'
@@ -81,10 +83,16 @@ export class ContextGenerator {
     // Determine which folders need regeneration
     let foldersToGenerate: string[]
     if (changedFolders) {
-      foldersToGenerate = changedFolders.filter(f => allFolders.includes(f))
+      // Merge explicitly changed folders with any that were marked stale by cascading invalidation
+      const staleFromManifest = manifest.needsRegeneration?.filter(f => allFolders.includes(f)) ?? []
+      const merged = new Set([...changedFolders.filter(f => allFolders.includes(f)), ...staleFromManifest])
+      foldersToGenerate = Array.from(merged)
+      // Clear the stale list since we're about to regenerate these
+      manifest.needsRegeneration = []
     } else {
       // Full regeneration: regenerate all folders
       foldersToGenerate = allFolders
+      manifest.needsRegeneration = []
     }
 
     if (!isAvailable || foldersToGenerate.length === 0) {
@@ -105,12 +113,16 @@ export class ContextGenerator {
     const contextDir = path.join(projectPath, '.aura', 'contexts')
     await fs.mkdir(contextDir, { recursive: true })
 
+    // Invalidate cache since we're about to write new context files
+    this.invalidateCache(projectPath)
+
     for (let i = 0; i < foldersToGenerate.length; i += MAX_CONCURRENT) {
       const batch = foldersToGenerate.slice(i, i + MAX_CONCURRENT)
       const results = await Promise.allSettled(
         batch.map(folder => this.generateOneContext(graph, projectPath, folder, depMap)),
       )
 
+      const regeneratedFolders: string[] = []
       for (let j = 0; j < results.length; j++) {
         const result = results[j]
         if (result.status === 'fulfilled' && result.value !== null) {
@@ -123,10 +135,38 @@ export class ContextGenerator {
             fileHashes: this.computeFolderFileHashes(graph, batch[j]),
           }
           generatedCount++
+          regeneratedFolders.push(batch[j])
         } else {
           failures++
         }
       }
+
+      // Cascading invalidation: mark dependents of regenerated folders for next re-index
+      if (regeneratedFolders.length > 0) {
+        const existing = new Set(manifest.needsRegeneration ?? [])
+        for (const folder of regeneratedFolders) {
+          const dependents = depMap.folderImportsTo.get(folder) ?? new Set()
+          for (const dep of dependents) {
+            // Only add folders that exist in the graph and aren't already in this batch
+            if (allFolders.includes(dep) && !batch.includes(dep)) {
+              existing.add(dep)
+            }
+          }
+        }
+        manifest.needsRegeneration = Array.from(existing)
+      }
+
+      // Circuit breaker: re-check availability after each batch
+      const stillAvailable = await this.checkAvailability()
+      if (!stillAvailable) {
+        manifest.ollamaWasAvailable = false
+        // Save progress before aborting
+        await this.saveManifest(manifest, projectPath)
+        break
+      }
+
+      // Save manifest after each batch to preserve progress on crash
+      await this.saveManifest(manifest, projectPath)
 
       done += batch.length
       onProgress?.(done, total)
@@ -607,10 +647,16 @@ Total symbols: ${data.symbolCount}, Total edges: ${data.edgeCount}`,
         }),
         signal: AbortSignal.timeout(CHAT_TIMEOUT),
       })
-      if (!res.ok) return null
+      if (!res.ok) {
+        // Invalidate availability cache so next check is live
+        this.lastAvailabilityCheck = 0
+        return null
+      }
       const data = await res.json() as { message?: { content?: string } }
       return data.message?.content ?? null
     } catch {
+      // Invalidate availability cache so next check is live
+      this.lastAvailabilityCheck = 0
       return null
     }
   }
@@ -644,16 +690,17 @@ Total symbols: ${data.symbolCount}, Total edges: ${data.edgeCount}`,
 
   private folderPathToFileName(folderPath: string): string {
     if (folderPath === '.') return 'root'
-    return folderPath.replace(/\//g, '_')
+    return folderPath.replace(/\//g, '__SLASH__')
   }
 
   private computeFolderFileHashes(graph: GraphData, folderPath: string): Record<string, string> {
     const hashes: Record<string, string> = {}
     for (const node of graph.nodes) {
-      if (node.kind !== AuraNodeKind.File) continue
+      // Include both File nodes and Symbol nodes so intra-file changes (adding/removing functions) trigger regeneration
       const nodeFolder = this.getFolderFromPath(node.filePath)
       if (nodeFolder === folderPath) {
-        hashes[node.filePath] = node.id // Use node ID as a proxy hash (changes when file content changes)
+        const key = node.kind === AuraNodeKind.File ? node.filePath : `${node.filePath}:${node.id}`
+        hashes[key] = node.id
       }
     }
     return hashes
@@ -666,6 +713,7 @@ Total symbols: ${data.symbolCount}, Total edges: ${data.edgeCount}`,
       ollamaWasAvailable: false,
       model: this.chatModel,
       folders: {},
+      needsRegeneration: [],
     }
   }
 
@@ -675,7 +723,9 @@ Total symbols: ${data.symbolCount}, Total edges: ${data.edgeCount}`,
     const auraDir = path.join(projectPath, '.aura')
     await fs.mkdir(auraDir, { recursive: true })
     const manifestPath = path.join(auraDir, 'contexts.json')
-    await fs.writeFile(manifestPath, JSON.stringify(manifest, null, 2), 'utf-8')
+    const tmpPath = manifestPath + '.tmp'
+    await fs.writeFile(tmpPath, JSON.stringify(manifest, null, 2), 'utf-8')
+    await fs.rename(tmpPath, manifestPath)
   }
 
   loadManifest(projectPath: string): ContextManifest | null {
@@ -683,13 +733,37 @@ Total symbols: ${data.symbolCount}, Total edges: ${data.edgeCount}`,
     if (!fsSync.existsSync(manifestPath)) return null
     try {
       const raw = fsSync.readFileSync(manifestPath, 'utf-8')
-      return JSON.parse(raw) as ContextManifest
+      const manifest = JSON.parse(raw) as ContextManifest
+      // Migration: rename old underscore-encoded context files to __SLASH__ encoding
+      const contextDir = path.join(projectPath, '.aura', 'contexts')
+      let migrated = false
+      for (const [folder, entry] of Object.entries(manifest.folders)) {
+        const oldName = folder === '.' ? 'root' : folder.replace(/\//g, '_')
+        const newName = this.folderPathToFileName(folder)
+        if (entry.contextFile === `${oldName}.md` && oldName !== newName) {
+          const oldPath = path.join(contextDir, `${oldName}.md`)
+          const newPath = path.join(contextDir, `${newName}.md`)
+          if (fsSync.existsSync(oldPath)) {
+            fsSync.renameSync(oldPath, newPath)
+          }
+          entry.contextFile = `${newName}.md`
+          migrated = true
+        }
+      }
+      if (migrated) {
+        fsSync.writeFileSync(manifestPath, JSON.stringify(manifest, null, 2), 'utf-8')
+      }
+      return manifest
     } catch {
       return null
     }
   }
 
   getContextForFolder(projectPath: string, folderPath: string): string | null {
+    const cacheKey = `${projectPath}:${folderPath}`
+    const cached = this.contextCache.get(cacheKey)
+    if (cached !== undefined) return cached
+
     const manifest = this.loadManifest(projectPath)
     if (!manifest) return null
     const entry = manifest.folders[folderPath]
@@ -697,7 +771,9 @@ Total symbols: ${data.symbolCount}, Total edges: ${data.edgeCount}`,
     const filePath = path.join(projectPath, '.aura', 'contexts', entry.contextFile)
     if (!fsSync.existsSync(filePath)) return null
     try {
-      return fsSync.readFileSync(filePath, 'utf-8')
+      const content = fsSync.readFileSync(filePath, 'utf-8')
+      this.setCache(cacheKey, content)
+      return content
     } catch {
       return null
     }
@@ -708,13 +784,39 @@ Total symbols: ${data.symbolCount}, Total edges: ${data.edgeCount}`,
     if (!manifest) return {}
     const result: Record<string, string> = {}
     for (const [folder, entry] of Object.entries(manifest.folders)) {
+      const cacheKey = `${projectPath}:${folder}`
+      const cached = this.contextCache.get(cacheKey)
+      if (cached !== undefined) {
+        result[folder] = cached
+        continue
+      }
       const filePath = path.join(projectPath, '.aura', 'contexts', entry.contextFile)
       try {
-        result[folder] = fsSync.readFileSync(filePath, 'utf-8')
+        const content = fsSync.readFileSync(filePath, 'utf-8')
+        this.setCache(cacheKey, content)
+        result[folder] = content
       } catch {
         // skip unreadable files
       }
     }
     return result
+  }
+
+  /** Evict cache entries for a project (call after generating new contexts) */
+  invalidateCache(projectPath: string): void {
+    for (const key of this.contextCache.keys()) {
+      if (key.startsWith(`${projectPath}:`)) {
+        this.contextCache.delete(key)
+      }
+    }
+  }
+
+  private setCache(key: string, value: string): void {
+    if (this.contextCache.size >= CONTEXT_CACHE_MAX) {
+      // Evict oldest entry (Map preserves insertion order)
+      const oldest = this.contextCache.keys().next().value
+      if (oldest !== undefined) this.contextCache.delete(oldest)
+    }
+    this.contextCache.set(key, value)
   }
 }

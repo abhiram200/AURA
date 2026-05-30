@@ -467,6 +467,14 @@ export interface AuraChatMessage {
 const WRITE_UPDATE_TOOLS = new Set(['write', 'update'])
 const CONTEXT_TOOLS = new Set(['write', 'update', 'ask_user'])
 
+export interface CompactionCheckpoint {
+  createdAt: string
+  summary: string
+  aiGenerated: boolean
+  coveredMessageIds: string[]
+  summaryTokens: number
+}
+
 function getAssistantFullText(msg: AuraChatMessage): string {
   if (msg.role !== 'assistant' || !msg.segments || msg.segments.length === 0) return msg.content
   return msg.segments
@@ -476,19 +484,55 @@ function getAssistantFullText(msg: AuraChatMessage): string {
 }
 
 interface PriorMessage {
-  role: 'user' | 'assistant' | 'tool'
+  role: 'user' | 'assistant' | 'tool' | 'system'
   content: string
   tool_calls?: Array<{ id?: string; function: { name: string; arguments: Record<string, unknown> } }>
   tool_call_id?: string
   name?: string
 }
 
-function buildPriorMessages(chatMessages: AuraChatMessage[]): PriorMessage[] {
-  const result: PriorMessage[] = []
+interface PriorMessagesResult {
+  messages: PriorMessage[]
+  /** Maps each output PriorMessage to the source AuraChatMessage ID */
+  sourceMessageIds: string[]
+}
 
-  for (const msg of chatMessages) {
+function buildPriorMessages(chatMessages: AuraChatMessage[], compactionCheckpoints: CompactionCheckpoint[]): PriorMessagesResult {
+  const result: PriorMessage[] = []
+  const sourceMessageIds: string[] = []
+
+  // Get the latest checkpoint (only the last one is used — it subsumes all prior ones)
+  const latestCheckpoint = compactionCheckpoints.length > 0
+    ? compactionCheckpoints[compactionCheckpoints.length - 1]
+    : null
+
+  // Validate checkpoint: all covered message IDs must still exist in chatMessages
+  let validCheckpoint = latestCheckpoint
+  if (validCheckpoint) {
+    const currentIds = new Set(chatMessages.map(m => m.id))
+    if (!validCheckpoint.coveredMessageIds.every(id => currentIds.has(id))) {
+      validCheckpoint = null // Stale checkpoint — discard
+    }
+  }
+
+  // If we have a valid checkpoint, prepend its summary
+  if (validCheckpoint) {
+    const summaryRole = 'system' // Always use system role to avoid consecutive user messages
+    const summaryContent = `[Conversation Summary]\n\n${validCheckpoint.summary}\n\n---\nThis conversation was compacted. Continue from where you left off without asking the user any further questions.`
+    result.push({ role: summaryRole, content: summaryContent })
+    sourceMessageIds.push('__compaction_summary__')
+  }
+
+  // Filter to only messages NOT covered by the checkpoint
+  const coveredIds = new Set(validCheckpoint?.coveredMessageIds ?? [])
+  const messagesToInclude = validCheckpoint
+    ? chatMessages.filter(m => !coveredIds.has(m.id))
+    : chatMessages
+
+  for (const msg of messagesToInclude) {
     if (msg.role === 'user') {
       result.push({ role: 'user', content: msg.content })
+      sourceMessageIds.push(msg.id)
       continue
     }
 
@@ -521,6 +565,7 @@ function buildPriorMessages(chatMessages: AuraChatMessage[]): PriorMessage[] {
       entry.tool_calls = toolCallsForMsg
     }
     result.push(entry)
+    sourceMessageIds.push(msg.id)
 
     // Add tool results for context tools
     for (const tc of contextTCs) {
@@ -532,6 +577,7 @@ function buildPriorMessages(chatMessages: AuraChatMessage[]): PriorMessage[] {
           tool_call_id: tc.toolCallId || `${tc.name}_${tc.order ?? 0}`,
           name: tc.name,
         })
+        sourceMessageIds.push(msg.id)
       } else {
         // ask_user — format as readable Q&A
         let resultContent: string
@@ -549,6 +595,7 @@ function buildPriorMessages(chatMessages: AuraChatMessage[]): PriorMessage[] {
           tool_call_id: tc.toolCallId || `${tc.name}_${tc.order ?? 0}`,
           name: tc.name,
         })
+        sourceMessageIds.push(msg.id)
       }
     }
 
@@ -569,10 +616,11 @@ function buildPriorMessages(chatMessages: AuraChatMessage[]): PriorMessage[] {
         tool_call_id: dispatchTC?.toolCallId || 'dispatch_sub_agents',
         name: 'dispatch_sub_agents',
       })
+      sourceMessageIds.push(msg.id)
     }
   }
 
-  return result
+  return { messages: result, sourceMessageIds }
 }
 
 // ── Hook ─────────────────────────────────────────────────────────────────────
@@ -595,6 +643,8 @@ export function useAura(projectId: string | null) {
   const [processDetail, setProcessDetail] = useState<AuraProcessDetail | null>(null)
   const [chatMessages, setChatMessages] = useState<AuraChatMessage[]>([])
   const [isStreaming, setIsStreaming] = useState(false)
+  const [isCompacting, setIsCompacting] = useState(false)
+  const [compactionCheckpoints, setCompactionCheckpoints] = useState<CompactionCheckpoint[]>([])
   const [chatError, setChatError] = useState<string | null>(null)
   const [offline, setOffline] = useState<'backend' | 'ollama' | null>(null)
   const [activeChatId, setActiveChatId] = useState<string | null>(null)
@@ -655,12 +705,12 @@ export function useAura(projectId: string | null) {
       await fetch(`/api/aura/chats/${pid}/${cid}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ messages: msgs }),
+        body: JSON.stringify({ messages: msgs, compactionCheckpoints: compactionCheckpoints }),
       })
     } catch {
       // Save failed silently
     }
-  }, [projectId])
+  }, [projectId, compactionCheckpoints])
 
   const startNewChat = useCallback(async () => {
     if (!projectId) return
@@ -670,6 +720,7 @@ export function useAura(projectId: string | null) {
         const newChat = await res.json()
         setActiveChatId(newChat.id)
         setChatMessages([])
+        setCompactionCheckpoints([])
         setChatError(null)
       }
     } catch {
@@ -685,6 +736,7 @@ export function useAura(projectId: string | null) {
         if (chat) {
           setActiveChatId(chat.id)
           setChatMessages(chat.messages || [])
+          setCompactionCheckpoints(chat.compactionCheckpoints || [])
           return
         }
       }
@@ -694,6 +746,7 @@ export function useAura(projectId: string | null) {
         const newChat = await createRes.json()
         setActiveChatId(newChat.id)
         setChatMessages([])
+        setCompactionCheckpoints([])
       }
     } catch {
       // Load failed
@@ -1210,6 +1263,7 @@ export function useAura(projectId: string | null) {
   useEffect(() => {
     if (!projectId) {
       setChatMessages([])
+      setCompactionCheckpoints([])
       setActiveChatId(null)
       return
     }
@@ -1222,6 +1276,8 @@ export function useAura(projectId: string | null) {
     if (!projectId) return
 
     setIsStreaming(true)
+    setIsCompacting(false)
+    setServerMessageTokens(null) // Reset server estimate — will be refreshed by context_usage event
     setChatError(null)
 
     let assistantId: string
@@ -1316,12 +1372,12 @@ export function useAura(projectId: string | null) {
 
     try {
       // Send prior messages so the agent has conversation memory
-      const priorMessages = buildPriorMessages(chatMessages)
+      const { messages: priorMessages, sourceMessageIds } = buildPriorMessages(chatMessages, compactionCheckpoints)
 
       const res = await fetch(`/api/aura/ask/${projectId}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ prompt, context, priorMessages }),
+        body: JSON.stringify({ prompt, context, priorMessages, sourceMessageIds }),
       })
 
       if (!res.ok) {
@@ -1370,6 +1426,30 @@ export function useAura(projectId: string | null) {
               if (eventType === 'context_usage') {
                 if (data.systemTokens) setSystemPromptTokens(data.systemTokens as number)
                 if (data.contextWindow) setContextWindowSize(data.contextWindow as number)
+                if (data.toolTokens) setToolDefTokens(data.toolTokens as number)
+                if (data.messageTokens != null) setServerMessageTokens(data.messageTokens as number)
+                // After compaction, clear the compacting status
+                if (data.compacted) {
+                  setIsCompacting(false)
+                }
+                currentEvent = ''
+                continue
+              }
+
+              // Handle status events (e.g. compacting)
+              if (eventType === 'status') {
+                if (data.status === 'compacting') {
+                  setIsCompacting(true)
+                }
+                currentEvent = ''
+                continue
+              }
+
+              // Handle compaction events — update checkpoint state
+              if (eventType === 'compaction') {
+                if (data.checkpoint) {
+                  setCompactionCheckpoints([data.checkpoint])
+                }
                 currentEvent = ''
                 continue
               }
@@ -1564,9 +1644,10 @@ export function useAura(projectId: string | null) {
       })
     } finally {
       setIsStreaming(false)
+      setIsCompacting(false)
       saveChat()
     }
-  }, [projectId, graphData, selectedNode, nodeContext, chatMessages, saveChat])
+  }, [projectId, graphData, selectedNode, nodeContext, chatMessages, compactionCheckpoints, saveChat])
 
   const askRef = useRef(ask)
   askRef.current = ask
@@ -1574,6 +1655,7 @@ export function useAura(projectId: string | null) {
 
   const clearChat = useCallback(() => {
     setChatMessages([])
+    setCompactionCheckpoints([])
     setChatError(null)
   }, [])
 
@@ -1599,6 +1681,8 @@ export function useAura(projectId: string | null) {
 
   const [contextWindowSize, setContextWindowSize] = useState(0)
   const [systemPromptTokens, setSystemPromptTokens] = useState(0)
+  const [toolDefTokens, setToolDefTokens] = useState(0)
+  const [serverMessageTokens, setServerMessageTokens] = useState<number | null>(null)
 
   useEffect(() => {
     if (!projectId) return
@@ -1613,37 +1697,44 @@ export function useAura(projectId: string | null) {
 
   const contextUsagePercent = useMemo(() => {
     if (contextWindowSize === 0) return 0
-    const messageTokens = chatMessages.reduce((sum, m) => {
-      if (m.role === 'user') return sum + Math.ceil(m.content.length / 4)
-      // For assistant messages, use segments as authoritative text source
-      let tokens = Math.ceil(getAssistantFullText(m).length / 4)
-      // Add write/update tool result tokens (diff-formatted)
-      for (const tc of (m.toolCalls || [])) {
-        if (WRITE_UPDATE_TOOLS.has(tc.name)) {
-          tokens += Math.ceil(JSON.stringify(tc.args).length / 4)
-          if (tc.result) {
-            const diffText = formatWriteUpdateDiff(tc as { name: string; args: Record<string, unknown>; result: unknown })
-            tokens += Math.ceil((diffText || '').length / 4)
+    // Use server-reported message tokens when available (accurate after compaction)
+    const messageTokens = serverMessageTokens != null
+      ? serverMessageTokens
+      : chatMessages.reduce((sum, m) => {
+          if (m.role === 'user') return sum + Math.ceil(m.content.length / 4)
+          // For assistant messages, use segments as authoritative text source
+          let tokens = Math.ceil(getAssistantFullText(m).length / 4)
+          // Add write/update tool result tokens (diff-formatted)
+          for (const tc of (m.toolCalls || [])) {
+            if (WRITE_UPDATE_TOOLS.has(tc.name)) {
+              tokens += Math.ceil(JSON.stringify(tc.args).length / 4)
+              if (tc.result) {
+                const diffText = formatWriteUpdateDiff(tc as { name: string; args: Record<string, unknown>; result: unknown })
+                tokens += Math.ceil((diffText || '').length / 4)
+              }
+            } else if (CONTEXT_TOOLS.has(tc.name)) {
+              // ask_user — count args + result
+              tokens += Math.ceil(JSON.stringify(tc.args).length / 4)
+              if (tc.result) {
+                const resStr = typeof tc.result === 'string' ? tc.result : JSON.stringify(tc.result)
+                tokens += Math.ceil(resStr.length / 4)
+              }
+            }
           }
-        } else if (CONTEXT_TOOLS.has(tc.name)) {
-          // ask_user — count args + result
-          tokens += Math.ceil(JSON.stringify(tc.args).length / 4)
-          if (tc.result) {
-            const resStr = typeof tc.result === 'string' ? tc.result : JSON.stringify(tc.result)
-            tokens += Math.ceil(resStr.length / 4)
+          // Add sub-agent result tokens
+          for (const sa of (m.subAgents || [])) {
+            if (sa.result) tokens += Math.ceil(sa.result.length / 4)
+            tokens += Math.ceil(sa.title.length / 4) + Math.ceil(sa.task.length / 4)
           }
-        }
-      }
-      // Add sub-agent result tokens
-      for (const sa of (m.subAgents || [])) {
-        if (sa.result) tokens += Math.ceil(sa.result.length / 4)
-        tokens += Math.ceil(sa.title.length / 4) + Math.ceil(sa.task.length / 4)
-      }
-      return sum + tokens
-    }, 0)
-    const total = systemPromptTokens + messageTokens
+          return sum + tokens
+        }, 0)
+    // Add compaction summary tokens if available
+    const checkpointTokens = compactionCheckpoints.length > 0
+      ? compactionCheckpoints[compactionCheckpoints.length - 1].summaryTokens
+      : 0
+    const total = systemPromptTokens + toolDefTokens + messageTokens + checkpointTokens
     return Math.min(100, Math.round((total / contextWindowSize) * 100))
-  }, [chatMessages, contextWindowSize, systemPromptTokens])
+  }, [chatMessages, contextWindowSize, systemPromptTokens, toolDefTokens, serverMessageTokens, compactionCheckpoints])
 
   // Health check: detect if backend or Ollama is offline
   useEffect(() => {
@@ -1694,6 +1785,8 @@ export function useAura(projectId: string | null) {
     ask,
     chatMessages,
     isStreaming,
+    isCompacting,
+    compactionCheckpoints,
     chatError,
     clearChat,
     clearChatError,

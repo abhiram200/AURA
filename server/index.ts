@@ -51,7 +51,7 @@ async function start() {
 
   const defaultSettings = {
     defaultModel: detectedModel,
-    contextWindowSize: 8192,
+    contextWindowSize: 131072,
     autoExtractMemory: true,
     preferences: {
       responseDetail: null, technicalLevel: null, responseFormat: null,

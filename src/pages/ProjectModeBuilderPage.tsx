@@ -129,8 +129,8 @@ export function ProjectModeBuilderPage() {
 
   // Dynamic status based on what the AI is doing
   const isIndexing = aura.indexingStatus?.phase && aura.indexingStatus.phase !== 'idle' && aura.indexingStatus.phase !== 'complete' && aura.indexingStatus.phase !== 'watching'
-  const statusLabel = aura.offline === 'backend' ? 'Offline' : aura.offline === 'ollama' ? 'No Ollama' : aura.isStreaming ? 'Thinking' : isIndexing ? 'Indexing' : 'Ready'
-  const statusColor = aura.offline ? '#ef4444' : (aura.isStreaming || isIndexing) ? '#facc15' : '#4ade80'
+  const statusLabel = aura.offline === 'backend' ? 'Offline' : aura.offline === 'ollama' ? 'No Ollama' : aura.isCompacting ? 'Compacting' : aura.isStreaming ? 'Thinking' : isIndexing ? 'Indexing' : 'Ready'
+  const statusColor = aura.offline ? '#ef4444' : (aura.isCompacting || aura.isStreaming || isIndexing) ? '#facc15' : '#4ade80'
   const statusPulse = true
 
   const tabs: { key: BuilderTab; label: string; icon: JSX.Element }[] = [

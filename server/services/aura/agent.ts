@@ -7,10 +7,13 @@ import { platform } from 'os'
 import type { Response } from 'express'
 import type { AuraQueryService } from './graph.ts'
 import type { AgentEventSink } from './sse.ts'
+import { AgentEventType } from './sse.ts'
 import type { ManagedShellService } from '../managedShell.ts'
 import { SilentEventSink } from './sse.ts'
 import { buildCrawlArgs, buildDesignCrawlArgs } from './crawl.ts'
 import { PlanPersistenceService, type SavedPlan } from './plan-persistence.ts'
+import { BUILDER_COMPACTION_PROMPT } from '../../prompts.ts'
+import type { AuraChatService, CompactionCheckpoint } from '../aura-chat.ts'
 
 const execFileAsync = promisify(execFile)
 
@@ -18,6 +21,8 @@ const execFileAsync = promisify(execFile)
 
 const CHARS_PER_TOKEN = 4
 const DEFAULT_CONTEXT_WINDOW = 200_000
+const MESSAGE_OVERHEAD_TOKENS = 10 // Per-message structural overhead (role labels, framing)
+const COMPACTION_TOOL_RESULTS = new Set(['write', 'update', 'ask_user', 'dispatch_sub_agents'])
 
 function estimateTokens(text: string): number {
   return Math.ceil(text.length / CHARS_PER_TOKEN)
@@ -25,7 +30,7 @@ function estimateTokens(text: string): number {
 
 function estimateMessagesTokens(messages: Array<{ role: string; content: string; tool_calls?: Array<{ function: { name: string; arguments: Record<string, unknown> } }> }>): number {
   return messages.reduce((sum, m) => {
-    let tokens = estimateTokens(m.content)
+    let tokens = MESSAGE_OVERHEAD_TOKENS + estimateTokens(m.content)
     if (m.tool_calls) {
       for (const tc of m.tool_calls) {
         tokens += estimateTokens(tc.function.name)
@@ -39,30 +44,96 @@ function estimateMessagesTokens(messages: Array<{ role: string; content: string;
 // ── Context compaction ──────────────────────────────────────────────────────
 
 const COMPACT_THRESHOLD = 0.6 // Compact when tokens exceed 60% of context window
-const KEEP_RECENT_MESSAGES = 8 // Keep last N messages during compaction
+const RECENT_BUDGET_RATIO = 0.3 // Keep 30% of context window for recent messages
+const COMPACTION_FAILURE_LIMIT = 3 // Stop compacting after this many consecutive failures
 
-function compactMessages(
+// Group messages into turn units: each turn = [assistant(+tool_calls), ...tool results, next user message?]
+function groupMessagesIntoTurns(messages: OllamaMessage[]): OllamaMessage[][] {
+  const turns: OllamaMessage[][] = []
+  let currentTurn: OllamaMessage[] = []
+
+  for (let i = 0; i < messages.length; i++) {
+    const m = messages[i]
+
+    // System messages are their own group (not part of a turn)
+    if (m.role === 'system') {
+      if (currentTurn.length > 0) {
+        turns.push(currentTurn)
+        currentTurn = []
+      }
+      turns.push([m])
+      continue
+    }
+
+    currentTurn.push(m)
+
+    // A turn boundary is after a user message that follows assistant+tool results,
+    // or after an assistant message with no tool calls
+    const isAssistantWithToolCalls = m.role === 'assistant' && m.tool_calls && m.tool_calls.length > 0
+    const isToolResult = m.role === 'tool'
+    const isUserMessage = m.role === 'user'
+
+    if (isUserMessage) {
+      // User message ends the current turn
+      turns.push(currentTurn)
+      currentTurn = []
+    } else if (!isAssistantWithToolCalls && !isToolResult && m.role === 'assistant') {
+      // Assistant with no tool calls — standalone turn
+      turns.push(currentTurn)
+      currentTurn = []
+    }
+    // Otherwise (assistant with tool_calls, or tool result), continue accumulating
+  }
+
+  if (currentTurn.length > 0) {
+    turns.push(currentTurn)
+  }
+
+  return turns
+}
+
+// Build the conversation text to send to the compaction LLM,
+// including only allowed tool results
+function buildCompactionInput(messages: OllamaMessage[]): string {
+  const lines: string[] = []
+
+  for (const m of messages) {
+    if (m.role === 'system') continue // Skip system messages in the summary input
+
+    if (m.role === 'user') {
+      lines.push(`[User]: ${m.content}`)
+    } else if (m.role === 'assistant') {
+      if (m.content) {
+        lines.push(`[Assistant]: ${m.content}`)
+      }
+      if (m.tool_calls && m.tool_calls.length > 0) {
+        const callDescs = m.tool_calls.map(tc => {
+          const argsStr = JSON.stringify(tc.function.arguments)
+          const abbreviated = argsStr.length > 100 ? argsStr.slice(0, 100) + '...' : argsStr
+          return `${tc.function.name}(${abbreviated})`
+        })
+        lines.push(`[Assistant called]: ${callDescs.join(', ')}`)
+      }
+    } else if (m.role === 'tool') {
+      const toolName = m.name || 'unknown'
+      if (COMPACTION_TOOL_RESULTS.has(toolName)) {
+        const content = typeof m.content === 'string' ? m.content : JSON.stringify(m.content)
+        lines.push(`[Tool result (${toolName})]: ${content}`)
+      } else {
+        lines.push(`[Tool result (${toolName})]: <omitted>`)
+      }
+    }
+  }
+
+  return lines.join('\n')
+}
+
+// Fallback: rule-based summary when LLM compaction fails
+function buildFallbackSummary(
   messages: OllamaMessage[],
-  systemPrompt: string,
   todoList: AuraTodoItem[],
-  contextWindow: number,
   planResume?: PlanResumeContext | null,
-): OllamaMessage[] {
-  const totalTokens = estimateTokens(systemPrompt) + estimateMessagesTokens(messages)
-  if (totalTokens <= contextWindow * COMPACT_THRESHOLD) {
-    return messages // No compaction needed
-  }
-
-  // If messages are too few to compact, just return them as-is
-  // (the num_ctx parameter will give Ollama enough room)
-  if (messages.length <= KEEP_RECENT_MESSAGES + 2) {
-    return messages
-  }
-
-  // Build compaction summary from messages we're about to remove
-  const cutoff = messages.length - KEEP_RECENT_MESSAGES
-  const removedMessages = messages.slice(1, cutoff) // Skip system message at index 0
-
+): string {
   let summary = '## Previous Work (Compacted)\n\nThe earlier part of this conversation has been summarized to save context space.\n\nKey completed work:\n'
 
   if (planResume) {
@@ -70,21 +141,32 @@ function compactMessages(
     summary += `\nContinuing plan "${planResume.slug}". ${planResume.todos.filter(t => t.status === 'completed').length}/${planResume.todos.length} tasks done. Next: "${planResume.nextTask || 'none'}".\n`
   }
 
-  for (const m of removedMessages) {
-    if (m.role === 'assistant' && m.content) {
-      const snippet = m.content.slice(0, 300).trim()
-      if (snippet) summary += `- ${snippet}\n`
+  for (const m of messages) {
+    if (m.role === 'user') {
+      const snippet = m.content.slice(0, 200).trim()
+      if (snippet) summary += `- User asked: ${snippet}\n`
+    }
+    if (m.role === 'assistant') {
+      if (m.content) {
+        const snippet = m.content.slice(0, 300).trim()
+        if (snippet) summary += `- Assistant: ${snippet}\n`
+      }
+      if (m.tool_calls && m.tool_calls.length > 0) {
+        const callDescs = m.tool_calls.map(tc => `${tc.function.name}(${JSON.stringify(tc.function.arguments).slice(0, 80)})`)
+        summary += `  Called: ${callDescs.join(', ')}\n`
+      }
     }
     if (m.role === 'tool') {
+      const toolName = m.name || 'unknown'
       const content = typeof m.content === 'string' ? m.content : JSON.stringify(m.content)
-      // Skip todo_write acknowledgments and very long results
       if (content.startsWith('{"acknowledged":true')) continue
-      const snippet = content.slice(0, 150).trim()
-      if (snippet) summary += `  (tool result: ${snippet}...)\n`
+      const isErrored = content.toLowerCase().includes('error')
+      const limit = isErrored ? 300 : 150
+      const snippet = content.slice(0, limit).trim()
+      if (snippet) summary += `  (tool result ${toolName}: ${snippet}...)\n`
     }
   }
 
-  // Always include current todo list state
   if (todoList.length > 0) {
     summary += '\n## Current Task List\n'
     for (const t of todoList) {
@@ -99,12 +181,181 @@ function compactMessages(
     }
   }
 
-  const recentMessages = messages.slice(-KEEP_RECENT_MESSAGES)
-  return [
+  return summary
+}
+
+// Call Ollama for AI-generated compaction summary
+async function generateCompactionSummary(
+  messages: OllamaMessage[],
+  todoList: AuraTodoItem[],
+  ollamaBaseUrl: string,
+  model: string,
+  planResume?: PlanResumeContext | null,
+): Promise<string | null> {
+  const compactionInput = buildCompactionInput(messages)
+
+  // Add todo list and plan resume to the input
+  let extraContext = ''
+  if (todoList.length > 0) {
+    extraContext += '\n\nCurrent task list:\n'
+    for (const t of todoList) {
+      const status = t.status === 'completed' ? '[x]' : t.status === 'in_progress' ? '[>]' : '[ ]'
+      extraContext += `${status} ${t.subject} — ${t.description}\n`
+    }
+  }
+  if (planResume) {
+    extraContext += `\n\nActive plan: "${planResume.slug}". ${planResume.todos.filter(t => t.status === 'completed').length}/${planResume.todos.length} tasks done. Next: "${planResume.nextTask || 'none'}".`
+  }
+
+  try {
+    const res = await fetch(`${ollamaBaseUrl}/api/chat`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model,
+        messages: [
+          { role: 'user', content: `${BUILDER_COMPACTION_PROMPT}\n${compactionInput}${extraContext}` },
+        ],
+        stream: false,
+      }),
+      signal: AbortSignal.timeout(30000),
+    })
+    if (!res.ok) return null
+    const data = await res.json() as { message?: { content?: string } }
+    const content = data.message?.content?.trim()
+    if (!content) return null
+    return content
+  } catch {
+    return null
+  }
+}
+
+// Compact messages using AI-generated summary (falls back to rule-based on failure)
+interface CompactionResult {
+  messages: OllamaMessage[]
+  compactionFailures: number
+  /** If compaction happened: checkpoint data to persist. null if no compaction. */
+  checkpoint: {
+    summary: string
+    aiGenerated: boolean
+    summaryTokens: number
+  } | null
+}
+
+async function compactMessagesAsync(
+  messages: OllamaMessage[],
+  systemPrompt: string,
+  todoList: AuraTodoItem[],
+  contextWindow: number,
+  ollamaBaseUrl: string,
+  model: string,
+  compactionFailures: number,
+  planResume?: PlanResumeContext | null,
+): Promise<CompactionResult> {
+  const totalTokens = estimateTokens(systemPrompt) + estimateMessagesTokens(messages)
+  if (totalTokens <= contextWindow * COMPACT_THRESHOLD) {
+    return { messages, compactionFailures, checkpoint: null } // No compaction needed
+  }
+
+  // Circuit breaker: stop compacting after too many consecutive failures
+  if (compactionFailures >= COMPACTION_FAILURE_LIMIT) {
+    return { messages, compactionFailures, checkpoint: null }
+  }
+
+  // Group messages into turns (preserving tool-call/result pairs)
+  const turns = groupMessagesIntoTurns(messages)
+
+  // The first turn should be the system message — keep it always
+  const systemTurn = turns[0] // [system message]
+  const conversationTurns = turns.slice(1)
+
+  // Walk backward through conversation turns, keeping complete turns that fit in the budget
+  const recentTokenBudget = Math.floor(contextWindow * RECENT_BUDGET_RATIO)
+  let usedTokens = 0
+  let cutoffIndex = conversationTurns.length // Index where we start keeping turns
+
+  for (let i = conversationTurns.length - 1; i >= 0; i--) {
+    const turnTokens = estimateMessagesTokens(conversationTurns[i])
+    if (usedTokens + turnTokens > recentTokenBudget) {
+      break
+    }
+    usedTokens += turnTokens
+    cutoffIndex = i
+  }
+
+  // Turn-boundary safety: always keep at least the most recent turn, even if it exceeds the budget.
+  // We never split a turn — it must stay intact (tool call/result pairs cannot be separated).
+  if (cutoffIndex >= conversationTurns.length) {
+    cutoffIndex = Math.max(0, conversationTurns.length - 1)
+  }
+
+  const recentTurns = conversationTurns.slice(cutoffIndex)
+  const removedTurns = conversationTurns.slice(0, cutoffIndex)
+
+  if (removedTurns.length === 0) {
+    return { messages, compactionFailures, checkpoint: null } // Nothing to compact
+  }
+
+  const removedMessages = removedTurns.flat()
+  const recentMessages = recentTurns.flat()
+
+  // Try AI-generated summary first
+  let summary: string | null = await generateCompactionSummary(
+    removedMessages, todoList, ollamaBaseUrl, model, planResume,
+  )
+
+  const aiGenerated = summary !== null
+  let newFailures = compactionFailures
+  if (summary === null) {
+    newFailures++
+    // Fall back to rule-based summary
+    summary = buildFallbackSummary(removedMessages, todoList, planResume)
+  } else {
+    newFailures = 0 // Reset on success
+  }
+
+  // Determine summary role: avoid consecutive user messages
+  const summaryRole = (recentMessages.length > 0 && recentMessages[0].role === 'user')
+    ? 'system'
+    : 'user'
+
+  const summaryPrefix = summaryRole === 'system' ? '[Conversation Summary]\n\n' : ''
+  let summaryContent = `${summaryPrefix}${summary}\n\n---\nThis conversation was compacted. Continue from where you left off without asking the user any further questions.`
+
+  // Summary truncation safeguard: if summary + recent messages + system prompt exceeds the context window,
+  // truncate the summary rather than dropping recent messages.
+  const recentTokens = estimateMessagesTokens(recentMessages)
+  const systemTokens = estimateTokens(systemPrompt)
+  const totalAfterCompaction = systemTokens + estimateTokens(summaryContent) + recentTokens
+  if (totalAfterCompaction > contextWindow) {
+    const maxSummaryTokens = contextWindow - systemTokens - recentTokens - 100 // 100-token margin
+    if (maxSummaryTokens > 0) {
+      const maxSummaryChars = Math.floor(maxSummaryTokens * CHARS_PER_TOKEN)
+      summaryContent = summaryContent.slice(0, maxSummaryChars) + '\n\n[...summary truncated...]'
+    }
+  }
+
+  const result: OllamaMessage[] = [
     { role: 'system', content: systemPrompt },
-    { role: 'user', content: summary },
-    ...recentMessages,
   ]
+
+  if (summaryRole === 'system') {
+    result.push({ role: 'system', content: summaryContent })
+  } else {
+    result.push({ role: 'user', content: summaryContent })
+  }
+
+  result.push(...recentMessages)
+
+  return {
+    messages: result,
+    compactionFailures: newFailures,
+    checkpoint: {
+      summary,
+      aiGenerated,
+      summaryTokens: estimateTokens(summary),
+    },
+  }
 }
 
 // ── Tool definition types ──────────────────────────────────────────────────
@@ -529,138 +780,173 @@ function matchesGlob(str: string, glob: string): boolean {
   return new RegExp(`(^|/)${regexStr}($|/)`).test(str) || new RegExp(regexStr).test(str)
 }
 
-function formatContext(context: Record<string, unknown>): string {
-  const parts: string[] = []
+function formatContext(context: Record<string, unknown>, maxTokens = 4000): string {
+  // Build sections in priority order (highest first)
+  // Priority 1: graph overview + selected node
+  // Priority 2: selected node context (relationships)
+  // Priority 3: explored context (lowest — truncated first)
+  const sections: Array<{ priority: number; text: string }> = []
 
   // Graph overview
   const overview = context.graphOverview as { nodeCount?: number; edgeCount?: number; nodeKinds?: Record<string, number>; edgeTypes?: Record<string, number> } | undefined
   if (overview) {
-    parts.push('**Graph overview:**')
-    parts.push(`- ${overview.nodeCount ?? 0} nodes, ${overview.edgeCount ?? 0} edges`)
+    const lines: string[] = []
+    lines.push('**Graph overview:**')
+    lines.push(`- ${overview.nodeCount ?? 0} nodes, ${overview.edgeCount ?? 0} edges`)
     if (overview.nodeKinds && Object.keys(overview.nodeKinds).length > 0) {
       const kinds = Object.entries(overview.nodeKinds).map(([k, v]) => `${k}: ${v}`).join(', ')
-      parts.push(`- Node types: ${kinds}`)
+      lines.push(`- Node types: ${kinds}`)
     }
     if (overview.edgeTypes && Object.keys(overview.edgeTypes).length > 0) {
       const types = Object.entries(overview.edgeTypes).map(([k, v]) => `${k}: ${v}`).join(', ')
-      parts.push(`- Edge types: ${types}`)
+      lines.push(`- Edge types: ${types}`)
     }
+    sections.push({ priority: 1, text: lines.join('\n') })
   }
 
   // Selected node
   const sel = context.selectedNode as { id?: string; name?: string; kind?: string; filePath?: string; range?: { startLine: number; endLine: number } } | null | undefined
   if (sel && sel.id) {
-    parts.push('')
-    parts.push('**Selected node:**')
-    parts.push(`- ${sel.name} (${sel.kind}) in ${sel.filePath}`)
-    if (sel.range) parts.push(`- Lines ${sel.range.startLine}-${sel.range.endLine}`)
-    parts.push(`- Node ID: ${sel.id}`)
+    const lines: string[] = []
+    lines.push('**Selected node:**')
+    lines.push(`- ${sel.name} (${sel.kind}) in ${sel.filePath}`)
+    if (sel.range) lines.push(`- Lines ${sel.range.startLine}-${sel.range.endLine}`)
+    lines.push(`- Node ID: ${sel.id}`)
+    sections.push({ priority: 1, text: lines.join('\n') })
   }
 
   // Selected node context (relationships) — now includes node IDs
   const selCtx = context.selectedNodeContext as { incoming?: Array<{ id: string; name: string; kind: string; edgeType: string; filePath: string }>; outgoing?: Array<{ id: string; name: string; kind: string; edgeType: string; filePath: string }>; members?: Array<{ id: string; name: string; kind: string; filePath: string }>; hierarchy?: Array<{ id: string; name: string; kind: string; relation: string }>; containedBy?: { id: string; name: string; kind: string; filePath: string } | null } | null | undefined
   if (selCtx) {
+    const lines: string[] = []
     if (selCtx.incoming && selCtx.incoming.length > 0) {
-      parts.push('')
-      parts.push('**Incoming references to selected node:**')
+      lines.push('**Incoming references to selected node:**')
       for (const ref of selCtx.incoming.slice(0, 10)) {
-        parts.push(`  - ${ref.name} (${ref.kind}) via ${ref.edgeType} — ${ref.filePath} [id: ${ref.id}]`)
+        lines.push(`  - ${ref.name} (${ref.kind}) via ${ref.edgeType} — ${ref.filePath} [id: ${ref.id}]`)
       }
-      if (selCtx.incoming.length > 10) parts.push(`  - ... and ${selCtx.incoming.length - 10} more`)
+      if (selCtx.incoming.length > 10) lines.push(`  - ... and ${selCtx.incoming.length - 10} more`)
     }
     if (selCtx.outgoing && selCtx.outgoing.length > 0) {
-      parts.push('')
-      parts.push('**Outgoing references from selected node:**')
+      lines.push('**Outgoing references from selected node:**')
       for (const ref of selCtx.outgoing.slice(0, 10)) {
-        parts.push(`  - ${ref.name} (${ref.kind}) via ${ref.edgeType} — ${ref.filePath} [id: ${ref.id}]`)
+        lines.push(`  - ${ref.name} (${ref.kind}) via ${ref.edgeType} — ${ref.filePath} [id: ${ref.id}]`)
       }
-      if (selCtx.outgoing.length > 10) parts.push(`  - ... and ${selCtx.outgoing.length - 10} more`)
+      if (selCtx.outgoing.length > 10) lines.push(`  - ... and ${selCtx.outgoing.length - 10} more`)
     }
     if (selCtx.members && selCtx.members.length > 0) {
-      parts.push('')
-      parts.push('**Members of selected node:**')
+      lines.push('**Members of selected node:**')
       for (const m of selCtx.members.slice(0, 15)) {
-        parts.push(`  - ${m.name} (${m.kind}) in ${m.filePath} [id: ${m.id}]`)
+        lines.push(`  - ${m.name} (${m.kind}) in ${m.filePath} [id: ${m.id}]`)
       }
-      if (selCtx.members.length > 15) parts.push(`  - ... and ${selCtx.members.length - 15} more`)
+      if (selCtx.members.length > 15) lines.push(`  - ... and ${selCtx.members.length - 15} more`)
     }
     if (selCtx.hierarchy && selCtx.hierarchy.length > 0) {
-      parts.push('')
-      parts.push('**Type hierarchy:**')
+      lines.push('**Type hierarchy:**')
       for (const h of selCtx.hierarchy) {
-        parts.push(`  - ${h.name} (${h.kind}) — ${h.relation} [id: ${h.id}]`)
+        lines.push(`  - ${h.name} (${h.kind}) — ${h.relation} [id: ${h.id}]`)
       }
     }
     if (selCtx.containedBy) {
-      parts.push('')
-      parts.push(`**Contained by:** ${selCtx.containedBy.name} (${selCtx.containedBy.kind}) in ${selCtx.containedBy.filePath} [id: ${selCtx.containedBy.id}]`)
+      lines.push(`**Contained by:** ${selCtx.containedBy.name} (${selCtx.containedBy.kind}) in ${selCtx.containedBy.filePath} [id: ${selCtx.containedBy.id}]`)
+    }
+    if (lines.length > 0) {
+      sections.push({ priority: 2, text: lines.join('\n') })
     }
   }
 
   // Explored context — data already available from user's browser session
   const explored = context.exploredContext as { searchResults?: Array<{ id: string; name: string; kind: string; filePath: string; score: number }>; impactResult?: { target: string; downstream: Array<{ id: string; name: string; kind: string; filePath: string; severity: string }>; upstream: Array<{ id: string; name: string; kind: string; filePath: string; severity: string }> } | null; changeDetection?: { filesChanged: number; changedSymbols: Array<{ id: string; name: string; kind: string; filePath: string }> } | null; routeMap?: { routeCount: number; apiCallCount: number; routes: Array<{ id: string; name: string; filePath: string }> } | null; processes?: Array<{ id: string; name: string; method: string; path: string }> | null } | null | undefined
   if (explored) {
-    let hasExploredData = false
+    const lines: string[] = []
 
     if (explored.searchResults && explored.searchResults.length > 0) {
-      parts.push('')
-      parts.push('**Recent search results** (already available, no need to re-search):')
+      lines.push('**Recent search results** (already available, no need to re-search):')
       for (const r of explored.searchResults) {
-        parts.push(`  - ${r.name} (${r.kind}) in ${r.filePath} [id: ${r.id}]`)
+        lines.push(`  - ${r.name} (${r.kind}) in ${r.filePath} [id: ${r.id}]`)
       }
-      hasExploredData = true
     }
 
     if (explored.impactResult) {
       const imp = explored.impactResult
-      parts.push('')
-      parts.push(`**Impact analysis for ${imp.target}** (already available):`)
+      lines.push(`**Impact analysis for ${imp.target}** (already available):`)
       if (imp.downstream.length > 0) {
-        parts.push('  Downstream (depends on this):')
+        lines.push('  Downstream (depends on this):')
         for (const d of imp.downstream) {
-          parts.push(`    - ${d.name} (${d.kind}) in ${d.filePath} [${d.severity}] [id: ${d.id}]`)
+          lines.push(`    - ${d.name} (${d.kind}) in ${d.filePath} [${d.severity}] [id: ${d.id}]`)
         }
       }
       if (imp.upstream.length > 0) {
-        parts.push('  Upstream (this depends on):')
+        lines.push('  Upstream (this depends on):')
         for (const u of imp.upstream) {
-          parts.push(`    - ${u.name} (${u.kind}) in ${u.filePath} [${u.severity}] [id: ${u.id}]`)
+          lines.push(`    - ${u.name} (${u.kind}) in ${u.filePath} [${u.severity}] [id: ${u.id}]`)
         }
       }
-      hasExploredData = true
     }
 
     if (explored.changeDetection && (explored.changeDetection.filesChanged > 0 || explored.changeDetection.changedSymbols.length > 0)) {
       const cd = explored.changeDetection
-      parts.push('')
-      parts.push(`**Detected changes** (${cd.filesChanged} files changed):`)
+      lines.push(`**Detected changes** (${cd.filesChanged} files changed):`)
       for (const s of cd.changedSymbols) {
-        parts.push(`  - ${s.name} (${s.kind}) in ${s.filePath} [id: ${s.id}]`)
+        lines.push(`  - ${s.name} (${s.kind}) in ${s.filePath} [id: ${s.id}]`)
       }
-      hasExploredData = true
     }
 
     if (explored.routeMap && explored.routeMap.routeCount > 0) {
       const rm = explored.routeMap
-      parts.push('')
-      parts.push(`**Route map** (${rm.routeCount} routes, ${rm.apiCallCount} API calls):`)
+      lines.push(`**Route map** (${rm.routeCount} routes, ${rm.apiCallCount} API calls):`)
       for (const r of rm.routes) {
-        parts.push(`  - ${r.name} in ${r.filePath} [id: ${r.id}]`)
+        lines.push(`  - ${r.name} in ${r.filePath} [id: ${r.id}]`)
       }
-      hasExploredData = true
     }
 
     if (explored.processes && explored.processes.length > 0) {
-      parts.push('')
-      parts.push('**Detected processes:**')
+      lines.push('**Detected processes:**')
       for (const p of explored.processes) {
-        parts.push(`  - ${p.method} ${p.path} — ${p.name} [id: ${p.id}]`)
+        lines.push(`  - ${p.method} ${p.path} — ${p.name} [id: ${p.id}]`)
       }
-      hasExploredData = true
+    }
+
+    if (lines.length > 0) {
+      sections.push({ priority: 3, text: lines.join('\n') })
     }
   }
 
-  return parts.join('\n')
+  // Assemble within token budget — truncate lowest-priority sections first
+  const result: string[] = []
+  let usedTokens = 0
+  // Sort: include all priority 1, then priority 2, then priority 3
+  // Within budget, progressively truncate lower-priority sections
+  for (let pri = 1; pri <= 3; pri++) {
+    const priSections = sections.filter(s => s.priority === pri)
+    for (const section of priSections) {
+      const sectionTokens = estimateTokens(section.text)
+      if (usedTokens + sectionTokens <= maxTokens) {
+        result.push(section.text)
+        usedTokens += sectionTokens
+      } else if (pri === 3) {
+        // For lowest-priority (explored), include as much as fits by truncating lines
+        const remaining = maxTokens - usedTokens
+        if (remaining > 50) {
+          const lines = section.text.split('\n')
+          const kept: string[] = []
+          let lineTokens = 0
+          for (const line of lines) {
+            const t = estimateTokens(line)
+            if (lineTokens + t > remaining) break
+            kept.push(line)
+            lineTokens += t
+          }
+          if (kept.length > 0) {
+            result.push(kept.join('\n'))
+            usedTokens += lineTokens
+          }
+        }
+      }
+      // Priority 1 and 2 sections are always included in full
+    }
+  }
+
+  return result.join('\n\n')
 }
 
 // ── Tool definitions ───────────────────────────────────────────────────────
@@ -1623,8 +1909,10 @@ export class AuraAgent {
   private approvalManager: ApprovalManager
   private managedShells: ManagedShellService | null
   private projectId: string | null
+  private chatService: AuraChatService | null
+  private chatId: string | null
 
-  constructor(qs: AuraQueryService, projectPath: string, ollamaBaseUrl?: string, model?: string, contextWindow?: number, managedShells?: ManagedShellService, projectId?: string) {
+  constructor(qs: AuraQueryService, projectPath: string, ollamaBaseUrl?: string, model?: string, contextWindow?: number, managedShells?: ManagedShellService, projectId?: string, chatService?: AuraChatService, chatId?: string) {
     this.qs = qs
     this.projectPath = projectPath
     this.ollamaBaseUrl = ollamaBaseUrl || process.env.OLLAMA_BASE_URL || 'http://localhost:11434'
@@ -1632,6 +1920,8 @@ export class AuraAgent {
     this.contextWindow = contextWindow ?? 200_000
     this.managedShells = managedShells || null
     this.projectId = projectId || null
+    this.chatService = chatService || null
+    this.chatId = chatId || null
     // Get or create the ApprovalManager for this project
     let am = globalApprovalManagers.get(projectPath)
     if (!am) {
@@ -1652,7 +1942,7 @@ export class AuraAgent {
     }
   }
 
-  async run(prompt: string, eventSink: AgentEventSink, context?: Record<string, unknown>, priorMessages?: Array<{ role: string; content: string; tool_calls?: Array<{ id?: string; function: { name: string; arguments: Record<string, unknown> } }>; tool_call_id?: string; name?: string }>): Promise<void> {
+  async run(prompt: string, eventSink: AgentEventSink, context?: Record<string, unknown>, priorMessages?: Array<{ role: string; content: string; tool_calls?: Array<{ id?: string; function: { name: string; arguments: Record<string, unknown> } }>; tool_call_id?: string; name?: string }>, sourceMessageIds?: string[]): Promise<void> {
     this.abortController = new AbortController()
 
     // Check Ollama availability
@@ -1729,15 +2019,18 @@ export class AuraAgent {
     const ollamaTools = buildOllamaTools(tools)
 
     const priorMsgs = priorMessages || []
+    const sourceIds = sourceMessageIds || []
 
     // Emit context usage so the UI can show a progress bar
     const systemTokens = estimateTokens(systemPrompt)
     const promptTokens = estimateTokens(prompt)
     const priorTokens = estimateMessagesTokens(priorMsgs)
-    eventSink.emit('context_usage', {
+    const toolTokens = estimateTokens(JSON.stringify(ollamaTools))
+    eventSink.emit(AgentEventType.ContextUsage, {
       systemTokens,
       messageTokens: priorTokens,
       promptTokens,
+      toolTokens,
       contextWindow: this.contextWindow,
     })
 
@@ -1746,16 +2039,26 @@ export class AuraAgent {
       { role: 'system', content: systemPrompt },
     ]
 
+    // Track prior message objects so we can identify which ones were removed by compaction
+    const priorMessageObjects: OllamaMessage[] = []
+
     for (const m of priorMsgs) {
       if (m.role === 'user' || m.role === 'assistant') {
         const msg: Record<string, unknown> = { role: m.role, content: m.content }
         if (m.tool_calls) msg.tool_calls = m.tool_calls
         messages.push(msg as OllamaMessage)
+        priorMessageObjects.push(msg as OllamaMessage)
       } else if (m.role === 'tool') {
         const msg: Record<string, unknown> = { role: 'tool', content: m.content }
         if (m.tool_call_id) msg.tool_call_id = m.tool_call_id
         if (m.name) msg.name = m.name
         messages.push(msg as OllamaMessage)
+        priorMessageObjects.push(msg as OllamaMessage)
+      } else if (m.role === 'system') {
+        // Compaction summary message from the client — preserve it
+        const msg: Record<string, unknown> = { role: 'system', content: m.content }
+        messages.push(msg as OllamaMessage)
+        priorMessageObjects.push(msg as OllamaMessage)
       }
     }
 
@@ -1779,12 +2082,31 @@ export class AuraAgent {
       )
     }
 
+    // Build plan resume re-injection content (used after compaction to restore plan context)
+    let planResumeMessages: OllamaMessage[] | null = null
+    if (planResume && activePlan) {
+      const completedCount = planResume.todos.filter(t => t.status === 'completed').length
+      const total = planResume.todos.length
+      const todoLines = planResume.todos.map(t => {
+        const marker = t.status === 'completed' ? '[x]' : t.status === 'in_progress' ? '[>]' : '[ ]'
+        return `${marker} ${t.subject} — ${t.description}`
+      }).join('\n')
+
+      const resumeMsg = `[RESUME — Active Plan: "${planResume.slug}"]\n\nI was previously working on: "${planResume.originalPrompt}"\n\nHere is the plan I was following:\n\n${activePlan.planMarkdown}\n\nCurrent task progress (${completedCount}/${total} done):\n${todoLines}\n\nContinue executing the plan from the next pending task. Do NOT repeat completed steps.`
+
+      planResumeMessages = [
+        { role: 'user', content: resumeMsg },
+        { role: 'assistant', content: `Understood. I'll continue from where I left off, starting with "${planResume.nextTask}".` },
+      ]
+    }
+
     // Agent loop
     const maxIterations = 500
     const maxLoopRetries = 3
     let loopRetryCount = 0
     const recentToolCalls: string[] = []  // Track tool call signatures for deduplication
     let todoList: AuraTodoItem[] = planResume ? [...planResume.todos] : []
+    let compactionFailures = 0
     for (let i = 0; i < maxIterations; i++) {
       if (this.abortController.signal.aborted) {
         eventSink.emit('done', {})
@@ -1792,11 +2114,78 @@ export class AuraAgent {
       }
 
       // Compact messages if context is getting too large
-      const compacted = compactMessages(messages, systemPrompt, todoList, this.contextWindow, planResume)
-      if (compacted !== messages) {
-        messages.length = 0
-        messages.push(...compacted)
+      const totalTokensBefore = estimateTokens(systemPrompt) + estimateMessagesTokens(messages)
+      if (totalTokensBefore > this.contextWindow * COMPACT_THRESHOLD) {
+        eventSink.emit(AgentEventType.Status, { status: 'compacting' })
       }
+      const compactResult = await compactMessagesAsync(messages, systemPrompt, todoList, this.contextWindow, this.ollamaBaseUrl, this.model, compactionFailures, planResume)
+      if (compactResult.messages !== messages) {
+        messages.length = 0
+        messages.push(...compactResult.messages)
+
+        // Re-inject plan resume messages if they were compacted away
+        if (planResumeMessages && i === 0) {
+          // Only on the first iteration — after that, the compaction summary should capture plan state
+          const hasResumeContent = messages.some(m =>
+            m.role === 'user' && m.content.includes('[RESUME')
+          )
+          if (!hasResumeContent) {
+            // Insert before the last user message (the current prompt)
+            const lastUserIdx = messages.findLastIndex(m => m.role === 'user')
+            if (lastUserIdx >= 0) {
+              messages.splice(lastUserIdx, 0, ...planResumeMessages)
+            } else {
+              messages.push(...planResumeMessages)
+            }
+          }
+        }
+
+        // Emit updated context usage after compaction
+        const postCompactTokens = estimateTokens(systemPrompt) + estimateMessagesTokens(messages)
+        eventSink.emit(AgentEventType.ContextUsage, {
+          systemTokens: estimateTokens(systemPrompt),
+          messageTokens: estimateMessagesTokens(messages),
+          promptTokens: 0,
+          toolTokens: estimateTokens(JSON.stringify(ollamaTools)),
+          contextWindow: this.contextWindow,
+          compacted: true,
+          preCompactTokens: totalTokensBefore,
+          postCompactTokens,
+        })
+
+        // Persist compaction checkpoint to chat.json
+        if (compactResult.checkpoint && this.chatService && this.chatId) {
+          // Determine which prior messages were removed by compaction
+          // by checking which prior message objects are no longer in the compacted result
+          const keptMessageSet = new Set(compactResult.messages)
+          const coveredIds = new Set<string>()
+          for (let i = 0; i < priorMessageObjects.length; i++) {
+            if (!keptMessageSet.has(priorMessageObjects[i]) && i < sourceIds.length && sourceIds[i] !== '__compaction_summary__') {
+              coveredIds.add(sourceIds[i])
+            }
+          }
+
+          const checkpoint: CompactionCheckpoint = {
+            createdAt: new Date().toISOString(),
+            summary: compactResult.checkpoint.summary,
+            aiGenerated: compactResult.checkpoint.aiGenerated,
+            coveredMessageIds: [...coveredIds],
+            summaryTokens: compactResult.checkpoint.summaryTokens,
+          }
+          try {
+            await this.chatService.saveCheckpoints(this.projectPath, this.chatId, [checkpoint])
+          } catch { /* best-effort persistence */ }
+
+          eventSink.emit(AgentEventType.Compaction, {
+            createdAt: checkpoint.createdAt,
+            summary: checkpoint.summary,
+            aiGenerated: checkpoint.aiGenerated,
+            coveredMessageIds: checkpoint.coveredMessageIds,
+            summaryTokens: checkpoint.summaryTokens,
+          })
+        }
+      }
+      compactionFailures = compactResult.compactionFailures
 
       const result = await this.streamChat(messages, ollamaTools, eventSink)
 

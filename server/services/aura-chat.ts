@@ -11,10 +11,25 @@ export interface AuraChatMessage {
   subAgents?: unknown[]
 }
 
+export interface CompactionCheckpoint {
+  /** ISO timestamp when this compaction was created */
+  createdAt: string
+  /** The AI-generated or fallback summary text */
+  summary: string
+  /** Whether the summary was AI-generated (true) or a rule-based fallback (false) */
+  aiGenerated: boolean
+  /** IDs of AuraChatMessages covered by this summary (all messages before the checkpoint) */
+  coveredMessageIds: string[]
+  /** Estimated token count of the summary */
+  summaryTokens: number
+}
+
 export interface AuraChatSession {
   id: string
   title: string
   messages: AuraChatMessage[]
+  /** Compaction checkpoints — only the latest is used (it subsumes all prior ones) */
+  compactionCheckpoints: CompactionCheckpoint[]
   createdAt: string
   updatedAt: string
 }
@@ -31,7 +46,12 @@ export class AuraChatService {
   async get(projectPath: string): Promise<AuraChatSession | null> {
     try {
       const raw = await fs.readFile(this.chatPath(projectPath), 'utf-8')
-      return JSON.parse(raw)
+      const chat = JSON.parse(raw) as AuraChatSession
+      // Migration: add compactionCheckpoints if missing (old chats)
+      if (!chat.compactionCheckpoints) {
+        chat.compactionCheckpoints = []
+      }
+      return chat
     } catch {
       return null
     }
@@ -43,6 +63,7 @@ export class AuraChatService {
       id: `ac_${uuidv4()}`,
       title: 'New Chat',
       messages: [],
+      compactionCheckpoints: [],
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     }
@@ -60,5 +81,13 @@ export class AuraChatService {
       }
     }
     await fs.writeFile(this.chatPath(projectPath), JSON.stringify(chat, null, 2), 'utf-8')
+  }
+
+  /** Save only the compaction checkpoints (avoids rewriting messages) */
+  async saveCheckpoints(projectPath: string, chatId: string, checkpoints: CompactionCheckpoint[]): Promise<void> {
+    const chat = await this.get(projectPath)
+    if (!chat || chat.id !== chatId) return
+    chat.compactionCheckpoints = checkpoints
+    await this.save(projectPath, chat)
   }
 }

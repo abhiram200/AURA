@@ -181,3 +181,39 @@ Rules:
 - Do NOT include pleasantries, greetings, or filler — only substantive information
 
 Conversation:`
+
+// ===== Builder Agent Compaction =====
+
+export const BUILDER_COMPACTION_PROMPT = `Analyze the builder agent conversation below and produce a structured summary that captures everything needed to continue the build seamlessly.
+
+You MUST respond with a markdown summary with these exact sections (omit any section that would be empty):
+
+## Primary Request and Intent
+What the user asked for. Be specific — include the exact goal, not a vague description.
+
+## Key Technical Decisions
+Architectural choices, patterns adopted, libraries selected, conventions established. Include why each decision was made if the reasoning was discussed.
+
+## Files Modified/Created
+List every file that was written or updated, with a brief description of what changed. Format: \`filePath\` — one-line description.
+
+## Errors and Fixes
+For each error encountered: what broke, the error message or symptom, and how it was resolved. If an error was NOT resolved, say so explicitly.
+
+## Current Work State
+Exactly where the build stands right now. What was just completed, what is in progress. Be precise — include file names and line numbers if relevant.
+
+## Pending Tasks
+List remaining tasks from the todo list (if any). Include status markers: [x] done, [>] in progress, [ ] pending.
+
+## Next Step
+What should happen next to continue the build. If the user's last message gave a specific instruction, quote it verbatim.
+
+Rules:
+- Be specific and factual. Include file paths, function names, error messages, and line numbers.
+- Do NOT hallucinate — only include information that appears in the conversation.
+- Keep the total summary under 200 lines.
+- If a section would be empty, omit it entirely.
+- This summary will replace the conversation history, so it must be self-contained.
+
+Conversation:`

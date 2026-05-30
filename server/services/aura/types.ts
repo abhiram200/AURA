@@ -255,6 +255,8 @@ export interface ContextManifest {
     generatedAt: string
     fileHashes: Record<string, string>
   }>
+  /** Folders whose contexts may be stale because a dependency was regenerated */
+  needsRegeneration?: string[]
 }
 
 export interface FileHashEntry {

@@ -28,7 +28,7 @@ export interface AppSettings {
 
 const DEFAULT_SETTINGS: AppSettings = {
   defaultModel: '',
-  contextWindowSize: 8192,
+  contextWindowSize: 131072,
   autoExtractMemory: true,
   preferences: {
     responseDetail: null, technicalLevel: null, responseFormat: null,
