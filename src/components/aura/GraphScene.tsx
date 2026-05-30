@@ -94,15 +94,19 @@ function computeHomeView(simulation: ForceSimulation): { position: THREE.Vector3
   }
   centerX /= count; centerY /= count; centerZ /= count
 
-  // Use bounding sphere radius (max distance from center) for 3D fitting
-  let maxRadius = 0
+  // Use 90th percentile radius instead of max to avoid outlier nodes zooming out too far
+  const radii: number[] = []
   for (const node of simulation.nodes.values()) {
     const dx = node.x - centerX, dy = node.y - centerY, dz = node.z - centerZ
-    const r = Math.sqrt(dx * dx + dy * dy + dz * dz)
-    if (r > maxRadius) maxRadius = r
+    radii.push(Math.sqrt(dx * dx + dy * dy + dz * dz))
   }
+  radii.sort((a, b) => a - b)
+  const p90Index = Math.min(Math.ceil(radii.length * 0.9), radii.length - 1)
+  const radius = radii[p90Index] || radii[radii.length - 1] || 10
 
-  const dist = maxRadius / Math.sin(Math.PI / 6) * 0.85
+  // Clamp: use at least 10 and at most 200 for the camera distance calculation
+  const clampedRadius = Math.max(10, Math.min(radius, 200))
+  const dist = clampedRadius / Math.sin(Math.PI / 6) * 0.85
 
   return {
     position: new THREE.Vector3(centerX, centerY, centerZ + dist),
@@ -181,15 +185,18 @@ function CameraAutoFit({ simulation, stable, controlsRef }: { simulation: ForceS
     }
     cx /= count; cy /= count; cz /= count
 
-    // Use bounding sphere radius for 3D camera fitting
-    let maxRadius = 0
+    // Use 90th percentile radius instead of max to avoid outlier nodes zooming out too far
+    const radii: number[] = []
     for (const node of simulation.nodes.values()) {
       const dx = node.x - cx, dy = node.y - cy, dz = node.z - cz
-      const r = Math.sqrt(dx * dx + dy * dy + dz * dz)
-      if (r > maxRadius) maxRadius = r
+      radii.push(Math.sqrt(dx * dx + dy * dy + dz * dz))
     }
+    radii.sort((a, b) => a - b)
+    const p90Index = Math.min(Math.ceil(radii.length * 0.9), radii.length - 1)
+    const radius = radii[p90Index] || radii[radii.length - 1] || 10
+    const clampedRadius = Math.max(10, Math.min(radius, 200))
 
-    const dist = maxRadius / Math.sin(Math.PI / 6) * 0.85
+    const dist = clampedRadius / Math.sin(Math.PI / 6) * 0.85
 
     targetPos.current.set(cx, cy, cz + dist)
     targetLookAt.current.set(cx, cy, cz)

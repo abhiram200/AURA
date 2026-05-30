@@ -47,6 +47,7 @@ export class AuraIndexer {
   private embeddingService: EmbeddingService | null = null
   private contextGenerator: ContextGenerator | null = null
   private processTracer: ProcessTracer | null = null
+  private tsconfigPaths: Array<{ pattern: RegExp; replacements: string[] }> = []
   private status: IndexingStatus = {
     phase: 'idle',
     progress: 0,
@@ -414,7 +415,73 @@ export class AuraIndexer {
     }
   }
 
+  /** Load tsconfig paths aliases (e.g. "@/*" -> "./src/*") into this.tsconfigPaths */
+  private loadTsconfigPaths(): void {
+    this.tsconfigPaths = []
+    const tsconfigs = ['tsconfig.json', 'tsconfig.app.json']
+
+    for (const tsconfigName of tsconfigs) {
+      const tsconfigPath = path.join(this.projectPath, tsconfigName)
+      try {
+        const content = fsSync.readFileSync(tsconfigPath, 'utf-8')
+        // Strip comments (single-line and multi-line)
+        const cleaned = content.replace(/\/\/.*$/gm, '').replace(/\/\*[\s\S]*?\*\//g, '')
+        const json = JSON.parse(cleaned)
+        const opts = json.compilerOptions || {}
+        // baseUrl is relative to the tsconfig file's directory
+        const baseUrl = opts.baseUrl
+          ? path.resolve(path.dirname(tsconfigPath), opts.baseUrl)
+          : this.projectPath
+        if (opts.paths && typeof opts.paths === 'object') {
+          for (const [pattern, targets] of Object.entries(opts.paths as Record<string, string[]>)) {
+            // Convert glob pattern like "@/*" to a RegExp
+            const regexStr = '^' + pattern.replace(/\*/g, '(.+)') + '$'
+            this.tsconfigPaths.push({
+              pattern: new RegExp(regexStr),
+              // Store replacement paths relative to project root (matching file node IDs)
+              replacements: targets.map((t: string) => {
+                const absoluteTarget = path.resolve(baseUrl, t).replace(/\\/g, '/')
+                // Convert back to project-relative path to match file node IDs
+                const projectPrefix = this.projectPath.replace(/\\/g, '/') + '/'
+                return absoluteTarget.startsWith(projectPrefix)
+                  ? absoluteTarget.slice(projectPrefix.length)
+                  : absoluteTarget
+              }),
+            })
+          }
+          break // Found paths, no need to check more tsconfigs
+        }
+      } catch {
+        // File doesn't exist or isn't valid JSON — skip
+      }
+    }
+  }
+
+  /** Resolve a bare import specifier (e.g. "@/types") using tsconfig paths */
+  private resolveAlias(specifier: string, fileNodeMap: Map<string, AuraNode>): string | null {
+    for (const { pattern, replacements } of this.tsconfigPaths) {
+      const match = specifier.match(pattern)
+      if (match) {
+        for (const replacement of replacements) {
+          // Replace the wildcard capture group
+          const wildcard = match[1] || ''
+          const resolved = replacement.replace(/\*/g, wildcard)
+          // Try common extensions
+          const extensions = ['', '.ts', '.tsx', '.js', '.jsx', '/index.ts', '/index.tsx', '/index.js', '/index.jsx']
+          for (const ext of extensions) {
+            const candidate = resolved + ext
+            if (fileNodeMap.has(candidate)) return candidate
+          }
+        }
+      }
+    }
+    return null
+  }
+
   private resolveImports(): void {
+    // Load tsconfig path aliases for resolving bare specifiers like "@/types"
+    this.loadTsconfigPaths()
+
     // Build a map of file node IDs for quick lookup
     const fileNodeMap = new Map<string, AuraNode>()
     for (const node of this.graph.nodes) {
@@ -487,9 +554,19 @@ export class AuraIndexer {
           edge.confidence = 0.5
         }
       } else {
-        // JS/TS import resolution (existing logic)
-        // Skip non-relative imports (bare specifiers like 'react', 'express')
-        if (!rawImportPath.startsWith('.')) continue
+        // JS/TS import resolution
+        if (!rawImportPath.startsWith('.')) {
+          // Non-relative import — try tsconfig path aliases (e.g. "@/types" -> "./src/types")
+          const aliasResolved = this.resolveAlias(rawImportPath, fileNodeMap)
+          if (aliasResolved) {
+            edge.target = aliasResolved
+            edge.confidence = 0.9
+          } else {
+            // Unresolvable bare specifier (e.g. 'react', 'express') — keep with low confidence
+            edge.confidence = 0.3
+          }
+          continue
+        }
 
         // Resolve relative import path
         const sourceDir = path.dirname(edge.source)
