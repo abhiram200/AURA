@@ -43,7 +43,7 @@ function estimateMessagesTokens(messages: Array<{ role: string; content: string;
 
 // ── Context compaction ──────────────────────────────────────────────────────
 
-const COMPACT_THRESHOLD = 0.6 // Compact when tokens exceed 60% of context window
+const COMPACT_THRESHOLD = 0.7 // Compact when tokens exceed 70% of context window
 const RECENT_BUDGET_RATIO = 0.3 // Keep 30% of context window for recent messages
 const COMPACTION_FAILURE_LIMIT = 3 // Stop compacting after this many consecutive failures
 
@@ -402,6 +402,7 @@ interface SubAgentTask {
   task: string
   focus: string
   type?: SubAgentType
+  preContext?: string
 }
 
 interface AuraTodoItem {
@@ -582,20 +583,33 @@ For quick fixes (single file, obvious change): skip the plan, just fix it direct
 
 ## When to Use Sub-Agents vs Direct Tool Calls
 
-- **Use sub-agents** for any task that requires understanding, investigating, or modifying multiple areas of the codebase. If a task involves reading multiple files, tracing relationships, or researching something you don't already know — spawn a sub-agent.
+- **Use sub-agents** for any task that requires understanding, investigating, or modifying multiple areas of the codebase. If a task involves reading multiple files, tracing relationships, or researching something you don't already know — spawn a sub-agent. This keeps your context window clean.
 - **Use direct tool calls** only for quick single operations where you already know exactly what to do (read one file, write one file, check one symbol).
 - **For build tasks**: always dispatch a \`plan\` sub-agent first, then execute the plan yourself.
 - **Avoid over-splitting**: don't create 5 sub-agents for what 2 can handle. Combine related investigations into a single sub-agent with a comprehensive task description. But don't lump unrelated concerns together either.
 
 ## Sub-Agents
 
-Use \`dispatch_sub_agents\` to fan out parallel agents for tasks that benefit from focused investigation. Each task MUST have a short, descriptive \`title\` and a detailed \`task\` prompt. Choose the right type:
+Use \`dispatch_sub_agents\` to offload token-heavy tasks — exploration, research, planning — to sub-agents. This keeps your own context window clean and avoids bloating it with intermediate tool results.
 
+**Writing effective task descriptions:**
+- Be specific and detailed. A sub-agent only knows what you tell it — it starts with no conversation context.
+- Include relevant file paths, symbol names, function signatures, or error messages directly in the \`task\` field.
+- State exactly what you want the sub-agent to find, trace, or produce — vague prompts waste iterations.
+- Bad: "Look at the auth module"
+- Good: "Trace how login() in src/auth.ts is called from the API layer. Find all routes that import or call login(), check what parameters it takes, and identify any middleware that wraps it. Report the call chain from route handler → middleware → login() → token generation."
+
+**Using \`preContext\`:**
+- When you have already discovered relevant facts (file paths, symbols, relationships, error details), pass them via \`preContext\` so the sub-agent doesn't waste time re-discovering them.
+- Only include context that is directly relevant to the task. Don't dump everything you know — distill it to what the sub-agent actually needs.
+
+**Choosing the right type:**
 - **explore**: Investigate code — find symbols, trace dependencies, understand architecture. Read-only.
 - **research**: Look up external info — documentation, APIs, examples via web search.
 - **plan**: Analyze and plan — investigate the codebase and produce a structured implementation plan without making edits.
 
 **When you should spawn sub-agents (not do the work inline):**
+- Any investigation that would require multiple tool calls — offload it so the intermediate results don't fill your context
 - Understanding unfamiliar code before making changes
 - Investigating a bug that spans multiple files
 - Researching how a feature is implemented before modifying it
@@ -1840,7 +1854,7 @@ function defineAgentTools(qs: AuraQueryService, projectPath: string, managedShel
 
     {
       name: 'dispatch_sub_agents',
-      description: 'Spawn one or more sub-agents to work on tasks in parallel. Each agent runs its own tool-calling loop and returns a detailed summary. Use this for any task that benefits from focused attention — investigating, researching, or planning. Choose the right type: "explore" for investigating code, "research" for web/docs lookup, "plan" for creating implementation plans.',
+      description: 'Spawn sub-agents for token-heavy tasks like exploration, research, or planning — this offloads work from your context window so it does not get bloated with intermediate tool results. Each sub-agent runs its own tool-calling loop and returns a concise summary. Write DETAILED task descriptions — sub-agents start with no conversation context, so include all relevant details, file paths, and specific questions in the task field. Use preContext to forward facts you have already discovered so the sub-agent does not re-discover them. Choose the right type: "explore" for investigating code, "research" for web/docs, "plan" for creating implementation plans.',
       parameters: {
         type: 'object',
         properties: {
@@ -1850,13 +1864,14 @@ function defineAgentTools(qs: AuraQueryService, projectPath: string, managedShel
               type: 'object',
               properties: {
                 title: { type: 'string', description: 'Short title for this task, e.g. "Explore auth module" or "Trace API dependencies"' },
-                task: { type: 'string', description: 'What to investigate — a focused question for the agent' },
+                task: { type: 'string', description: 'A detailed, specific prompt for the sub-agent. Include file paths, symbol names, error messages, and exactly what to find or produce. The sub-agent has no conversation context — everything it needs to know must be in this field or preContext. Vague prompts waste iterations.' },
                 focus: { type: 'string', description: 'Specific focus area — e.g., "upstream dependencies", "API surface", "auth module"' },
                 type: { type: 'string', enum: ['explore', 'research', 'plan'], description: 'Agent type: "explore" (investigate code, read-only), "research" (web/docs), "plan" (create implementation plan, read-only)' },
+                preContext: { type: 'string', description: 'Optional context to give the sub-agent a head start — relevant findings, file paths, or facts the main agent has already discovered. Use this when you have information that would save the sub-agent from re-discovering it. Only include what is directly relevant to the task.' },
               },
               required: ['title', 'task'],
             },
-            description: 'Tasks for sub-agents to work on in parallel',
+            description: 'Tasks for sub-agents to work on',
           },
         },
         required: ['tasks'],
@@ -2696,8 +2711,14 @@ Focus on: ${task.focus}`
 
       const messages: OllamaMessage[] = [
         { role: 'system', content: subSystemPrompt },
-        { role: 'user', content: task.task },
       ]
+
+      // If the main agent provided pre-context, inject it as a second system message
+      if (task.preContext) {
+        messages.push({ role: 'system', content: `## Pre-Context\n\nThe main agent has provided the following context from its ongoing investigation. Use this as background — you do not need to re-discover these facts.\n\n${task.preContext}` })
+      }
+
+      messages.push({ role: 'user', content: task.task })
 
       let lastContent = ''
       for (let i = 0; i < maxSubIterations; i++) {
