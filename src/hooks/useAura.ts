@@ -1542,25 +1542,29 @@ export function useAura(projectId: string | null) {
                     }
                   }
                 } else if (eventType === 'sub_agent_start') {
-                  const newSa: AuraSubAgentInfo = {
-                    taskId: data.taskId,
-                    title: data.title || '',
-                    task: data.task,
-                    type: data.type || 'explore',
-                    status: 'running' as const,
-                    order: eventOrder++,
-                  }
-                  msg.subAgents = [...(msg.subAgents || []), newSa]
-                  // Create new array to avoid mutating previous state (StrictMode double-invokes updaters)
-                  const segments = [...(msg.segments || [])]
-                  if (msg.content.trim()) {
-                    if (segments.length === 0 || segments[segments.length - 1].type !== 'text') {
-                      segments.push({ type: 'text', content: msg.content, order: eventOrder++ })
+                  // Deduplicate: skip if a sub-agent with this taskId already exists
+                  const existingSa = (msg.subAgents || []).find((sa: AuraSubAgentInfo) => sa.taskId === data.taskId)
+                  if (!existingSa) {
+                    const newSa: AuraSubAgentInfo = {
+                      taskId: data.taskId,
+                      title: data.title || '',
+                      task: data.task,
+                      type: data.type || 'explore',
+                      status: 'running' as const,
+                      order: eventOrder++,
                     }
+                    msg.subAgents = [...(msg.subAgents || []), newSa]
+                    // Create new array to avoid mutating previous state (StrictMode double-invokes updaters)
+                    const segments = [...(msg.segments || [])]
+                    if (msg.content.trim()) {
+                      if (segments.length === 0 || segments[segments.length - 1].type !== 'text') {
+                        segments.push({ type: 'text', content: msg.content, order: eventOrder++ })
+                      }
+                    }
+                    msg.content = ''
+                    segments.push({ type: 'sub_agent_start', subAgent: newSa, order: newSa.order! })
+                    msg.segments = segments
                   }
-                  msg.content = ''
-                  segments.push({ type: 'sub_agent_start', subAgent: newSa, order: newSa.order! })
-                  msg.segments = segments
                 } else if (eventType === 'sub_agent_result') {
                   msg.subAgents = (msg.subAgents || []).map((sa: AuraSubAgentInfo) =>
                     sa.taskId === data.taskId

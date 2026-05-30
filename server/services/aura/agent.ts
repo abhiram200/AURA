@@ -2660,9 +2660,10 @@ export class AuraAgent {
     const allTools = defineAgentTools(this.qs, this.projectPath, this.managedShells ?? undefined, this.projectId ?? undefined)
     const maxSubIterations = 100
 
-    const runOne = async (task: SubAgentTask): Promise<string> => {
+    const runOne = async (taskIndex: number, task: SubAgentTask): Promise<string> => {
       const agentType: SubAgentType = task.type || 'explore'
-      eventSink.emit('sub_agent_start', { taskId: task.focus, title: task.title, task: task.task, type: agentType })
+      const taskId = `sa_${taskIndex}_${task.focus}`
+      eventSink.emit('sub_agent_start', { taskId, title: task.title, task: task.task, type: agentType })
 
       // Build lean system prompt for sub-agents: base tool instructions only, no user context/skills/plan
       const agentPrompt = SUB_AGENT_SYSTEM_PROMPTS[agentType]
@@ -2727,14 +2728,14 @@ Focus on: ${task.focus}`
         if (result?.content) lastContent = result.content
 
         if (!result || result.toolCalls.length === 0) {
-          eventSink.emit('sub_agent_result', { taskId: task.focus, result: result?.content || 'No findings' })
+          eventSink.emit('sub_agent_result', { taskId, result: result?.content || 'No findings' })
           return result?.content || 'No findings'
         }
 
         // On the last iteration, return whatever content the model produced alongside tool calls
         if (i === maxSubIterations - 1) {
           const summary = lastContent || 'Sub-agent ran out of iterations before producing a final summary'
-          eventSink.emit('sub_agent_result', { taskId: task.focus, result: summary })
+          eventSink.emit('sub_agent_result', { taskId, result: summary })
           return summary
         }
 
@@ -2758,13 +2759,13 @@ Focus on: ${task.focus}`
       }
 
       // Unreachable, but just in case
-      eventSink.emit('sub_agent_result', { taskId: task.focus, result: lastContent || 'No findings' })
+      eventSink.emit('sub_agent_result', { taskId, result: lastContent || 'No findings' })
       return lastContent || 'No findings'
     }
 
     // Run sub-agents in parallel
     const results = await Promise.allSettled(
-      tasks.map(task => runOne(task)),
+      tasks.map((task, index) => runOne(index, task)),
     )
 
     return results.map((r, i) => ({
