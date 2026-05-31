@@ -33,8 +33,8 @@ export function AssistantPage({ projectId, projectName, workspacePath: _workspac
     if (reportedCrashesRef.current.has(report.shellId)) return
 
     const currentAura = auraRef.current
-    // Silently ignore if AI is streaming
-    if (currentAura.isStreaming) return
+    // Silently ignore if AI is not ready (streaming, compacting, etc.)
+    if (currentAura.isStreaming || currentAura.isCompacting) return
 
     reportedCrashesRef.current.add(report.shellId)
 
