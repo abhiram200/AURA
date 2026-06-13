@@ -1,7 +1,7 @@
 import type { AuraNode, SearchResult, EmbeddingStoreData } from '../types.ts'
 
 const EMBED_TIMEOUT = 30000
-const MAX_CONCURRENT = 5
+const MAX_CONCURRENT = 3
 const AVAILABILITY_CACHE_MS = 60000
 
 export class EmbeddingService {

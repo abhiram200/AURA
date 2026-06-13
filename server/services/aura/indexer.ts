@@ -230,20 +230,24 @@ export class AuraIndexer {
       this.bm25Engine = new BM25SearchEngine()
       this.bm25Engine.buildIndex(this.graph.nodes)
 
-      this.updateStatus('searchIndexing', 0.3, filePaths.length, filePaths.length, this.graph.nodes.length, this.graph.edges.length, 'Generating embeddings and context files...')
+      this.updateStatus('searchIndexing', 0.3, filePaths.length, filePaths.length, this.graph.nodes.length, this.graph.edges.length, 'Generating embeddings...')
       this.embeddingService = new EmbeddingService(this.config.ollamaBaseUrl, this.config.embedModel)
-      this.contextGenerator = new ContextGenerator(this.config.ollamaBaseUrl, this.config.chatModel)
 
-      // Run embeddings and context generation in parallel
-      const [embeddingAvailable] = await Promise.all([
+      // Run embeddings first, then context generation — avoids overwhelming Ollama with concurrent requests
+      const EMBEDDING_TIMEOUT = 120_000 // 2 minute timeout for all embeddings
+      const embeddingAvailable = await Promise.race([
         this.embeddingService.generateEmbeddings(
           this.graph.nodes,
           (done, total) => {
             this.updateStatus('searchIndexing', 0.3 + 0.5 * done / total, filePaths.length, filePaths.length, this.graph.nodes.length, this.graph.edges.length, `Generating embeddings ${done}/${total}...`)
           },
         ),
-        this.generateContextsInternal(filePaths.length),
+        new Promise<false>((resolve) => setTimeout(() => resolve(false), EMBEDDING_TIMEOUT)),
       ])
+
+      this.updateStatus('searchIndexing', 0.8, filePaths.length, filePaths.length, this.graph.nodes.length, this.graph.edges.length, embeddingAvailable ? 'Embeddings complete, generating context files...' : 'Embeddings timed out, generating context files...')
+      this.contextGenerator = new ContextGenerator(this.config.ollamaBaseUrl, this.config.chatModel)
+      await this.generateContextsInternal(filePaths.length)
 
       if (!embeddingAvailable) {
         this.updateStatus('searchIndexing', 0.8, filePaths.length, filePaths.length, this.graph.nodes.length, this.graph.edges.length, 'Ollama unavailable, skipping embeddings')
