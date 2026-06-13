@@ -1,12 +1,14 @@
+import 'dotenv/config'
 import express from 'express'
 import cors from 'cors'
-import { join } from 'path'
+import { join, basename } from 'path'
 import { FileStore } from './storage/fileStore.ts'
 import { OllamaService } from './services/ollama.ts'
 import { ContextService } from './services/context.ts'
 import { ConversationService } from './services/conversation.ts'
 import { MemoryService } from './services/memory.ts'
 import { SkillsService } from './services/skills.ts'
+import { WebSearchService } from './services/aura/web-search.ts'
 import { ProjectService } from './services/project.ts'
 import { GroupService } from './services/group.ts'
 import { createChatRouter } from './routes/chat.ts'
@@ -78,7 +80,8 @@ async function start() {
   const contextService = new ContextService()
   const conversationService = new ConversationService(store)
   const memoryService = new MemoryService(store)
-  const skillsService = new SkillsService(store)
+  const webSearch = new WebSearchService()
+  const skillsService = new SkillsService(store, webSearch)
   const projectService = new ProjectService(store)
   const groupService = new GroupService(DATA_DIR)
   const workspaceService = new WorkspaceService(projectService)
@@ -121,6 +124,10 @@ async function start() {
   // Single WebSocket server for terminal and file watching
   const wss = new WebSocketServer({ noServer: true })
   const wssFiles = new WebSocketServer({ noServer: true })
+  const wssVisual = new WebSocketServer({ noServer: true })
+
+  // Import visual companion helpers for WebSocket handling
+  const { addClient: addVisualClient, removeClient: removeVisualClient, recordEvent: recordVisualEvent } = await import('./services/aura/visual-companion.ts')
 
   server.on('upgrade', (request, socket, head) => {
     const pathname = new URL(request.url || '', `http://localhost:${PORT}`).pathname
@@ -132,6 +139,10 @@ async function start() {
     } else if (pathname === '/api/workspace/watch') {
       wssFiles.handleUpgrade(request, socket, head, (ws) => {
         wssFiles.emit('connection', ws, request)
+      })
+    } else if (pathname.startsWith('/api/aura/visual/') && pathname.endsWith('/ws')) {
+      wssVisual.handleUpgrade(request, socket, head, (ws) => {
+        wssVisual.emit('connection', ws, request)
       })
     } else {
       socket.destroy()
@@ -221,6 +232,53 @@ async function start() {
 
     // Track projectId on the ws instance for cleanup
     ;(ws as any)._projectId = projectId
+  })
+
+  // Visual companion WebSocket — live reload and click event recording
+  wssVisual.on('connection', async (ws, req) => {
+    const url = new URL(req.url || '', `http://localhost:${PORT}`)
+    const pathname = url.pathname
+    // Path format: /api/aura/visual/{projectId}/ws
+    const match = pathname.match(/\/api\/aura\/visual\/([^/]+)\/ws/)
+    if (!match) {
+      ws.close(4001, 'Invalid visual companion WebSocket path')
+      return
+    }
+
+    // Look up the project path from the companion map using the projectId dir name
+    const projectDirName = decodeURIComponent(match[1])
+    // Find project by matching workspacePath basename to dirName
+    // We'll use a simple approach: iterate known projects
+    let projectPath: string | null = null
+    try {
+      const projects = await projectService.list()
+      for (const p of projects) {
+        if (basename(p.workspacePath) === projectDirName) {
+          projectPath = p.workspacePath
+          break
+        }
+      }
+    } catch {}
+
+    if (!projectPath) {
+      ws.close(4002, 'Project not found')
+      return
+    }
+
+    addVisualClient(projectPath, ws)
+
+    ws.on('message', (data) => {
+      try {
+        const msg = JSON.parse(data.toString())
+        if (msg.type === 'click' || msg.type === 'choice') {
+          recordVisualEvent(projectPath!, msg).catch(() => {})
+        }
+      } catch {}
+    })
+
+    ws.on('close', () => {
+      removeVisualClient(projectPath!, ws)
+    })
   })
 }
 

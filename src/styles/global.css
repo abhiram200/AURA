@@ -3812,6 +3812,57 @@ body {
   display: none;
 }
 
+/* ── Visual Companion Panel ──────────────────────────────────────────── */
+
+.visual-companion-panel {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  background: var(--bg-primary);
+}
+
+.visual-companion-panel__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 16px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-secondary);
+}
+
+.visual-companion-panel__title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--accent);
+}
+
+.visual-companion-panel__iframe {
+  flex: 1;
+  border: none;
+  width: 100%;
+  background: var(--bg-primary);
+}
+
+/* ── Visual Companion Banner ────────────────────────────────────────── */
+
+.aura-chat__visual-banner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 16px;
+  margin: 8px 0;
+  background: rgba(0, 240, 255, 0.06);
+  border: 1px solid rgba(0, 240, 255, 0.2);
+  border-radius: 8px;
+  font-size: 13px;
+  color: var(--text-primary);
+}
+
+.aura-chat__visual-banner svg {
+  flex-shrink: 0;
+  color: var(--accent);
+}
+
 .builder-placeholder {
   display: flex;
   flex-direction: column;

@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo, useRef, memo, type KeyboardEvent } from 'react'
+import { useState, useEffect, useCallback, useMemo, useRef, memo, Fragment, type KeyboardEvent } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { computeDiff, type DiffLine } from '../../utils/diffUtils'
@@ -73,6 +73,7 @@ interface AuraChatProps {
   isActive?: boolean
   focusTrigger?: number
   onActivity?: (type: 'edit' | 'interaction') => void
+  visualCompanion?: { url: string; title: string; filename: string } | null
 }
 
 function StatusDot({ status }: { status: 'running' | 'completed' | 'error' }) {
@@ -553,6 +554,7 @@ const ChatMessage = memo(function ChatMessage({ msg, onViewShell, liveShells }: 
     | { kind: 'text'; content: string; key: string }
     | { kind: 'write-tool'; tc: AuraToolCall; key: string }
     | { kind: 'ask-user'; tc: AuraToolCall; key: string }
+    | { kind: 'skill-loaded'; tc: AuraToolCall; key: string }
     | { kind: 'other-tool-group'; tcs: AuraToolCall[]; key: string }
     | { kind: 'agent-group'; agents: AuraSubAgentInfo[]; key: string }
     | { kind: 'single-agent'; agent: AuraSubAgentInfo; key: string }
@@ -576,13 +578,16 @@ const ChatMessage = memo(function ChatMessage({ msg, onViewShell, liveShells }: 
         } else if (tc.name === 'ask_user') {
           blocks.push({ kind: 'ask-user', tc, key: `au-${i}` })
           i++
+        } else if (tc.name === 'load_skill') {
+          blocks.push({ kind: 'skill-loaded', tc, key: `sl-${i}` })
+          i++
         } else {
           // Collect consecutive non-write, non-ask_user tool calls
           const group: AuraToolCall[] = [tc]
           let j = i + 1
           while (j < msg.segments.length && msg.segments[j].type === 'tool_call' && msg.segments[j].toolCall) {
             const nextTc = msg.toolCalls?.find(t => t.toolCallId === msg.segments[j].toolCall!.toolCallId) || msg.segments[j].toolCall
-            if (WRITE_TOOLS.has(nextTc.name) || nextTc.name === 'ask_user') break
+            if (WRITE_TOOLS.has(nextTc.name) || nextTc.name === 'ask_user' || nextTc.name === 'load_skill') break
             group.push(nextTc)
             j++
           }
@@ -631,6 +636,19 @@ const ChatMessage = memo(function ChatMessage({ msg, onViewShell, liveShells }: 
           }
           if (block.kind === 'ask-user') {
             return <AskUserSection key={block.key} tc={block.tc} />
+          }
+          if (block.kind === 'skill-loaded') {
+            const tc = block.tc
+            const statusClass = tc.status === 'completed' ? 'aura-chat__status-text--done'
+              : tc.status === 'running' ? 'aura-chat__status-text--running'
+              : 'aura-chat__status-text--error'
+            const label = tc.purpose || `Skill: ${tc.name}`
+            return (
+              <div key={block.key} className="aura-chat__skill-loaded">
+                <StatusDot status={tc.status} />
+                <span className={`aura-chat__skill-loaded-label ${statusClass}`}>{label}</span>
+              </div>
+            )
           }
           if (block.kind === 'other-tool-group') {
             return block.tcs.length === 1
@@ -854,7 +872,7 @@ function ApprovalCard({ request, onRespond }: { request: AuraApprovalRequest; on
   return null
 }
 
-export default function AuraChat({ messages, isStreaming, error, onAsk, onClearError, pendingApproval, onRespondToApproval, onViewShell, liveShells, isActive, focusTrigger, onActivity }: AuraChatProps) {
+export default function AuraChat({ messages, isStreaming, error, onAsk, onClearError, pendingApproval, onRespondToApproval, onViewShell, liveShells, isActive, focusTrigger, onActivity, visualCompanion }: AuraChatProps) {
   const [input, setInput] = useState('')
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const messagesContainerRef = useRef<HTMLDivElement>(null)
@@ -953,7 +971,15 @@ export default function AuraChat({ messages, isStreaming, error, onAsk, onClearE
           </div>
         )}
         {messages.map(msg => (
-          <ChatMessage key={msg.id} msg={msg} onViewShell={onViewShell} liveShells={liveShells} />
+          <Fragment key={msg.id}>
+            <ChatMessage msg={msg} onViewShell={onViewShell} liveShells={liveShells} />
+            {visualCompanion && visualCompanion.messageId === msg.id && (
+              <div className="aura-chat__visual-banner">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" /><circle cx="12" cy="12" r="3" /></svg>
+                <span>📐 Visual preview: <strong>{visualCompanion.title}</strong> — switch to the <strong>Visual</strong> tab to view</span>
+              </div>
+            )}
+          </Fragment>
         ))}
         {isStreaming && messages[messages.length - 1]?.role === 'assistant' && (messages[messages.length - 1]?.content !== '' || (messages[messages.length - 1]?.segments?.length || 0) > 0) && (
           <div className="aura-chat__streaming">

@@ -152,6 +152,7 @@ export function AssistantPage({ projectId, projectName, workspacePath: _workspac
         isActive={isActive}
         focusTrigger={focusTrigger}
         onActivity={reportActivity}
+        visualCompanion={aura.visualCompanion}
       />
       {managedShells.viewingShell && (() => {
         const shell = managedShells.shells.get(managedShells.viewingShell)

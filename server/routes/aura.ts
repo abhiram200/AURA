@@ -20,6 +20,7 @@ import { globalApprovalManagers } from '../services/aura/agent.ts'
 import { PlanPersistenceService } from '../services/aura/plan-persistence.ts'
 import type { ManagedShellService } from '../services/managedShell.ts'
 import { AgentEventType } from '../services/aura/sse.ts'
+import { serveVisualPage, serveVisualFile, recordEvent, getProjectPathByDirName, startVisualCompanion } from '../services/aura/visual-companion.ts'
 
 const groupQueryService = new GroupQueryService()
 const chatService = new AuraChatService()
@@ -1167,6 +1168,77 @@ export function createAuraRouter(
     }
 
     res.json({ status: 'ok' })
+  })
+
+  // ── Visual Companion Routes ────────────────────────────────────────────
+
+  // GET /api/aura/visual/:projectId — Serve the newest visual companion screen
+  router.get('/visual/:projectId', async (req, res) => {
+    const { projectId } = req.params
+    const project = await projectService.get(projectId)
+    if (!project) {
+      res.status(404).json({ error: 'Project not found' })
+      return
+    }
+
+    try {
+      const html = await serveVisualPage(project.workspacePath)
+      res.type('html').send(html)
+    } catch {
+      res.status(500).json({ error: 'Failed to serve visual companion' })
+    }
+  })
+
+  // GET /api/aura/visual/:projectId/files/:filename — Serve a specific file from the visual companion
+  router.get('/visual/:projectId/files/:filename', async (req, res) => {
+    const { projectId, filename } = req.params
+    const project = await projectService.get(projectId)
+    if (!project) {
+      res.status(404).json({ error: 'Project not found' })
+      return
+    }
+
+    const content = await serveVisualFile(project.workspacePath, filename)
+    if (!content) {
+      res.status(404).json({ error: 'File not found' })
+      return
+    }
+
+    res.type(filename.endsWith('.html') ? 'html' : filename.endsWith('.css') ? 'css' : filename.endsWith('.js') ? 'js' : 'text').send(content)
+  })
+
+  // POST /api/aura/visual/:projectId/events — Record a click event from the visual companion browser
+  router.post('/visual/:projectId/events', async (req, res) => {
+    const { projectId } = req.params
+    const project = await projectService.get(projectId)
+    if (!project) {
+      res.status(404).json({ error: 'Project not found' })
+      return
+    }
+
+    try {
+      await recordEvent(project.workspacePath, req.body)
+      res.json({ status: 'ok' })
+    } catch {
+      res.status(500).json({ error: 'Failed to record event' })
+    }
+  })
+
+  // POST /api/aura/visual/:projectId/start — Start the visual companion for a project
+  router.post('/visual/:projectId/start', async (req, res) => {
+    const { projectId } = req.params
+    const project = await projectService.get(projectId)
+    if (!project) {
+      res.status(404).json({ error: 'Project not found' })
+      return
+    }
+
+    try {
+      const info = await startVisualCompanion(project.workspacePath)
+      res.json({ url: info.url, screenDir: info.screenDir, stateDir: info.stateDir })
+    } catch {
+      res.status(500).json({ error: 'Failed to start visual companion' })
+    }
   })
 
   // Global error handler — catches unhandled errors from any route above

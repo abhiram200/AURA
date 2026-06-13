@@ -1,6 +1,5 @@
 import path from 'path'
 import fs from 'fs/promises'
-import { rmSync } from 'fs'
 import { execFile } from 'child_process'
 import { promisify } from 'util'
 import { platform } from 'os'
@@ -10,10 +9,11 @@ import type { AgentEventSink } from './sse.ts'
 import { AgentEventType } from './sse.ts'
 import type { ManagedShellService } from '../managedShell.ts'
 import { SilentEventSink } from './sse.ts'
-import { buildCrawlArgs, buildDesignCrawlArgs } from './crawl.ts'
+import { WebSearchService } from './web-search.ts'
 import { PlanPersistenceService, type SavedPlan } from './plan-persistence.ts'
 import { BUILDER_COMPACTION_PROMPT } from '../../prompts.ts'
 import type { AuraChatService, CompactionCheckpoint } from '../aura-chat.ts'
+import { writeScreen, readEvents as readVisualEvents, startVisualCompanion, stopVisualCompanion } from './visual-companion.ts'
 
 const execFileAsync = promisify(execFile)
 
@@ -450,7 +450,7 @@ Focus on:`,
 const TOOL_ACCESS: Record<SubAgentType, string[]> = {
   explore: ['search', 'context', 'impact', 'dependents', 'dependencies', 'route_map', 'tool_map', 'shape_check', 'api_impact', 'processes', 'process_detail', 'context_manifest', 'context_folder', 'get_graph', 'read_file', 'search_pattern'],
   research: ['search_web', 'context_manifest', 'context_folder', 'read_file', 'search_pattern', 'search'],
-  plan: ['search', 'context', 'dependents', 'dependencies', 'context_manifest', 'context_folder', 'read_file', 'search_pattern', 'route_map', 'processes', 'search_web', 'get_graph'],
+  plan: ['search', 'context', 'dependents', 'dependencies', 'context_manifest', 'context_folder', 'read_file', 'search_pattern', 'route_map', 'processes', 'search_web', 'get_graph', 'visual_preview', 'read_visual_events'],
 }
 
 // Commands that require user approval before execution, with human-readable descriptions
@@ -544,23 +544,11 @@ export const globalApprovalManagers = new Map<string, ApprovalManager>()
 
 // ── Intent detection ───────────────────────────────────────────────────────
 
-const INTENT_PATTERNS: Array<{ keywords: string[]; skill: string }> = [
-  { keywords: ['build me', 'create a', 'scaffold', 'implement', 'add feature', 'set up a', 'new project', 'from scratch', 'build a', 'create new'], skill: 'aura-building' },
-  { keywords: ['how', 'where', 'what does', 'understand', 'architecture', 'entry point', 'show me', 'explain', 'navigate', 'find'], skill: 'aura-exploring' },
-  { keywords: ['break', 'safe', 'change', 'modify', 'impact', 'affect', 'risk', 'delete', 'remove', 'consequence'], skill: 'aura-impact' },
-  { keywords: ['broken', 'error', 'fail', 'bug', 'trace', 'crash', 'fix', 'debug', 'issue', 'wrong', 'not working'], skill: 'aura-debugging' },
-  { keywords: ['rename', 'move', 'extract', 'refactor', 'restructure', 'clean up', 'delete safely', 'simplify'], skill: 'aura-refactoring' },
-]
-
-function detectIntent(prompt: string): string[] {
-  const lower = prompt.toLowerCase()
-  const skills = new Set<string>(['aura-guide'])
-  for (const { keywords, skill } of INTENT_PATTERNS) {
-    if (keywords.some(k => lower.includes(k))) {
-      skills.add(skill)
-    }
-  }
-  return [...skills]
+function detectIntent(_prompt: string): string[] {
+  // On-demand skill loading: aura-guide is always loaded as the base skill.
+  // Domain skills (building, exploring, impact, debugging, refactoring, visual)
+  // are loaded by the agent via the load_skill tool when it decides it needs them.
+  return ['aura-guide']
 }
 
 // ── Skill loading ──────────────────────────────────────────────────────────
@@ -583,7 +571,7 @@ async function loadSkills(skillNames: string[]): Promise<string> {
 
 function buildSystemPrompt(skillContent: string, contextSection?: string, isGreenfield?: boolean, gitContext?: string, planResume?: PlanResumeContext, isWindows?: boolean): string {
   const greenfieldNote = isGreenfield
-    ? '\nThis is a NEW project with no existing code. You are building from scratch.\n\n**IMPORTANT: Your FIRST actions must be:**\n1. Initialize git: `git init`\n2. Create a proper `.gitignore` file — always include `.aura/*` plus appropriate entries for the project type (e.g., node_modules/, dist/, .env for Node.js; __pycache__/, .venv/, *.pyc for Python; etc.)\n3. Commit: `git add -A` then `git commit -m "chore: initial commit"`\n4. Create a feature branch: `git checkout -b aura/<short-description>`\n\nThen: if the user\'s request is vague, use `ask_user` to clarify requirements (technology choices, UI preferences, scope, etc.) before planning. If you need external knowledge (library APIs, framework setup, versions), dispatch a `research` sub-agent. After that, dispatch a `plan` sub-agent — include any user decisions as `preContext`. No explore sub-agent needed since there is no existing codebase.\n'
+    ? '\nThis is a NEW project with no existing code. You are building from scratch.\n\n**IMPORTANT: Your FIRST actions must be:**\n1. Initialize git: `git init`\n2. Create a proper `.gitignore` file — always include `.aura/*` plus appropriate entries for the project type (e.g., node_modules/, dist/, .env for Node.js; __pycache__/, .venv/, *.pyc for Python; etc.)\n3. Commit: `git add -A` then `git commit -m "chore: initial commit"`\n4. Create a feature branch: `git checkout -b aura/<short-description>`\n\nThen: if the user\'s request is vague, use `ask_user` to clarify requirements (technology choices, UI preferences, scope, etc.) before planning. If the task involves UI/layout decisions, use `visual_preview` to show mockups and get visual feedback — users often can\'t articulate design preferences in words alone. If you need external knowledge (library APIs, framework setup, versions), dispatch a `research` sub-agent. After that, dispatch a `plan` sub-agent — include any user decisions and visual preferences as `preContext`. No explore sub-agent needed since there is no existing codebase.\n'
     : '\nThis is an existing codebase. You MUST explore it before making any changes. Start by dispatching an `explore` sub-agent to understand the structure, patterns, and relevant files.\n'
 
   const gitNote = gitContext ? `\n${gitContext}\n` : ''
@@ -596,8 +584,15 @@ For any task that requires more than one file change, follow this workflow IN OR
 
 1. **Explore first.** Dispatch an \`explore\` sub-agent to understand the codebase structure, relevant files, and existing patterns. You cannot plan effectively without understanding what already exists.
 2. **Research if needed.** If the task requires external knowledge (APIs, libraries, frameworks, versions), dispatch a \`research\` sub-agent. Skip this step if not needed.
-3. **Ask clarifying questions.** If the user's request is vague or you have ambiguities about requirements (technology choices, UI preferences, scope, etc.), use \`ask_user\` before planning. Don't guess on important decisions.
-4. **Plan.** Dispatch a \`plan\` sub-agent to create a detailed implementation plan. Include discoveries from explore/research steps AND any clarifying decisions from \`ask_user\` as \`preContext\` so the plan is grounded in actual knowledge and user preferences.
+3. **Clarify and visualize.** If the user's request is vague or you have ambiguities about requirements, clarify BEFORE planning. Choose the right tool for the type of question:
+   - **Use \`ask_user\`** for: technology choices, scope decisions, feature priorities, API design, data modeling, any question where the answer is words or a selection from options.
+   - **Use \`visual_preview\`** for: UI mockups, wireframes, layout comparisons, architecture diagrams, flow diagrams, side-by-side design choices, visual hierarchy questions — anything where SEEING it is clearer than DESCRIBING it.
+   - **The test:** Would the user understand this better by seeing it than reading about it? If yes, use \`visual_preview\`. If no, use \`ask_user\`. Many tasks benefit from BOTH — ask text questions first, then show visual options.
+   - **After calling \`visual_preview\`, do NOT describe the visual content in your response.** The user can see it in the Visual tab. Just tell them the preview is ready and what to look for or select.
+   - **Always call \`read_visual_events\` after \`visual_preview\`.** The call pattern is: (1) push screen with \`visual_preview\`, (2) wait for the user to interact with the visual (they click options, select elements), (3) call \`read_visual_events\` to retrieve their selections, (4) use their choices to inform the plan. You can call \`read_visual_events\` multiple times if the user is still making selections.
+   - When visual decisions are complete, call \`close_visual\` to close the Visual tab. Don't leave it open after the task is done.
+   - **Never skip clarifying questions.** If the request is vague, ask or show options before planning.
+4. **Plan.** Dispatch a \`plan\` sub-agent to create a detailed implementation plan. Include discoveries from explore/research steps, user decisions from \`ask_user\`, and visual preferences from \`read_visual_events\` as \`preContext\`. If the task has visual components, include mockup descriptions in the plan so the user can confirm the visual direction before code is written.
 5. **Create a feature branch.** Use the \`git\` tool: \`git checkout -b aura/short-description\`
 6. **Create a todo list.** After receiving the plan, immediately call \`todo_write\` to create a structured task list. Break the plan into discrete, ordered steps.
 7. **Work through todos sequentially.** For each todo:
@@ -608,6 +603,7 @@ For any task that requires more than one file change, follow this workflow IN OR
       ii. Read modified files back via \`read_file\` to confirm correctness
       iii. Commit via the \`git\` tool: first \`git add -A\`, then \`git commit -m "type: description"\`
    d. Mark it \`completed\` via \`todo_write\`
+   e. **When all todos are completed**, call \`close_visual\` to close the Visual tab if it was opened during this task.
 
 **Deploy sub-agents sequentially** — explore first, then research (if needed), then plan. Each step builds on the previous one. Only dispatch multiple sub-agents in a single call when they are genuinely independent (e.g., exploring two unrelated codebase areas simultaneously).
 
@@ -811,7 +807,26 @@ ${planResume ? `\n## Active Plan\n\nYou are continuing build plan: "${planResume
 
 Node ID format: \`filePath:symbolName\` (e.g., \`src/auth.ts:login\`), or just \`filePath\` for File nodes, or \`filePath:METHOD /path\` for Route nodes.
 
-${skillContent ? `\n## Skills\n\n${skillContent}\n` : ''}${contextSection ? `\n## Current Context\n\nThe user is viewing the codebase in their browser. Here is the context from their current view:\n\n${contextSection}\n` : ''}`
+## Available Skills
+
+Load specialized skill guides by calling \`load_skill\`. Each skill provides tool-specific strategies, safe workflows, and proven patterns. **Load skills at the point you need them** — you don't need all of them upfront.
+
+### When to load (required):
+- **\`load_skill("aura-building")\`** — ALWAYS load this at the start of any build/implement task. It contains the build workflow (explore → research → clarify → plan → implement), project scaffolding patterns, and commit conventions.
+- **\`load_skill("aura-debugging")\`** — ALWAYS load this when the user reports a bug, error, or unexpected behavior. It contains the systematic debugging workflow (find symbol → trace call chain → read source → verify assumptions).
+- **\`load_skill("aura-impact")\`** — ALWAYS load this before making changes to shared/util code, API endpoints, exported functions, or database schemas. It contains impact analysis strategy and risk level thresholds. If you change something others depend on, load this first.
+- **\`load_skill("aura-refactoring")\`** — ALWAYS load this when the task involves renaming, moving, extracting, or restructuring existing code. It contains safe rename/extract workflows with verification steps.
+
+### When to load (situational):
+- **\`load_skill("aura-exploring")\`** — Load this when you need to investigate an unfamiliar area of the codebase and the graph tools (\`search\`, \`context\`, \`dependents\`, etc.) aren't giving you what you need. It contains the top-down exploration strategy (manifest → folder → symbol → context) and when to use \`search_pattern\` vs \`search\`.
+- **\`load_skill("aura-visual")\`** — Load this when you're about to use \`visual_preview\` for the first time in a conversation. It contains the available CSS classes, interaction patterns (options, cards, mockups), and the push → tell → read → iterate workflow. Not needed if you're only doing text-based work.
+
+### When NOT to load:
+- Don't load a skill just because it exists. Load it when the task matches its trigger condition.
+- Don't load multiple skills at once "just in case." Load the one you need now, and load others if the task evolves.
+- Don't re-load a skill you've already loaded in this conversation — you already have its guidance.
+
+${skillContent ? `\n${skillContent}\n` : ''}${contextSection ? `\n## Current Context\n\nThe user is viewing the codebase in their browser. Here is the context from their current view:\n\n${contextSection}\n` : ''}`
 }
 
 // ── Context formatting ─────────────────────────────────────────────────────
@@ -998,7 +1013,7 @@ function formatContext(context: Record<string, unknown>, maxTokens = 4000): stri
 
 // ── Tool definitions ───────────────────────────────────────────────────────
 
-function defineAgentTools(qs: AuraQueryService, projectPath: string, managedShells?: ManagedShellService, projectId?: string): AgentTool[] {
+function defineAgentTools(qs: AuraQueryService, projectPath: string, managedShells?: ManagedShellService, projectId?: string, webSearch?: WebSearchService): AgentTool[] {
   return [
     // ── Graph & Indexing Tools ────────────────────────────────────────────
 
@@ -1759,7 +1774,7 @@ function defineAgentTools(qs: AuraQueryService, projectPath: string, managedShel
 
     {
       name: 'search_web',
-      description: 'Fetch and render web page content with full JavaScript rendering via crawl4ai. ALWAYS use "url" when a specific URL is available — it returns the full rendered page. Use "query" ONLY when you need to discover pages about a topic you don\'t have a URL for. Use "design: true" to extract a website\'s visual design tokens (colors, fonts, spacing, etc.) instead of reading its content. Use "flags" for advanced behavior like deep crawling, stealth mode, or targeting specific page sections.',
+      description: 'Search the web or fetch web page content. Use "query" to search for pages about a topic — returns titles, URLs, and snippets. Use "url" to fetch the full content of a specific page. Use "design: true" with a URL to extract visual design tokens (CSS variables, colors, fonts, spacing). Use "flags" for advanced crawl options — when flags are provided, the full rendering engine is used instead of the fast path.',
       parameters: {
         type: 'object',
         properties: {
@@ -1794,63 +1809,15 @@ function defineAgentTools(qs: AuraQueryService, projectPath: string, managedShel
         },
       },
       execute: async (args) => {
-        const design = args.design === true
-        const query = String(args.query ?? '')
-        const url = String(args.url ?? '')
-        const flags = (args.flags ?? {}) as Record<string, unknown>
-
-        if (design && !url) {
-          return { error: 'The "design" flag requires a URL. Design extraction cannot be performed on search results.' }
+        if (!webSearch) {
+          return { error: 'Web search is not available.' }
         }
-
-        const targetUrl = url || `https://lite.duckduckgo.com/lite/?q=${encodeURIComponent(query)}`
-
-        if (!url && !query) {
-          return { error: 'Either query or url is required for search_web' }
-        }
-
-        let configDir: string | null = null
-        try {
-          let cliArgs: string[]
-          if (design) {
-            const result = buildDesignCrawlArgs(targetUrl, flags)
-            cliArgs = result.args
-            configDir = result.configDir
-          } else {
-            cliArgs = buildCrawlArgs(targetUrl, flags)
-          }
-
-          const timeout = flags.deep_crawl ? 120000 : 30000
-          const maxBuffer = flags.deep_crawl ? 5 * 1024 * 1024 : 1024 * 1024
-
-          const { stdout } = await execFileAsync('crwl', cliArgs, { timeout, maxBuffer })
-          let content = stdout.trim()
-          return { source: targetUrl, content: content || `No content returned from ${targetUrl}` }
-        } catch {
-          if (design) {
-            return { error: 'Design extraction requires crawl4ai (crwl CLI). Ensure crawl4ai is installed and the URL is accessible.' }
-          }
-          try {
-            const response = await fetch(targetUrl, {
-              signal: AbortSignal.timeout(10000),
-              headers: {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,text/plain;q=0.8,*/*;q=0.7',
-              },
-            })
-            if (!response.ok) {
-              return { error: `HTTP ${response.status} ${response.statusText} for ${targetUrl}` }
-            }
-            const text = await response.text()
-            return { source: targetUrl, content: text }
-          } catch (fetchErr) {
-            return { error: `Failed to fetch ${targetUrl}: ${fetchErr instanceof Error ? fetchErr.message : String(fetchErr)}` }
-          }
-        } finally {
-          if (configDir) {
-            try { rmSync(configDir, { recursive: true, force: true }) } catch {}
-          }
-        }
+        return webSearch.search({
+          query: args.query,
+          url: args.url,
+          design: args.design,
+          flags: args.flags,
+        })
       },
     },
 
@@ -1915,6 +1882,41 @@ function defineAgentTools(qs: AuraQueryService, projectPath: string, managedShel
     },
 
     {
+      name: 'visual_preview',
+      description: 'Write an HTML content fragment to the visual companion and show it to the user in a Visual tab. Use for UI mockups, wireframes, architecture diagrams, layout comparisons, flow diagrams, and any visual content that is clearer shown than described in text. After calling this tool, do NOT describe the visual content in text — the user can see it in the Visual tab. Just tell them the preview is ready and what to look for, then call `read_visual_events` to collect their selections. The server wraps your fragment in a styled frame with interactive options, selection tracking, and live reload. Available CSS classes: .options/.option for A/B/C choices (with data-choice attributes and onclick="toggleSelect(this)"), .cards/.card for visual designs, .mockup/.mockup-header/.mockup-body for previews, .split for side-by-side, .pros-cons for comparisons, .mock-nav/.mock-sidebar/.mock-content/.mock-button/.mock-input/.placeholder for wireframe elements, .subtitle/.section/.label for typography, h2/h3 for headings. Write content fragments by default (no <html>/<head>/<body> tags).',
+      parameters: {
+        type: 'object',
+        properties: {
+          filename: { type: 'string', description: 'Semantic filename for this screen, e.g. "dashboard-layout" or "auth-flow-diagram". Never reuse filenames — append version suffixes like "-v2" for iterations. Only alphanumeric, hyphens, and underscores.' },
+          content: { type: 'string', description: 'HTML content fragment using the provided CSS classes. NOT a full HTML document — the frame provides <html>, <head>, <body>, and all styling. Use .options/.option for choices, .cards/.card for visual designs, .mockup for previews, etc.' },
+          title: { type: 'string', description: 'Brief title shown to the user, e.g. "Dashboard Layout Options" or "Auth Flow Diagram"' },
+        },
+        required: ['filename', 'content', 'title'],
+      },
+      execute: async () => ({ acknowledged: true }),
+    },
+
+    {
+      name: 'read_visual_events',
+      description: 'Read user click/selection interactions from the visual companion. ALWAYS call this after `visual_preview` — the user makes selections in the Visual tab and this tool retrieves them. Call pattern: (1) push screen with `visual_preview`, (2) wait for user to interact, (3) call `read_visual_events` to get their choices. Events are cleared after reading, so each call returns only new interactions since the last read.',
+      parameters: {
+        type: 'object',
+        properties: {},
+      },
+      execute: async () => ({ acknowledged: true }),
+    },
+
+    {
+      name: 'close_visual',
+      description: 'Close the visual companion tab when the visual preview is no longer needed — typically after all visual decisions have been made or when the task is complete. This removes the Visual tab from the UI.',
+      parameters: {
+        type: 'object',
+        properties: {},
+      },
+      execute: async () => ({ acknowledged: true }),
+    },
+
+    {
       name: 'ask_user',
       description: 'Ask the user a clarifying question with predefined options. Use this when you need to make a decision that affects the implementation and the answer isn\'t clear from the context. Provide a clear question and 2-4 options.',
       parameters: {
@@ -1930,6 +1932,36 @@ function defineAgentTools(qs: AuraQueryService, projectPath: string, managedShel
         required: ['question', 'options'],
       },
       execute: async () => ({ acknowledged: true }),
+    },
+
+    {
+      name: 'load_skill',
+      description: 'Load a skill guide that provides domain-specific strategy and tool usage instructions. Call this when you realize the task would benefit from specialized guidance — for example, when you discover the task involves building, debugging, refactoring, impact analysis, exploration, or visual design. Each skill provides targeted instructions for how to approach that type of task effectively. Available skills: aura-building (scaffolding, feature implementation, build workflow), aura-exploring (codebase navigation, investigation strategy), aura-impact (change impact analysis, risk assessment), aura-debugging (bug tracing, error investigation), aura-refactoring (safe renaming, extraction, restructuring), aura-visual (mockups, diagrams, visual companion usage).',
+      parameters: {
+        type: 'object',
+        properties: {
+          skill: {
+            type: 'string',
+            enum: ['aura-building', 'aura-exploring', 'aura-impact', 'aura-debugging', 'aura-refactoring', 'aura-visual'],
+            description: 'The skill to load',
+          },
+        },
+        required: ['skill'],
+      },
+      execute: async (args) => {
+        const skillName = (args as { skill?: string }).skill || ''
+        const validSkills = ['aura-building', 'aura-exploring', 'aura-impact', 'aura-debugging', 'aura-refactoring', 'aura-visual']
+        if (!validSkills.includes(skillName)) {
+          return { error: `Unknown skill "${skillName}". Valid skills: ${validSkills.join(', ')}` }
+        }
+        try {
+          const skillPath = path.resolve(process.cwd(), 'server', 'skills', skillName, 'SKILL.md')
+          const content = await fs.readFile(skillPath, 'utf-8')
+          return { skill: skillName, content }
+        } catch {
+          return { error: `Failed to load skill "${skillName}": file not found` }
+        }
+      },
     },
   ]
 }
@@ -1959,6 +1991,9 @@ export class AuraAgent {
   private projectId: string | null
   private chatService: AuraChatService | null
   private chatId: string | null
+  private webSearch: WebSearchService
+  private chatService: AuraChatService | null
+  private chatId: string | null
 
   constructor(qs: AuraQueryService, projectPath: string, ollamaBaseUrl?: string, model?: string, contextWindow?: number, managedShells?: ManagedShellService, projectId?: string, chatService?: AuraChatService, chatId?: string) {
     this.qs = qs
@@ -1970,6 +2005,7 @@ export class AuraAgent {
     this.projectId = projectId || null
     this.chatService = chatService || null
     this.chatId = chatId || null
+    this.webSearch = new WebSearchService()
     // Get or create the ApprovalManager for this project
     let am = globalApprovalManagers.get(projectPath)
     if (!am) {
@@ -2063,7 +2099,7 @@ export class AuraAgent {
     const systemPrompt = buildSystemPrompt(skillContent, contextSection, isGreenfield || undefined, gitContext || undefined, planResume || undefined, isWindows)
 
     // Build tools
-    const tools = defineAgentTools(this.qs, this.projectPath, this.managedShells ?? undefined, this.projectId ?? undefined)
+    const tools = defineAgentTools(this.qs, this.projectPath, this.managedShells ?? undefined, this.projectId ?? undefined, this.webSearch)
     const ollamaTools = buildOllamaTools(tools)
 
     const priorMsgs = priorMessages || []
@@ -2448,11 +2484,149 @@ export class AuraAgent {
         result.toolCalls = result.toolCalls.filter(tc => tc.name !== 'ask_user')
       }
 
+      // Handle visual_preview — write HTML fragment and emit visual_content event
+      const visualCall = result.toolCalls.find(tc => tc.name === 'visual_preview')
+      if (visualCall) {
+        // Emit tool_call so the frontend creates a proper tool call entry
+        const visualCallId = visualCall.id || `visual_preview_${i}`
+        eventSink.emit('tool_call', { name: 'visual_preview', args: visualCall.args, tool_call_id: visualCallId })
+
+        const args = visualCall.args as { filename?: string; content?: string; title?: string }
+        const filename = args.filename || 'screen'
+        const content = args.content || ''
+        const title = args.title || 'Visual Preview'
+        try {
+          const result_info = await writeScreen(this.projectPath, filename, content, title, this.projectId ?? undefined)
+          const url = result_info.url
+          eventSink.emit(AgentEventType.VisualContent, { url, title, filename })
+          messages.push({
+            role: 'tool',
+            content: JSON.stringify({ url, screenDir: result_info.screenDir, stateDir: result_info.stateDir, filename }),
+            tool_call_id: visualCallId,
+            name: 'visual_preview',
+          })
+          eventSink.emit('tool_result', { name: 'visual_preview', result: { url, filename, title }, tool_call_id: visualCallId })
+        } catch (err) {
+          const errorMsg = err instanceof Error ? err.message : String(err)
+          messages.push({
+            role: 'tool',
+            content: JSON.stringify({ error: `Failed to write visual preview: ${errorMsg}` }),
+            tool_call_id: visualCallId,
+            name: 'visual_preview',
+          })
+          eventSink.emit('tool_result', { name: 'visual_preview', error: errorMsg, tool_call_id: visualCallId })
+        }
+        result.toolCalls = result.toolCalls.filter(tc => tc.name !== 'visual_preview')
+      }
+
+      // Handle read_visual_events — read user interactions from visual companion
+      const readEventsCall = result.toolCalls.find(tc => tc.name === 'read_visual_events')
+      if (readEventsCall) {
+        // Emit tool_call so the frontend creates a proper tool call entry
+        const readEventsCallId = readEventsCall.id || `read_visual_events_${i}`
+        eventSink.emit('tool_call', { name: 'read_visual_events', args: readEventsCall.args || {}, tool_call_id: readEventsCallId })
+
+        try {
+          const events = await readVisualEvents(this.projectPath)
+          messages.push({
+            role: 'tool',
+            content: JSON.stringify({ events }),
+            tool_call_id: readEventsCallId,
+            name: 'read_visual_events',
+          })
+          eventSink.emit('tool_result', { name: 'read_visual_events', result: { events }, tool_call_id: readEventsCallId })
+        } catch (err) {
+          const errorMsg = err instanceof Error ? err.message : String(err)
+          messages.push({
+            role: 'tool',
+            content: JSON.stringify({ error: `Failed to read visual events: ${errorMsg}` }),
+            tool_call_id: readEventsCallId,
+            name: 'read_visual_events',
+          })
+          eventSink.emit('tool_result', { name: 'read_visual_events', error: errorMsg, tool_call_id: readEventsCallId })
+        }
+        result.toolCalls = result.toolCalls.filter(tc => tc.name !== 'read_visual_events')
+      }
+
+      // Handle load_skill — read skill file and inject as tool result
+      const loadSkillCall = result.toolCalls.find(tc => tc.name === 'load_skill')
+      if (loadSkillCall) {
+        // Emit tool_call so the frontend creates a proper tool call entry
+        const loadSkillCallId = loadSkillCall.id || `load_skill_${i}`
+        const skillName = (loadSkillCall.args as { skill?: string }).skill || ''
+        eventSink.emit('tool_call', { name: 'load_skill', args: loadSkillCall.args, tool_call_id: loadSkillCallId, purpose: `Skill: ${skillName}` })
+
+        const validSkills = ['aura-building', 'aura-exploring', 'aura-impact', 'aura-debugging', 'aura-refactoring', 'aura-visual']
+        if (validSkills.includes(skillName)) {
+          try {
+            const skillPath = path.resolve(process.cwd(), 'server', 'skills', skillName, 'SKILL.md')
+            const skillContent = await fs.readFile(skillPath, 'utf-8')
+            messages.push({
+              role: 'tool',
+              content: `Skill loaded. Here is the guidance:\n\n${skillContent}`,
+              tool_call_id: loadSkillCallId,
+              name: 'load_skill',
+            })
+            eventSink.emit('tool_result', { name: 'load_skill', result: `Skill: ${skillName} loaded successfully`, tool_call_id: loadSkillCallId })
+          } catch {
+            messages.push({
+              role: 'tool',
+              content: JSON.stringify({ error: `Failed to load skill "${skillName}": file not found` }),
+              tool_call_id: loadSkillCallId,
+              name: 'load_skill',
+            })
+            eventSink.emit('tool_result', { name: 'load_skill', error: `Skill "${skillName}" not found`, tool_call_id: loadSkillCallId })
+          }
+        } else {
+          messages.push({
+            role: 'tool',
+            content: JSON.stringify({ error: `Unknown skill "${skillName}". Valid skills: ${validSkills.join(', ')}` }),
+            tool_call_id: loadSkillCallId,
+            name: 'load_skill',
+          })
+          eventSink.emit('tool_result', { name: 'load_skill', error: `Unknown skill "${skillName}"`, tool_call_id: loadSkillCallId })
+        }
+        result.toolCalls = result.toolCalls.filter(tc => tc.name !== 'load_skill')
+      }
+
+      // Handle close_visual — stop the companion and emit close event
+      const closeVisualCall = result.toolCalls.find(tc => tc.name === 'close_visual')
+      if (closeVisualCall) {
+        // Emit tool_call so the frontend creates a proper tool call entry
+        const closeVisualCallId = closeVisualCall.id || `close_visual_${i}`
+        eventSink.emit('tool_call', { name: 'close_visual', args: closeVisualCall.args || {}, tool_call_id: closeVisualCallId })
+
+        try {
+          await stopVisualCompanion(this.projectPath)
+          eventSink.emit(AgentEventType.VisualClose, {})
+          messages.push({
+            role: 'tool',
+            content: JSON.stringify({ acknowledged: true }),
+            tool_call_id: closeVisualCallId,
+            name: 'close_visual',
+          })
+          eventSink.emit('tool_result', { name: 'close_visual', result: { acknowledged: true }, tool_call_id: closeVisualCallId })
+        } catch {
+          messages.push({
+            role: 'tool',
+            content: JSON.stringify({ acknowledged: true }),
+            tool_call_id: closeVisualCallId,
+            name: 'close_visual',
+          })
+          eventSink.emit('tool_result', { name: 'close_visual', result: { acknowledged: true }, tool_call_id: closeVisualCallId })
+        }
+        result.toolCalls = result.toolCalls.filter(tc => tc.name !== 'close_visual')
+      }
+
       // Execute regular tool calls
       let hasFileEdits = false
       for (const tc of result.toolCalls) {
         if (tc.name === 'dispatch_sub_agents') continue
         if (tc.name === 'todo_write') continue
+        if (tc.name === 'visual_preview') continue
+        if (tc.name === 'read_visual_events') continue
+        if (tc.name === 'load_skill') continue
+        if (tc.name === 'close_visual') continue
 
         if (tc.name === 'write' || tc.name === 'update') {
           hasFileEdits = true
@@ -2690,7 +2864,7 @@ export class AuraAgent {
     eventSink: AgentEventSink,
     context?: Record<string, unknown>,
   ): Promise<Array<{ focus: string; result: string }>> {
-    const allTools = defineAgentTools(this.qs, this.projectPath, this.managedShells ?? undefined, this.projectId ?? undefined)
+    const allTools = defineAgentTools(this.qs, this.projectPath, this.managedShells ?? undefined, this.projectId ?? undefined, this.webSearch)
     const maxSubIterations = 100
 
     const runOne = async (taskIndex: number, task: SubAgentTask): Promise<string> => {

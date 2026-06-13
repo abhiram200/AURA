@@ -18,6 +18,8 @@ export enum AgentEventType {
   ShellOutput = 'shell_output',
   ShellExited = 'shell_exited',
   ShellTerminated = 'shell_terminated',
+  VisualContent = 'visual_content',
+  VisualClose = 'visual_close',
 }
 
 export interface AgentEventSink {
@@ -108,6 +110,7 @@ export class CollectingEventSink implements AgentEventSink {
       case AgentEventType.ContextUsage:
       case AgentEventType.Status:
       case AgentEventType.Compaction:
+      case AgentEventType.VisualContent:
         // These are informational events — no action needed in JSON mode
         break
     }

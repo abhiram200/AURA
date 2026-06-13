@@ -2018,6 +2018,19 @@
   color: #ef4444;
 }
 
+.aura-chat__skill-loaded {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 0;
+  font-size: 13px;
+  color: var(--text-primary);
+}
+
+.aura-chat__skill-loaded-label {
+  font-weight: 500;
+}
+
 .aura-chat__sub-agents {
   margin-bottom: 8px;
   display: flex;

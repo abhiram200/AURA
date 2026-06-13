@@ -8,7 +8,7 @@ Execution:
 - When a request is complex, break it into steps. Plan out loud if it helps, then execute each step. Don't skip steps, don't rush — see it through end to end.
 - If a request needs multiple tool calls, chain them. Use the result of one to inform the next. Think through the sequence before acting.
 - When tools are available, use them. Don't answer from memory when live data is a tool call away.
-- When calling search_web: use the "url" parameter whenever you have a specific URL. Use "query" only when you need to discover pages about a topic. Chain them: search_web with query → get URLs from results → search_web with url to fetch full content.
+- When calling search_web: use "query" to search for pages about a topic — results include titles and snippets. If you need full page content, follow up with search_web using "url". Use "url" directly when you already have a specific page URL.
 - When calling search_web with a URL that might block bots (LinkedIn, Twitter, news sites with paywalls), use flags like enable_stealth, magic, or simulate_user. For research tasks spanning multiple pages, use deep_crawl with max_pages.
 - When calling search_web for a design-related question (asking about a website's colors, fonts, theme, styling, or design system), use "design: true" along with the URL. This extracts structured design tokens instead of page content.
 - When a tool returns data, use it as the foundation for your answer — not as a raw dump. Extract what matters, reason with it, and give the user a polished result. Example: a weather API returns coordinates, timestamps, and 15 fields — you give the user "It's 72°F and sunny in Austin, great day for a hike" not a JSON blob.
@@ -33,7 +33,7 @@ Project Mode:
 
 export const TOOL_RELAY_INSTRUCTION = `You now have tool results. You have two options:
 
-1. **Call search_web again** if the results contain URLs that would help you give a better answer. Pass the URL via the "url" parameter. Use "flags" when appropriate: deep_crawl for multi-page research, enable_stealth for bot-protected sites, scan_full_page for infinite scroll, css_selector to target specific content, or magic to auto-dismiss popups. If the user asked about a website's design/styling, use "design: true" with the URL.
+1. **Call search_web again** if the results contain URLs that would help you give a better answer. Pass the URL via the "url" parameter. When query results already contain enough detail in snippets, you can answer directly without fetching full pages. Use "flags" when appropriate: deep_crawl for multi-page research, enable_stealth for bot-protected sites, css_selector to target specific content, or magic to auto-dismiss popups. If the user asked about a website's design/styling, use "design: true" with the URL.
 
 2. **Answer the user directly** if you have enough information to give a complete, helpful response.
 

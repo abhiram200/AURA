@@ -445,6 +445,13 @@ export interface AuraShellEvent {
   exitCode: number | null
 }
 
+export interface VisualCompanionInfo {
+  url: string
+  title: string
+  filename: string
+  messageId: string
+}
+
 export interface MessageSegment {
   type: 'text' | 'tool_call' | 'sub_agent_start'
   content?: string
@@ -652,6 +659,7 @@ export function useAura(projectId: string | null) {
   const [offline, setOffline] = useState<'backend' | 'ollama' | null>(null)
   const [activeChatId, setActiveChatId] = useState<string | null>(null)
   const [pendingApproval, setPendingApproval] = useState<AuraApprovalRequest | null>(null)
+  const [visualCompanion, setVisualCompanion] = useState<VisualCompanionInfo | null>(null)
 
   const chatMessagesRef = useRef<AuraChatMessage[]>(chatMessages)
   const activeChatIdRef = useRef<string | null>(activeChatId)
@@ -718,6 +726,7 @@ export function useAura(projectId: string | null) {
         setChatMessages([])
         setCompactionCheckpoints([])
         setChatError(null)
+        setVisualCompanion(null)
       }
     } catch {
       // Create failed silently
@@ -1403,6 +1412,7 @@ export function useAura(projectId: string | null) {
                     args: data.args || {},
                     status: 'running' as const,
                     order: eventOrder++,
+                    ...(data.purpose ? { purpose: data.purpose as string } : {}),
                   }
                   // Track edit activity from file-modifying tools
                   const editTools = ['write', 'update', 'execute', 'git']
@@ -1503,6 +1513,10 @@ export function useAura(projectId: string | null) {
                   msg.todos = data.todos || []
                 } else if (eventType === 'approval_request') {
                   setPendingApproval(data as AuraApprovalRequest)
+                } else if (eventType === 'visual_content') {
+                  setVisualCompanion({ url: data.url, title: data.title, filename: data.filename, messageId: assistantId })
+                } else if (eventType === 'visual_close') {
+                  setVisualCompanion(null)
                 } else if (eventType === 'shell_spawned') {
                   msg.shells = [...(msg.shells || []), {
                     shellId: data.shellId,
@@ -1720,6 +1734,7 @@ export function useAura(projectId: string | null) {
     contextUsagePercent,
     pendingApproval,
     respondToApproval,
+    visualCompanion,
     offline,
     reportActivity,
   }

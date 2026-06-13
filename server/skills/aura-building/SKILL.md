@@ -11,9 +11,13 @@ For any task beyond a single-file quick fix, follow this workflow **in order**:
 
 2. **Research if needed.** If the task requires external knowledge (APIs, library versions, framework docs), dispatch a `research` sub-agent. Skip this step if not needed.
 
-3. **Ask clarifying questions.** If the user's request is vague or you have ambiguities about requirements (technology choices, UI preferences, scope, etc.), use `ask_user` before planning. Don't guess on important decisions.
+3. **Clarify and visualize.** If the user's request is vague or you have ambiguities about requirements, clarify BEFORE planning:
+   - **Text questions** (technology choices, scope, feature priorities, API design): use `ask_user`
+   - **Visual questions** (layouts, designs, UI flows, architecture diagrams): use `visual_preview` to show options, then `read_visual_events` to collect selections
+   - **The test:** Would the user understand this better by seeing it than reading about it? If yes, use `visual_preview`. If no, use `ask_user`.
+   - Many tasks benefit from BOTH — ask text questions first, then show visual options.
 
-4. **Plan.** Dispatch a `plan` sub-agent with discoveries from explore/research AND any user decisions from `ask_user` as `preContext`. The plan should be structured as numbered steps with file paths and dependencies.
+4. **Plan.** Dispatch a `plan` sub-agent with discoveries from explore/research AND any user decisions from `ask_user` and visual preferences from `read_visual_events` as `preContext`. The plan should be structured as numbered steps with file paths and dependencies.
 
 5. **Create a todo list from the plan.** Call `todo_write` immediately after the plan is approved. Each plan step becomes one todo item. Set `blockedBy` for steps that depend on earlier steps.
 
@@ -23,16 +27,28 @@ For any task beyond a single-file quick fix, follow this workflow **in order**:
 
 8. **Commit after each completed todo.** Use `execute` to run `git add -A && git commit -m "type: description"`. Use conventional commit prefixes: `feat:`, `fix:`, `refactor:`, `chore:`, `docs:`.
 
-**Deploy sub-agents sequentially** — explore → research (if needed) → plan. Each step builds on the previous one. Only dispatch multiple sub-agents together when they are genuinely independent.
+**Deploy sub-agents sequentially** — explore → research (if needed) → clarify/visualize → plan. Each step builds on the previous one. Only dispatch multiple sub-agents together when they are genuinely independent.
+
+## When to load additional skills
+
+Use `load_skill` to pull in specialized guidance when the task evolves:
+
+- If you discover a **bug** while implementing → `load_skill("aura-debugging")`
+- If you need to **assess impact** before making changes → `load_skill("aura-impact")`
+- If the task involves **renaming, moving, or extracting** code → `load_skill("aura-refactoring")`
+- If you need to **investigate unfamiliar code** deeply → `load_skill("aura-exploring")`
+- If the task involves **UI/layout/design decisions** → `load_skill("aura-visual")`
+
+You can load skills at any point during a conversation — not just at the start.
 
 ## Project scaffolding
 
 For new projects:
 1. **Create .gitignore FIRST** — This is the very first step. Use `write` to create a proper .gitignore that **always includes `.aura/*`** plus entries for the project type (e.g., node_modules/, dist/, .env for Node.js; __pycache__/, .venv/, *.pyc for Python). Commit it before creating any other files.
 2. If no git repo, the system will auto-initialize one with a placeholder .gitignore — overwrite it with the real one (must include `.aura/*`)
-3. **Ask clarifying questions.** If the user's request is vague (e.g., "build me an app" without specifying tech stack, features, or UI), use `ask_user` to clarify before planning. Don't guess on tech choices, scope, or design decisions.
+3. **Ask clarifying questions.** If the user's request is vague (e.g., "build me an app" without specifying tech stack, features, or UI), use `ask_user` to clarify before planning. For visual tasks, use `visual_preview` to show layout options.
 4. **Research if needed.** If you need external knowledge (library APIs, framework versions, setup guides), dispatch a `research` sub-agent. No `explore` sub-agent needed since there's no existing codebase.
-5. **Plan.** Dispatch a `plan` sub-agent — include any user decisions from `ask_user` as `preContext`. Then create a todo list and implement as described in the Build Workflow.
+5. **Plan.** Dispatch a `plan` sub-agent — include any user decisions and visual preferences as `preContext`. Then create a todo list and implement as described in the Build Workflow.
 5. Create the project structure: use `write` for package.json, tsconfig, config files, source files
 6. Install dependencies via `execute`: `npm install` or `pip install`
 7. Verify the project builds: `execute` the build command
@@ -43,7 +59,7 @@ For new projects:
 For adding features to existing codebases:
 1. Dispatch an `explore` sub-agent to understand the codebase structure and where the feature fits
 2. (Optional) Dispatch a `research` sub-agent if external knowledge is needed
-3. Ask clarifying questions with `ask_user` if any requirements are ambiguous
+3. Ask clarifying questions with `ask_user` or show visual options with `visual_preview` if any requirements are ambiguous
 4. Dispatch a `plan` sub-agent with explore/research discoveries AND user decisions as `preContext`
 5. Create a feature branch if on main/master
 6. Create a todo list from the approved plan
@@ -75,3 +91,14 @@ When you dispatch a `plan` sub-agent, request the output in this format:
 - **Express API**: Create routes, middleware, controllers, models as separate files. Start with package.json, then server entry point, then individual modules.
 - **React component**: Create component file, styles, tests. Use `write` for new files, `update` for modifying existing imports.
 - **Database migration**: Create migration file, update schema types, add seed data. Run migration via `execute`.
+
+## Visual Companion for Building
+
+When building UI features, layouts, or visual changes, use the visual companion:
+
+1. **After exploring, before planning** — if the task involves visual changes, call `visual_preview` to show mockups of what you're planning to build
+2. **During `ask_user`** — for visual preference questions (layouts, designs, color schemes), use `visual_preview` to show options instead of text-only descriptions
+3. **After planning, before implementing** — show visual mockups so the user confirms the visual direction before code is written
+4. **During implementation** — for components whose appearance matters, push a preview of the intended result
+
+The test: **would the user understand this better by seeing it?** If yes, use the visual companion. If it's a conceptual or technical question, use `ask_user`.

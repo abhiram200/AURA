@@ -6,9 +6,9 @@ import { AssistantPage } from './builder/AssistantPage'
 import { DependenciesPage } from './builder/DependenciesPage'
 import { IndexingOverlay } from '../components/aura/IndexingOverlay'
 
-type BuilderTab = 'workspace' | 'assistant' | 'dependencies'
+type BuilderTab = 'workspace' | 'assistant' | 'dependencies' | 'visual'
 
-const VALID_TABS: BuilderTab[] = ['workspace', 'assistant', 'dependencies']
+const VALID_TABS: BuilderTab[] = ['workspace', 'assistant', 'dependencies', 'visual']
 
 function getTabFromSearch(search: string): BuilderTab {
   const params = new URLSearchParams(search)
@@ -149,6 +149,11 @@ export function ProjectModeBuilderPage() {
       label: 'Dependencies',
       icon: <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="2" /><circle cx="6" cy="6" r="2" /><circle cx="18" cy="6" r="2" /><circle cx="6" cy="18" r="2" /><circle cx="18" cy="18" r="2" /><line x1="12" y1="10" x2="7" y2="7.4" /><line x1="12" y1="10" x2="17" y2="7.4" /><line x1="12" y1="14" x2="7" y2="16.6" /><line x1="12" y1="14" x2="17" y2="16.6" /></svg>,
     },
+    ...(aura.visualCompanion ? [{
+      key: 'visual' as BuilderTab,
+      label: 'Visual',
+      icon: <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" /><circle cx="12" cy="12" r="3" /></svg>,
+    }] : []),
   ]
 
   const tabProps = { projectId: projectId!, projectName, workspacePath, conversationId, reportActivity: aura.reportActivity }
@@ -196,6 +201,20 @@ export function ProjectModeBuilderPage() {
         <div className={activeTab === 'dependencies' ? 'builder-tab--active' : 'builder-tab--hidden'}>
           <DependenciesPage {...tabProps} onFileOpen={handleFileOpen} aura={aura} />
         </div>
+        {aura.visualCompanion && (
+          <div className={activeTab === 'visual' ? 'builder-tab--active' : 'builder-tab--hidden'}>
+            <div className="visual-companion-panel">
+              <div className="visual-companion-panel__header">
+                <span className="visual-companion-panel__title">{aura.visualCompanion.title}</span>
+              </div>
+              <iframe
+                className="visual-companion-panel__iframe"
+                src={aura.visualCompanion.url}
+                title="Visual Companion"
+              />
+            </div>
+          </div>
+        )}
       </div>
       <IndexingOverlay status={aura.indexingStatus} />
     </div>
