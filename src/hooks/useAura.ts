@@ -667,7 +667,6 @@ export function useAura(projectId: string | null) {
   activeChatIdRef.current = activeChatId
 
   const pollIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
-  const pendingGitCommitRef = useRef<Set<string>>(new Set()) // tool_call_ids of git commit attempts
   const pendingRetryRef = useRef<{ assistantId: string; prompt: string } | null>(null) // retry after indexing
 
   // ── Helpers ──────────────────────────────────────────────────────────────
@@ -1419,19 +1418,6 @@ export function useAura(projectId: string | null) {
                   if (editTools.includes(data.name)) {
                     reportActivity('edit')
                   }
-                  // Track git commit attempts to trigger re-index on success
-                  if (data.name === 'git') {
-                    const gitArgs = typeof (data.args as Record<string, unknown>)?.args === 'string'
-                      ? (data.args as Record<string, unknown>).args as string
-                      : ''
-                    // Detect commit as first subcommand OR chained via && / ;
-                    // e.g. "commit -m ..." or "add -A && git commit -m ..."
-                    const hasCommit = gitArgs.split(/\s+/)[0] === 'commit'
-                      || /(?:&&|;)\s*git\s+commit\b/.test(gitArgs)
-                    if (hasCommit) {
-                      pendingGitCommitRef.current.add(data.tool_call_id || `${data.name}_${eventOrder}`)
-                    }
-                  }
                   msg.toolCalls = [...(msg.toolCalls || []), newTc]
                   msg.content = '' // Reset content — text before this tool is now in segments
                   segments.push({ type: 'tool_call', toolCall: newTc, order: newTc.order! })
@@ -1458,16 +1444,6 @@ export function useAura(projectId: string | null) {
                     msg.segments = (msg.segments || []).map(s =>
                       segMatchFn(s) ? { ...s, toolCall: updatedTc } : s
                     )
-                  }
-                  // Detect successful git commit — trigger immediate re-index
-                  if (data.name === 'git' && tcId && pendingGitCommitRef.current.has(tcId)) {
-                    pendingGitCommitRef.current.delete(tcId)
-                    const result = data.result as Record<string, unknown> | undefined
-                    if (!data.error && result?.exitCode === 0) {
-                      if (projectId) {
-                        startIndexing(projectId)
-                      }
-                    }
                   }
                 } else if (eventType === 'sub_agent_start') {
                   // Deduplicate: skip if a sub-agent with this taskId already exists
