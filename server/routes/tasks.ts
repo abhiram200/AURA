@@ -1,50 +1,61 @@
 import { Router } from 'express'
-import type { ProjectService } from '../services/project.js'
-import type { TaskService } from '../services/task.js'
+import type { TaskService } from '../services/task.ts'
 
-export function createTasksRouter(projectService: ProjectService, taskService: TaskService) {
-  const router = Router()
+/**
+ * Creates task routes.
+ * Mounted at /api/projects, so routes here define the :projectId param themselves.
+ * This ensures Express 5 correctly extracts :projectId from req.params.
+ */
+export function createTasksRouter(taskService: TaskService) {
+  const router = Router({ mergeParams: true })
 
-  // Resolve projectId to projectPath
-  async function resolveProjectPath(projectId: string): Promise<string | null> {
-    const project = await projectService.get(projectId)
-    return project?.workspacePath ?? null
-  }
-
-  // GET /:projectId — load tasks for a project
-  router.get('/:projectId', async (req, res) => {
+  // GET /api/projects/:projectId/tasks — fetch full task state for a project
+  router.get('/:projectId/tasks', async (req, res) => {
     try {
       const { projectId } = req.params
-      const projectPath = await resolveProjectPath(projectId)
-      if (!projectPath) {
-        res.status(404).json({ error: 'Project not found' })
-        return
-      }
-      const data = await taskService.load(projectPath)
+      const data = await taskService.getTaskData(projectId)
       res.json(data)
     } catch (error) {
-      res.status(500).json({ error: 'Failed to load tasks' })
+      console.error('Failed to get task data:', error)
+      res.status(500).json({ error: 'Failed to get task data' })
     }
   })
 
-  // PUT /:projectId — save tasks for a project
-  router.put('/:projectId', async (req, res) => {
+  // PUT /api/projects/:projectId/tasks — replace full task state
+  router.put('/:projectId/tasks', async (req, res) => {
     try {
       const { projectId } = req.params
-      const projectPath = await resolveProjectPath(projectId)
-      if (!projectPath) {
-        res.status(404).json({ error: 'Project not found' })
+      const { todos, groups, lastCategory, lastPriority, lastGroupId, groupSortOrders, groupFilterPriority } = req.body
+
+      if (!Array.isArray(todos) || !Array.isArray(groups)) {
+        res.status(400).json({ error: 'todos and groups must be arrays' })
         return
       }
-      const { groups, items } = req.body
-      if (!Array.isArray(groups) || !Array.isArray(items)) {
-        res.status(400).json({ error: 'groups and items must be arrays' })
-        return
-      }
-      await taskService.save(projectPath, { groups, items })
-      res.json({ success: true })
+
+      const data = await taskService.setTaskData(projectId, {
+        todos,
+        groups,
+        lastCategory: lastCategory ?? 'none',
+        lastPriority: lastPriority ?? 'medium',
+        lastGroupId: lastGroupId ?? null,
+        groupSortOrders: groupSortOrders ?? {},
+        groupFilterPriority: groupFilterPriority ?? {},
+      })
+      res.json(data)
     } catch (error) {
-      res.status(500).json({ error: 'Failed to save tasks' })
+      console.error('Failed to save task data:', error)
+      res.status(500).json({ error: 'Failed to save task data' })
+    }
+  })
+
+  // DELETE /api/projects/:projectId/tasks — delete all task data for a project
+  router.delete('/:projectId/tasks', async (req, res) => {
+    try {
+      await taskService.deleteTaskData(req.params.projectId)
+      res.status(204).end()
+    } catch (error) {
+      console.error('Failed to delete task data:', error)
+      res.status(500).json({ error: 'Failed to delete task data' })
     }
   })
 

@@ -1,4 +1,4 @@
-import { Zap, X, Inbox, Circle, CheckCircle2, Flag, Briefcase, ShoppingBag, Heart, BookOpen, Tag, Settings2 } from 'lucide-react';
+import { X, Inbox, Circle, CheckCircle2, Flag, Briefcase, ShoppingBag, Heart, BookOpen, Tag, Settings2 } from 'lucide-react';
 import { useTodoStore } from '../store/todoStore';
 import { CATEGORY_CONFIG, PRIORITY_CONFIG, ALL_CATEGORIES, ALL_PRIORITIES } from '../utils/constants';
 import { Tooltip } from './ui/Tooltip';
@@ -39,35 +39,23 @@ export function Sidebar({ onClose, onManageGroups }: SidebarProps) {
   const hasActiveFilters = filters.category !== 'all' || filters.priority !== 'all' || filters.groupId !== 'all';
 
   return (
-    <div className="flex flex-col h-full bg-surface-raised border-r border-border">
-      {/* Logo */}
-      <div className="flex items-center justify-between px-6 pt-6 pb-5">
-        <div className="flex items-center gap-3">
-          <div className="flex items-center justify-center w-10 h-10 rounded-xl shadow-sm shadow-primary/25" style={{ background: 'linear-gradient(135deg, #7c3aed, #d946ef)' }}>
-            <Zap className="h-5 w-5 text-white" />
-          </div>
-          <div>
-            <h1 className="text-lg font-bold tracking-tight leading-tight" style={{ background: 'linear-gradient(135deg, #7c3aed, #d946ef)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' }}>TaskNova</h1>
-            <p className="text-xs text-text-tertiary leading-tight">
-              {activeCount} remaining · {completedCount} done
-            </p>
-          </div>
-        </div>
-        {/* Mobile close button */}
-        {onClose && (
+    <div className="flex flex-col h-full bg-surface-hover border-r border-border">
+      {/* Mobile close button */}
+      {onClose && (
+        <div className="flex justify-end px-4 pt-3 lg:hidden">
           <Tooltip content="Close menu" side="right">
             <button
               onClick={onClose}
-              className="cursor-pointer p-2 rounded-xl text-text-tertiary hover:bg-surface hover:text-text transition-colors lg:hidden"
+              className="cursor-pointer p-2 rounded-xl text-text-tertiary hover:bg-surface hover:text-text transition-colors"
             >
               <X className="h-5 w-5" />
             </button>
           </Tooltip>
-        )}
-      </div>
+        </div>
+      )}
 
       {/* Scrollable filter area */}
-      <div className="flex-1 overflow-y-auto min-h-0">
+      <div className="flex-1 overflow-y-auto min-h-0 pt-4">
       {/* Status Filters */}
       <div className="px-4 mb-2">
         <div className="text-[10px] font-bold text-text-tertiary uppercase tracking-[0.12em] px-1 mb-2">

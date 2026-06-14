@@ -25,8 +25,8 @@ import { AuraQueryService } from './services/aura/graph.ts'
 import { WorkspaceService } from './services/workspace.ts'
 import { TerminalService } from './services/terminal.ts'
 import { ManagedShellService } from './services/managedShell.ts'
-import { TaskService } from './services/taskService.ts'
 import { createManagedShellRouter } from './routes/managedShell.ts'
+import { TaskService } from './services/task.ts'
 import { createTasksRouter } from './routes/tasks.ts'
 import { WebSocketServer } from 'ws'
 
@@ -89,7 +89,7 @@ async function start() {
   const workspaceService = new WorkspaceService(projectService)
   const terminalService = new TerminalService(projectService)
   const managedShellService = new ManagedShellService(projectService)
-  const taskService = new TaskService()
+  const taskService = new TaskService(projectService)
   const auraIndexers = new Map<string, AuraIndexer>()
   const auraQueries = new Map<string, AuraQueryService>()
   await skillsService.init()
@@ -105,7 +105,7 @@ async function start() {
   app.use('/api/settings', createSettingsRouter(store))
   app.use('/api/aura', createAuraRouter(projectService, auraIndexers, auraQueries, groupService, DATA_DIR, store, managedShellService))
   app.use('/api/managed-shells', createManagedShellRouter(managedShellService))
-  app.use('/api/tasks', createTasksRouter(projectService, taskService))
+  app.use('/api/projects', createTasksRouter(taskService))
 
   app.get('/api/health', async (_req, res) => {
     let ollama = false

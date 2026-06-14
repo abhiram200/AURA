@@ -19,16 +19,26 @@
   transition-duration: 0.4s !important;
 }
 
-*, *::before, *::after {
-  box-sizing: border-box;
-  margin: 0;
-  padding: 0;
+/* Global reset placed in @layer base so that Tailwind's @layer utilities
+   can override margin/padding inside the Tasks app. Without this layer,
+   the unlayered * selector beats layered utility classes in cascade order. */
+@layer base {
+  *, *::before, *::after {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+  }
 }
 
-/* Allow Tailwind spacing utilities to work inside the Tasks app */
-.tasks-app *, .tasks-app *::before, .tasks-app *::after {
-  margin: revert;
-  padding: revert;
+/* Ensure the Tasks app container has proper typography defaults
+   since Tailwind rem-based sizes need a 16px root font-size.
+   Also set explicit color/bg so portaled elements (rendered to body)
+   inherit the correct theme values instead of body's light-theme computed values. */
+.tasks-app {
+  font-size: 16px;
+  line-height: 1.5;
+  color: var(--color-text);
+  background-color: var(--color-surface);
 }
 
 html, body, #root {

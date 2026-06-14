@@ -1,9 +1,10 @@
-import { useState, forwardRef, useCallback } from 'react';
+import { useState, forwardRef, useCallback, useMemo } from 'react';
 import { useDroppable } from '@dnd-kit/core';
 import { motion } from 'framer-motion';
 import { getIconComponent } from '../utils/helpers';
 import { EditGroupModal } from './EditGroupModal';
 import { Tooltip } from './ui/Tooltip';
+import { useTheme } from '../../../../hooks/useTheme';
 import { useTodoStore } from '../store/todoStore';
 import { PRIORITY_CONFIG } from '../utils/constants';
 import type { TaskGroup, Priority } from '../types';
@@ -51,7 +52,7 @@ export const GroupCard = forwardRef<HTMLDivElement, GroupCardProps>(function Gro
   const toggleGroupSort = useTodoStore((s) => s.toggleGroupSort);
   const activeFilterPriority = useTodoStore((s) => s.groupFilterPriority[group.id] || null);
   const setGroupFilterPriority = useTodoStore((s) => s.setGroupFilterPriority);
-  const theme = useTodoStore((s) => s.theme);
+  const { theme } = useTheme();
   const [editModalOpen, setEditModalOpen] = useState(false);
   const IconComponent = getIconComponent(group.icon);
   const isLight = theme === 'light';
@@ -59,8 +60,10 @@ export const GroupCard = forwardRef<HTMLDivElement, GroupCardProps>(function Gro
   const isFilterActive = !!activeFilterPriority;
 
   // Compute priority-based pending/total counts for tasks in this group
-  const groupTodos = useTodoStore((s) =>
-    s.todos.filter((t) => t.groupId === group.id)
+  const todos = useTodoStore((s) => s.todos);
+  const groupTodos = useMemo(
+    () => todos.filter((t) => t.groupId === group.id),
+    [todos, group.id]
   );
   const priorityBreakdown = (['high', 'medium', 'low'] as Priority[]).map(
     (p) => {

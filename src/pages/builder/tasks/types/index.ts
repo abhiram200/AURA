@@ -1,7 +1,6 @@
 export type Category = 'personal' | 'work' | 'shopping' | 'health' | 'learning' | 'none';
 export type Priority = 'low' | 'medium' | 'high';
 export type FilterStatus = 'all' | 'active' | 'completed';
-export type Theme = 'light' | 'dark';
 
 export interface TaskGroup {
   id: string;

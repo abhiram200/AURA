@@ -30,7 +30,7 @@ export function Tooltip({
             side={side}
             sideOffset={sideOffset}
             className={cn(
-              'z-50 rounded-lg bg-surface-raised px-2.5 py-1.5 text-xs font-medium text-text border border-border',
+              'tasks-app z-50 rounded-lg bg-surface-raised px-2.5 py-1.5 text-xs font-medium text-text border border-border',
               'shadow-lg select-none',
               'popover-enter',
               className,

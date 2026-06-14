@@ -101,7 +101,7 @@ export function CategorySelect({ value, onValueChange, className }: CategorySele
               minWidth: `${Math.max(pos.width, 200)}px`,
               zIndex: 9999,
             }}
-            className="rounded-xl border border-border bg-surface-raised p-1.5 shadow-xl shadow-black/20 popover-enter"
+            className="tasks-app rounded-xl border border-border bg-surface-raised p-1.5 shadow-xl shadow-black/20 popover-enter"
           >
             <div className="space-y-0.5">
               {ALL_CATEGORIES.map((cat) => {
@@ -118,8 +118,8 @@ export function CategorySelect({ value, onValueChange, className }: CategorySele
                     className={cn(
                       'relative flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm w-full',
                       'cursor-pointer outline-none transition-all duration-150',
-                      'hover:bg-surface hover:text-text',
-                      isSelected && 'bg-surface',
+                      'hover:bg-surface-hover',
+                      isSelected && 'bg-surface-hover',
                     )}
                   >
                     <span

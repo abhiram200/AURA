@@ -10,6 +10,6 @@ interface TasksPageProps {
   onOpenGitTree?: () => void
 }
 
-export function TasksPage(_props: TasksPageProps) {
-  return <TasksApp />
+export function TasksPage(props: TasksPageProps) {
+  return <TasksApp projectId={props.projectId} />
 }

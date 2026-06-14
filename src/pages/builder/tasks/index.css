@@ -21,8 +21,8 @@
   --color-warning-light: #fef3c7;
 }
 
-/* Scope dark theme to the tasks container so it doesn't leak */
-.tasks-app.dark {
+/* Dark theme: respond to AURA's global .dark class on <html> */
+.dark .tasks-app {
   --color-primary: #a78bfa;
   --color-primary-light: #c4b5fd;
   --color-primary-dark: #7c3aed;

@@ -225,7 +225,7 @@ export function DatePickerInput({
               minWidth: `${Math.max(pos.width, 280)}px`,
               zIndex: 9999,
             }}
-            className="rounded-xl border border-border bg-surface-raised shadow-xl shadow-black/20 popover-enter"
+            className="tasks-app rounded-xl border border-border bg-surface-raised shadow-xl shadow-black/20 popover-enter"
           >
             <div className="px-3 pt-2 pb-1 border-b border-border">
               <span className="text-xs text-text-tertiary">
