@@ -155,7 +155,7 @@ export function ProjectModeBuilderPage() {
     {
       key: 'tasks',
       label: 'Tasks',
-      icon: <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M9 11l3 3L22 4" /><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11" /></svg>,
+      icon: <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M9 5H7a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-2" /><rect x="9" y="3" width="6" height="4" rx="1" /><path d="M9 14l2 2 4-4" /></svg>,
     },
     ...(aura.visualCompanion ? [{
       key: 'visual' as BuilderTab,
@@ -209,6 +209,9 @@ export function ProjectModeBuilderPage() {
         <div className={activeTab === 'dependencies' ? 'builder-tab--active' : 'builder-tab--hidden'}>
           <DependenciesPage {...tabProps} onFileOpen={handleFileOpen} aura={aura} />
         </div>
+        <div className={activeTab === 'tasks' ? 'builder-tab--active' : 'builder-tab--hidden'}>
+          <TasksPage {...tabProps} />
+        </div>
         {aura.visualCompanion && (
           <div className={activeTab === 'visual' ? 'builder-tab--active' : 'builder-tab--hidden'}>
             <div className="visual-companion-panel">
@@ -223,9 +226,6 @@ export function ProjectModeBuilderPage() {
             </div>
           </div>
         )}
-        <div className={activeTab === 'tasks' ? 'builder-tab--active' : 'builder-tab--hidden'}>
-          <TasksPage {...tabProps} />
-        </div>
       </div>
       <IndexingOverlay status={aura.indexingStatus} />
       <GitTreePanel
