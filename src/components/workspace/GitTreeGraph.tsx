@@ -76,13 +76,11 @@ function assignLanes(commits: GitCommit[], branches: GitBranch[], currentBranch:
 
   // Trace first-parent chains from each branch HEAD backward.
   // Process primary branch first so it claims shared ancestry.
-  // Only claim HEAD if not already claimed by a higher-priority branch (lower lane number).
+  // Each branch claims its HEAD on its own lane so the branch has a dot,
+  // then traces first-parent ancestry, stopping at already-claimed commits.
   for (const branch of sortedLocals) {
     const lane = laneMap.get(branch.name)!
-    const existingLane = commitLanes.get(branch.commitHash)
-    if (existingLane === undefined || existingLane > lane) {
-      commitLanes.set(branch.commitHash, lane)
-    }
+    commitLanes.set(branch.commitHash, lane)
     let currentHash: string | undefined = branch.commitHash
     let isFirst = true
     while (currentHash) {
@@ -92,6 +90,19 @@ function assignLanes(commits: GitCommit[], branches: GitBranch[], currentBranch:
       const commit = commitMap.get(currentHash)
       if (!commit || commit.parentHashes.length === 0) break
       currentHash = commit.parentHashes[0] // follow first parent
+    }
+  }
+
+  // Fix merge commits: a merge commit (2+ parents) should be on the lane
+  // of its first parent (the "main line"), not on a sub-branch's lane.
+  // This ensures the merge dot appears on the primary branch lane with
+  // a curve connecting from the sub-branch.
+  for (const commit of commits) {
+    if (commit.parentHashes.length > 1) {
+      const firstParentLane = commitLanes.get(commit.parentHashes[0])
+      if (firstParentLane !== undefined) {
+        commitLanes.set(commit.hash, firstParentLane)
+      }
     }
   }
 
