@@ -30,13 +30,20 @@ function formatRelativeTime(timestamp: number): string {
 
 export function GitTreePanel({ projectId, open, onClose, onBranchChange }: GitTreePanelProps) {
   const gitTree = useGitTree(projectId)
-  const [viewMode, setViewMode] = useState<ViewMode>('graph')
+  const [viewMode, setViewMode] = useState<ViewMode>(() => {
+    return (localStorage.getItem('git-tree-view-mode') as ViewMode) || 'graph'
+  })
   const [selectedHash, setSelectedHash] = useState<string | null>(null)
   const [confirmAction, setConfirmAction] = useState<{ commitHash: string; strategy: 'revert' | 'reset'; message: string } | null>(null)
   const [actionError, setActionError] = useState<string | null>(null)
   const [checkingOut, setCheckingOut] = useState<string | null>(null)
   const [copyFeedback, setCopyFeedback] = useState<string | null>(null)
   const panelRef = useRef<HTMLDivElement>(null)
+
+  // Persist view mode to localStorage
+  useEffect(() => {
+    localStorage.setItem('git-tree-view-mode', viewMode)
+  }, [viewMode])
 
   // Fetch log when panel opens
   useEffect(() => {
@@ -46,7 +53,6 @@ export function GitTreePanel({ projectId, open, onClose, onBranchChange }: GitTr
       setSelectedHash(null)
       setConfirmAction(null)
       setActionError(null)
-      setViewMode('graph')
     }
   }, [open])
 
