@@ -1,4 +1,4 @@
-/* Tasks tab — original TaskNova styling, scoped under .tasks-page */
+/* Tasks tab — original TaskNova styling, scoped to .tasks-page */
 
 @import "tailwindcss";
 
@@ -44,15 +44,7 @@
   --color-warning-light: #2a1f06;
 }
 
-.tasks-page {
-  color: var(--color-text);
-  background: var(--color-surface);
-  height: 100%;
-  overflow-y: auto;
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
-}
+/* ── Scoped global styles ──────────────────────────────────────────── */
 
 .tasks-page * {
   transition: background-color 0.2s ease, border-color 0.2s ease, color 0.2s ease;
@@ -66,7 +58,28 @@
   cursor: not-allowed;
 }
 
-/* Custom scrollbar */
+@media (prefers-reduced-motion: reduce) {
+  .tasks-page * {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* ── Tasks page container ───────────────────────────────────────────── */
+
+.tasks-page {
+  color: var(--color-text);
+  background-color: var(--color-surface);
+  height: 100%;
+  overflow: hidden;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* ── Custom scrollbar ───────────────────────────────────────────────── */
+
 .tasks-page ::-webkit-scrollbar {
   width: 6px;
 }
@@ -84,7 +97,8 @@
   background: var(--color-text-tertiary);
 }
 
-/* Focus ring utility */
+/* ── Focus ring ──────────────────────────────────────────────────────── */
+
 .tasks-page .focus-ring {
   outline: none;
 }
@@ -95,7 +109,8 @@
   border-radius: 4px;
 }
 
-/* Checkbox animation */
+/* ── Checkbox animation ─────────────────────────────────────────────── */
+
 @keyframes checkmark {
   from {
     stroke-dashoffset: 20;
@@ -109,7 +124,8 @@
   animation: checkmark 0.2s ease-out forwards;
 }
 
-/* Popover enter/exit animations */
+/* ── Popover enter/exit animations ───────────────────────────────────── */
+
 @keyframes popoverFadeIn {
   from {
     opacity: 0;
@@ -140,7 +156,8 @@
   animation: popoverFadeOut 0.1s ease-in forwards;
 }
 
-/* Tooltip animations (replaces missing tailwindcss-animate) */
+/* ── Tooltip animations ─────────────────────────────────────────────── */
+
 @keyframes tooltipFadeIn {
   from {
     opacity: 0;
@@ -160,14 +177,5 @@
   to {
     opacity: 0;
     transform: scale(0.95);
-  }
-}
-
-/* Reduced motion */
-@media (prefers-reduced-motion: reduce) {
-  .tasks-page * {
-    animation-duration: 0.01ms !important;
-    animation-iteration-count: 1 !important;
-    transition-duration: 0.01ms !important;
   }
 }
