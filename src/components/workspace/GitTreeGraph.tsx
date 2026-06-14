@@ -76,12 +76,13 @@ function assignLanes(commits: GitCommit[], branches: GitBranch[], currentBranch:
 
   // Trace first-parent chains from each branch HEAD backward.
   // Process primary branch first so it claims shared ancestry.
-  // Each branch always claims its HEAD commit (even if already claimed),
-  // then stops tracing at shared ancestors.
+  // Only claim HEAD if not already claimed by a higher-priority branch (lower lane number).
   for (const branch of sortedLocals) {
     const lane = laneMap.get(branch.name)!
-    // Always claim HEAD commit on this branch's lane
-    commitLanes.set(branch.commitHash, lane)
+    const existingLane = commitLanes.get(branch.commitHash)
+    if (existingLane === undefined || existingLane > lane) {
+      commitLanes.set(branch.commitHash, lane)
+    }
     let currentHash: string | undefined = branch.commitHash
     let isFirst = true
     while (currentHash) {
@@ -102,7 +103,10 @@ function assignLanes(commits: GitCommit[], branches: GitBranch[], currentBranch:
     const localName = branch.name.replace(/^[^/]+\//, '')
     const localBranch = sortedLocals.find(b => b.name === localName)
     if (localBranch && branch.commitHash === localBranch.commitHash) continue
-    commitLanes.set(branch.commitHash, lane)
+    const existingLane = commitLanes.get(branch.commitHash)
+    if (existingLane === undefined || existingLane > lane) {
+      commitLanes.set(branch.commitHash, lane)
+    }
     let currentHash: string | undefined = branch.commitHash
     let isFirst = true
     while (currentHash) {
