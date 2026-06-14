@@ -21,7 +21,8 @@
   --color-warning-light: #fef3c7;
 }
 
-.dark {
+/* Scope dark theme to the tasks container so it doesn't leak */
+.tasks-app.dark {
   --color-primary: #a78bfa;
   --color-primary-light: #c4b5fd;
   --color-primary-dark: #7c3aed;

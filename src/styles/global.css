@@ -3,7 +3,6 @@
 @import './playground.css';
 @import './workspace.css';
 @import './aura.css';
-@import './tasks.css';
 @import 'highlight.js/styles/atom-one-dark.css';
 
 /* Animation intensity: subtle disables all CSS animations */
@@ -24,6 +23,12 @@
   box-sizing: border-box;
   margin: 0;
   padding: 0;
+}
+
+/* Allow Tailwind spacing utilities to work inside the Tasks app */
+.tasks-app *, .tasks-app *::before, .tasks-app *::after {
+  margin: revert;
+  padding: revert;
 }
 
 html, body, #root {

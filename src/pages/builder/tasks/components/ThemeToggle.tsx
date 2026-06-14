@@ -8,9 +8,12 @@ export function ThemeToggle() {
   const theme = useTodoStore((s) => s.theme);
   const toggleTheme = useTodoStore((s) => s.toggleTheme);
 
-  // Apply theme to document
+  // Apply theme to the tasks app container only (not the full page)
   useEffect(() => {
-    document.documentElement.classList.toggle('dark', theme === 'dark');
+    const container = document.querySelector('.tasks-app');
+    if (container) {
+      container.classList.toggle('dark', theme === 'dark');
+    }
   }, [theme]);
 
   // Detect system preference on first load

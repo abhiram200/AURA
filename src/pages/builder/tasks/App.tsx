@@ -40,7 +40,7 @@ export function TasksApp() {
   const completedCount = todos.filter((t) => t.completed).length;
 
   return (
-    <div className="h-screen overflow-hidden bg-surface transition-colors duration-300">
+    <div className="tasks-app h-full overflow-hidden bg-surface transition-colors duration-300">
       {/* Mobile sidebar overlay */}
       {sidebarOpen && (
         <div
