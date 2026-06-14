@@ -5,6 +5,7 @@ import { WorkspacePage } from './builder/WorkspacePage'
 import { AssistantPage } from './builder/AssistantPage'
 import { DependenciesPage } from './builder/DependenciesPage'
 import { IndexingOverlay } from '../components/aura/IndexingOverlay'
+import { GitTreePanel } from '../components/workspace/GitTreePanel'
 
 type BuilderTab = 'workspace' | 'assistant' | 'dependencies' | 'visual'
 
@@ -27,6 +28,7 @@ export function ProjectModeBuilderPage() {
   const [pathMissing, setPathMissing] = useState(false)
   const [activeTab, setActiveTab] = useState<BuilderTab>(() => getTabFromSearch(location.search))
   const [pendingFileOpen, setPendingFileOpen] = useState<{ path: string; startLine?: number } | null>(null)
+  const [gitTreeOpen, setGitTreeOpen] = useState(false)
 
   // Shared aura hook — persists across tab switches
   const aura = useAura(projectId ?? null)
@@ -156,7 +158,7 @@ export function ProjectModeBuilderPage() {
     }] : []),
   ]
 
-  const tabProps = { projectId: projectId!, projectName, workspacePath, conversationId, reportActivity: aura.reportActivity }
+  const tabProps = { projectId: projectId!, projectName, workspacePath, conversationId, reportActivity: aura.reportActivity, onOpenGitTree: () => setGitTreeOpen(true) }
 
   return (
     <div className="builder-page">
@@ -217,6 +219,16 @@ export function ProjectModeBuilderPage() {
         )}
       </div>
       <IndexingOverlay status={aura.indexingStatus} />
+      <GitTreePanel
+        projectId={projectId!}
+        open={gitTreeOpen}
+        onClose={() => setGitTreeOpen(false)}
+        onBranchChange={() => {
+          // Force workspace refresh after branch change — the WebSocket git-status-change
+          // event will handle file explorer and status updates automatically
+          setGitTreeOpen(false)
+        }}
+      />
     </div>
   )
 }

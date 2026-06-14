@@ -10,6 +10,7 @@ interface StatusBarProps {
   autoSave: boolean
   onAutoSaveChange: (enabled: boolean) => void
   onThemeChange: (theme: string) => void
+  onOpenGitTree?: () => void
 }
 
 function getLanguageLabel(path: string | null): string {
@@ -40,7 +41,7 @@ function getLanguageLabel(path: string | null): string {
   return 'Plain Text'
 }
 
-export function StatusBar({ projectId, activeFile, workspacePath, editorTheme, autoSave, onAutoSaveChange, onThemeChange }: StatusBarProps) {
+export function StatusBar({ projectId, activeFile, workspacePath, editorTheme, autoSave, onAutoSaveChange, onThemeChange, onOpenGitTree }: StatusBarProps) {
   const [gitBranch, setGitBranch] = useState<string | null>(null)
   const [themeMenuOpen, setThemeMenuOpen] = useState(false)
   const menuRef = useRef<HTMLDivElement>(null)
@@ -70,12 +71,16 @@ export function StatusBar({ projectId, activeFile, workspacePath, editorTheme, a
     <div className="status-bar">
       <div className="status-bar__left">
         {gitBranch && (
-          <span className="status-bar__item">
+          <button
+            className="status-bar__item status-bar__item--btn status-bar__item--git-branch"
+            onClick={onOpenGitTree}
+            title="View git tree"
+          >
             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <line x1="6" y1="3" x2="6" y2="15" /><circle cx="18" cy="6" r="3" /><circle cx="6" cy="18" r="3" /><path d="M18 9a9 9 0 0 1-9 9" />
             </svg>
             {gitBranch}
-          </span>
+          </button>
         )}
         <span className="status-bar__item status-bar__item--path">
           {workspacePath.split(/[\\/]/).pop()}

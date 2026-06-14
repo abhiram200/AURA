@@ -14,11 +14,12 @@ interface AssistantPageProps {
   conversationId: string | null
   aura: ReturnType<typeof useAura>
   reportActivity?: (type: 'edit' | 'interaction') => void
+  onOpenGitTree?: () => void
 }
 
 const SKIP_KEY = (pid: string) => `aura-skip-new-chat-confirm:${pid}`
 
-export function AssistantPage({ projectId, projectName, workspacePath: _workspacePath, conversationId: _conversationId, aura, isActive, reportActivity }: AssistantPageProps & { isActive?: boolean }) {
+export function AssistantPage({ projectId, projectName, workspacePath: _workspacePath, conversationId: _conversationId, aura, isActive, reportActivity, onOpenGitTree }: AssistantPageProps & { isActive?: boolean }) {
   const { theme } = useTheme()
   const isLight = theme === 'light'
   const [showConfirm, setShowConfirm] = useState(false)
@@ -132,6 +133,14 @@ export function AssistantPage({ projectId, projectName, workspacePath: _workspac
           onViewShell={managedShells.setViewingShell}
           onTerminateShell={managedShells.terminateShell}
         />
+        {onOpenGitTree && (
+          <button className="assistant-page__git-tree-btn" onClick={onOpenGitTree} title="Git tree">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <circle cx="18" cy="18" r="3" /><circle cx="6" cy="6" r="3" /><circle cx="18" cy="6" r="3" />
+              <path d="M6 9v1c0 1.5.5 3 3 3s3-1.5 3-3V9" /><path d="M18 9v6" />
+            </svg>
+          </button>
+        )}
         <button className="assistant-page__new-chat-btn" onClick={handleNewChat} title="New chat">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
             <line x1="12" y1="5" x2="12" y2="19" />

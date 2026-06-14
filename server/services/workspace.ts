@@ -3,6 +3,7 @@ import { watch, type FSWatcher } from 'fs'
 import { execFile } from 'child_process'
 import { promisify } from 'util'
 import { join, dirname, basename, extname, relative } from 'path'
+import { getGitLog, gitCheckout, gitRevert } from './aura/git.ts'
 import type { ProjectService } from './project.ts'
 
 const execFileAsync = promisify(execFile)
@@ -279,6 +280,24 @@ export class WorkspaceService {
     } catch {
       return {}
     }
+  }
+
+  async getGitLog(projectId: string, maxCount = 100) {
+    const root = await this.getWorkspaceRoot(projectId)
+    if (!root) throw new Error('Project not found')
+    return getGitLog(root, maxCount)
+  }
+
+  async gitCheckout(projectId: string, branch: string) {
+    const root = await this.getWorkspaceRoot(projectId)
+    if (!root) throw new Error('Project not found')
+    return gitCheckout(root, branch)
+  }
+
+  async gitRevert(projectId: string, commitHash: string, strategy: 'revert' | 'reset') {
+    const root = await this.getWorkspaceRoot(projectId)
+    if (!root) throw new Error('Project not found')
+    return gitRevert(root, commitHash, strategy)
   }
 
   private isBinaryBuffer(buffer: Buffer): boolean {

@@ -20,9 +20,10 @@ interface WorkspacePageProps {
   pendingFileOpen?: { path: string; startLine?: number } | null
   onFileOpened?: () => void
   reportActivity?: (type: 'edit' | 'interaction') => void
+  onOpenGitTree?: () => void
 }
 
-export function WorkspacePage({ projectId, projectName, workspacePath, pendingFileOpen, onFileOpened, reportActivity }: WorkspacePageProps) {
+export function WorkspacePage({ projectId, projectName, workspacePath, pendingFileOpen, onFileOpened, reportActivity, onOpenGitTree }: WorkspacePageProps) {
   const ws = useWorkspace(projectId)
   const { settings, updateSettings } = useSettings()
   const { theme } = useTheme()
@@ -194,6 +195,7 @@ export function WorkspacePage({ projectId, projectName, workspacePath, pendingFi
         autoSave={settings.autoSave}
         onAutoSaveChange={(enabled) => updateSettings({ autoSave: enabled })}
         onThemeChange={(theme) => updateSettings({ codeEditorTheme: theme })}
+        onOpenGitTree={onOpenGitTree}
       />
 
       {showQuickOpen && (

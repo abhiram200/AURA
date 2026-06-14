@@ -137,6 +137,108 @@ function parseUnifiedDiff(output: string): FileDiff[] {
   return files
 }
 
+export interface GitCommit {
+  hash: string
+  shortHash: string
+  message: string
+  author: string
+  date: number
+  parentHashes: string[]
+  refs: string[]
+}
+
+export interface GitBranch {
+  name: string
+  isHead: boolean
+  isRemote: boolean
+  commitHash: string
+}
+
+export async function getGitLog(projectPath: string, maxCount = 100): Promise<{ commits: GitCommit[]; branches: GitBranch[] }> {
+  // Use %x01 (SOH) as field delimiter — safe since control chars can't appear in commit messages
+  const logOutput = await execGit(
+    ['log', '--all', `--max-count=${maxCount}`, '--format=%H%x01%h%x01%s%x01%an%x01%at%x01%P%x01%D'],
+    projectPath
+  )
+
+  const commits: GitCommit[] = logOutput.trim().split('\n')
+    .filter(line => line.trim())
+    .map(line => {
+      const parts = line.split('\x01')
+      return {
+        hash: parts[0] || '',
+        shortHash: parts[1] || '',
+        message: parts[2] || '',
+        author: parts[3] || '',
+        date: parseInt(parts[4], 10) || 0,
+        parentHashes: parts[5] ? parts[5].split(' ').filter(Boolean) : [],
+        refs: parts[6] ? parts[6].split(', ').filter(Boolean) : [],
+      }
+    })
+
+  // Get branches — use git for-each-ref for reliable parsing
+  // Local branches
+  const localBranchOutput = await execGit(
+    ['for-each-ref', '--format=%(refname:short) %(objectname:short)', 'refs/heads/'],
+    projectPath
+  )
+  // Current branch
+  let currentBranch = ''
+  try {
+    currentBranch = (await execGit(['rev-parse', '--abbrev-ref', 'HEAD'], projectPath)).trim()
+  } catch { /* no HEAD — bare repo or similar */ }
+
+  const branches: GitBranch[] = []
+  for (const line of localBranchOutput.trim().split('\n').filter(l => l.trim())) {
+    const spaceIdx = line.lastIndexOf(' ')
+    const name = line.substring(0, spaceIdx).trim()
+    const commitHash = line.substring(spaceIdx + 1).trim()
+    if (name && commitHash) {
+      branches.push({ name, commitHash, isHead: name === currentBranch, isRemote: false })
+    }
+  }
+
+  // Remote branches
+  try {
+    const remoteBranchOutput = await execGit(
+      ['for-each-ref', '--format=%(refname:short) %(objectname:short)', 'refs/remotes/'],
+      projectPath
+    )
+    for (const line of remoteBranchOutput.trim().split('\n').filter(l => l.trim())) {
+      const spaceIdx = line.lastIndexOf(' ')
+      const name = line.substring(0, spaceIdx).trim()
+      const commitHash = line.substring(spaceIdx + 1).trim()
+      // Skip remote namespace entries like bare "origin" without a branch path
+      if (!name || !name.includes('/') || !commitHash) continue
+      branches.push({ name, commitHash, isHead: false, isRemote: true })
+    }
+  } catch { /* no remotes */ }
+
+  return { commits, branches }
+}
+
+export async function gitCheckout(projectPath: string, branch: string): Promise<{ success: boolean; error?: string }> {
+  try {
+    await execGit(['checkout', branch], projectPath)
+    return { success: true }
+  } catch (err: any) {
+    return { success: false, error: err.message || 'Checkout failed' }
+  }
+}
+
+export async function gitRevert(projectPath: string, commitHash: string, strategy: 'revert' | 'reset'): Promise<{ success: boolean; error?: string }> {
+  try {
+    if (strategy === 'revert') {
+      await execGit(['revert', '--no-edit', commitHash], projectPath)
+    } else {
+      await execGit(['reset', '--soft', commitHash], projectPath)
+    }
+    return { success: true }
+  } catch (err: any) {
+    return { success: false, error: err.message || 'Revert/reset failed' }
+  }
+}
+
 function normalizePath(p: string): string {
   return p.replace(/\\/g, '/')
 }

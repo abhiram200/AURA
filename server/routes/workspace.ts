@@ -235,5 +235,62 @@ export function createWorkspaceRouter(workspaceService: WorkspaceService) {
     }
   })
 
+  // GET /:id/git-log - Get git commit history and branches
+  router.get('/:id/git-log', async (req, res) => {
+    try {
+      const maxCount = parseInt(req.query.maxCount as string) || 100
+      const data = await workspaceService.getGitLog(req.params.id, maxCount)
+      res.json(data)
+    } catch (error: any) {
+      if (error.message === 'Project not found') {
+        res.status(404).json({ error: 'Project not found' })
+      } else {
+        res.status(500).json({ error: 'Failed to get git log' })
+      }
+    }
+  })
+
+  // POST /:id/git-checkout - Switch branch
+  router.post('/:id/git-checkout', async (req, res) => {
+    try {
+      const { branch } = req.body
+      if (!branch || typeof branch !== 'string') {
+        res.status(400).json({ error: 'branch is required' })
+        return
+      }
+      const result = await workspaceService.gitCheckout(req.params.id, branch)
+      res.json(result)
+    } catch (error: any) {
+      if (error.message === 'Project not found') {
+        res.status(404).json({ error: 'Project not found' })
+      } else {
+        res.status(500).json({ error: 'Checkout failed' })
+      }
+    }
+  })
+
+  // POST /:id/git-revert - Revert/reset to a commit
+  router.post('/:id/git-revert', async (req, res) => {
+    try {
+      const { commitHash, strategy } = req.body
+      if (!commitHash || typeof commitHash !== 'string') {
+        res.status(400).json({ error: 'commitHash is required' })
+        return
+      }
+      if (strategy !== 'revert' && strategy !== 'reset') {
+        res.status(400).json({ error: 'strategy must be "revert" or "reset"' })
+        return
+      }
+      const result = await workspaceService.gitRevert(req.params.id, commitHash, strategy)
+      res.json(result)
+    } catch (error: any) {
+      if (error.message === 'Project not found') {
+        res.status(404).json({ error: 'Project not found' })
+      } else {
+        res.status(500).json({ error: 'Revert/reset failed' })
+      }
+    }
+  })
+
   return router
 }
