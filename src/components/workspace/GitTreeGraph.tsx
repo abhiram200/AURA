@@ -6,12 +6,11 @@ const BRANCH_COLORS = [
   '#ff6b6b', '#45b7d1', '#96ceb4', '#ff8a5c', '#6c63ff',
 ]
 
-const LANE_WIDTH = 100
 const COMMIT_SPACING = 44
 const DOT_RADIUS = 5
 const MERGE_DOT_RADIUS = 6
-const LABEL_X_OFFSET = 16
 const SVG_LEFT_PAD = 30
+const LABEL_LEFT_MARGIN = 60
 
 function formatRelativeTime(timestamp: number): string {
   const now = Date.now() / 1000
@@ -36,21 +35,21 @@ interface GitTreeGraphProps {
 interface LaneAssignment {
   laneMap: Map<string, number>
   commitLanes: Map<string, number>
-  numLanes: number
+  usedLanes: Set<number>
 }
 
 function assignLanes(commits: GitCommit[], branches: GitBranch[]): LaneAssignment {
   const laneMap = new Map<string, number>()
   const locals = branches.filter(b => !b.isRemote)
   locals.forEach((b, i) => {
-    laneMap.set(b.name, i % BRANCH_COLORS.length)
+    laneMap.set(b.name, i)
   })
   branches.filter(b => b.isRemote).forEach(b => {
     const localName = b.name.replace(/^remotes\/[^/]+\//, '')
     if (laneMap.has(localName)) {
       laneMap.set(b.name, laneMap.get(localName)!)
     } else {
-      laneMap.set(b.name, laneMap.size % BRANCH_COLORS.length)
+      laneMap.set(b.name, laneMap.size)
     }
   })
 
@@ -83,8 +82,9 @@ function assignLanes(commits: GitCommit[], branches: GitBranch[]): LaneAssignmen
     }
   }
 
-  const numLanes = Math.max(laneMap.size, ...Array.from(commitLanes.values())) + 1
-  return { laneMap, commitLanes, numLanes }
+  // Only include lanes that are actually used by commits
+  const usedLanes = new Set(commitLanes.values())
+  return { laneMap, commitLanes, usedLanes }
 }
 
 interface Connection {
@@ -104,14 +104,32 @@ export function GitTreeGraph({
   onBranchClick,
   checkingOut,
 }: GitTreeGraphProps) {
-  const { laneMap, commitLanes, numLanes } = useMemo(
+  const { laneMap, commitLanes, usedLanes } = useMemo(
     () => assignLanes(commits, branches),
     [commits, branches]
   )
 
   const localBranches = useMemo(() => branches.filter(b => !b.isRemote), [branches])
 
-  const svgWidth = Math.max(numLanes * LANE_WIDTH + 220, 340)
+  // Compute lane X positions: spread used lanes evenly
+  const laneXMap = useMemo(() => {
+    const sortedLanes = Array.from(usedLanes).sort((a, b) => a - b)
+    const map = new Map<number, number>()
+    sortedLanes.forEach((lane, i) => {
+      map.set(lane, i * 80 + SVG_LEFT_PAD)
+    })
+    return map
+  }, [usedLanes])
+
+  const maxLaneX = useMemo(() => {
+    let max = 0
+    for (const x of laneXMap.values()) {
+      if (x > max) max = x
+    }
+    return max
+  }, [laneXMap])
+
+  const svgWidth = Math.max(maxLaneX + 260, 340)
   const svgHeight = commits.length * COMMIT_SPACING + 40
 
   const connections = useMemo(() => {
@@ -122,7 +140,7 @@ export function GitTreeGraph({
     for (const commit of commits) {
       const childLane = commitLanes.get(commit.hash) ?? 0
       const childY = commitYMap.get(commit.hash) ?? 0
-      const childX = childLane * LANE_WIDTH + SVG_LEFT_PAD
+      const childX = laneXMap.get(childLane) ?? SVG_LEFT_PAD
 
       for (const parentHash of commit.parentHashes) {
         const parentLane = commitLanes.get(parentHash)
@@ -130,7 +148,7 @@ export function GitTreeGraph({
         if (parentLane === undefined || parentY === undefined) continue
 
         if (parentLane !== childLane) {
-          const parentX = parentLane * LANE_WIDTH + SVG_LEFT_PAD
+          const parentX = laneXMap.get(parentLane) ?? SVG_LEFT_PAD
           conns.push({
             fromX: parentX,
             fromY: parentY,
@@ -142,6 +160,29 @@ export function GitTreeGraph({
       }
     }
     return conns
+  }, [commits, commitLanes, laneXMap])
+
+  // Build a map from commit hash to index for same-lane line segments
+  const sameLaneSegments = useMemo(() => {
+    // Group commits by lane, then create line segments connecting consecutive commits on the same lane
+    const laneCommits = new Map<number, { y: number; hash: string }[]>()
+    commits.forEach((commit, i) => {
+      const lane = commitLanes.get(commit.hash) ?? 0
+      if (!laneCommits.has(lane)) laneCommits.set(lane, [])
+      laneCommits.get(lane)!.push({ y: i * COMMIT_SPACING + 20, hash: commit.hash })
+    })
+
+    const segments: { lane: number; y1: number; y2: number }[] = []
+    for (const [lane, items] of laneCommits) {
+      if (items.length === 1) {
+        // Single commit — draw a short stub
+        segments.push({ lane, y1: items[0].y - 15, y2: items[0].y + 15 })
+      } else {
+        // Connect first to last
+        segments.push({ lane, y1: items[0].y, y2: items[items.length - 1].y })
+      }
+    }
+    return segments
   }, [commits, commitLanes])
 
   if (commits.length === 0) {
@@ -152,38 +193,42 @@ export function GitTreeGraph({
     <div className="git-tree-graph">
       {localBranches.length > 0 && (
         <div className="git-tree-graph__branches">
-          {localBranches.map(branch => (
-            <button
-              key={branch.name}
-              className={`git-tree-graph__branch-tag${branch.name === currentBranch ? ' git-tree-graph__branch-tag--active' : ''}`}
-              style={{ '--branch-color': BRANCH_COLORS[laneMap.get(branch.name) ?? 0] } as React.CSSProperties}
-              onClick={() => onBranchClick(branch.name)}
-              disabled={checkingOut !== null}
-              title={branch.name === currentBranch ? `Current branch: ${branch.name}` : `Switch to ${branch.name}`}
-            >
-              <span className="git-tree-graph__branch-dot" />
-              {branch.name}
-              {branch.isHead && <span className="git-tree-graph__head-badge">HEAD</span>}
-              {checkingOut === branch.name && <span className="git-tree-graph__checkout-spinner" />}
-            </button>
-          ))}
+          {localBranches.map(branch => {
+            const lane = laneMap.get(branch.name) ?? 0
+            const color = BRANCH_COLORS[lane % BRANCH_COLORS.length]
+            return (
+              <button
+                key={branch.name}
+                className={`git-tree-graph__branch-tag${branch.name === currentBranch ? ' git-tree-graph__branch-tag--active' : ''}`}
+                style={{ '--branch-color': color } as React.CSSProperties}
+                onClick={() => onBranchClick(branch.name)}
+                disabled={checkingOut !== null}
+                title={branch.name === currentBranch ? `Current branch: ${branch.name}` : `Switch to ${branch.name}`}
+              >
+                <span className="git-tree-graph__branch-dot" />
+                {branch.name}
+                {branch.isHead && <span className="git-tree-graph__head-badge">HEAD</span>}
+                {checkingOut === branch.name && <span className="git-tree-graph__checkout-spinner" />}
+              </button>
+            )
+          })}
         </div>
       )}
 
       <div className="git-tree-graph__scroll">
         <svg width={svgWidth} height={svgHeight} className="git-tree-graph__svg">
-          {/* Lane lines */}
-          {Array.from({ length: numLanes }, (_, i) => {
-            const x = i * LANE_WIDTH + SVG_LEFT_PAD
-            const color = BRANCH_COLORS[i % BRANCH_COLORS.length]
+          {/* Same-lane vertical line segments */}
+          {sameLaneSegments.map((seg, i) => {
+            const x = laneXMap.get(seg.lane) ?? SVG_LEFT_PAD
+            const color = BRANCH_COLORS[seg.lane % BRANCH_COLORS.length]
             return (
               <line
                 key={`lane-${i}`}
-                x1={x} y1={0}
-                x2={x} y2={svgHeight}
+                x1={x} y1={seg.y1}
+                x2={x} y2={seg.y2}
                 stroke={color}
                 strokeWidth={2}
-                strokeOpacity={0.15}
+                strokeOpacity={0.2}
               />
             )
           })}
@@ -203,30 +248,10 @@ export function GitTreeGraph({
             )
           })}
 
-          {/* Inline lane lines (connecting each commit to its neighbors on the same lane) */}
-          {commits.map((commit, i) => {
-            const lane = commitLanes.get(commit.hash) ?? 0
-            const x = lane * LANE_WIDTH + SVG_LEFT_PAD
-            const y = i * COMMIT_SPACING + 20
-            const prevY = i > 0 ? (i - 1) * COMMIT_SPACING + 20 : 0
-            const nextY = i < commits.length - 1 ? (i + 1) * COMMIT_SPACING + 20 : svgHeight
-            const color = BRANCH_COLORS[lane % BRANCH_COLORS.length]
-            return (
-              <line
-                key={`line-${commit.hash}`}
-                x1={x} y1={prevY}
-                x2={x} y2={nextY}
-                stroke={color}
-                strokeWidth={2}
-                strokeOpacity={0.15}
-              />
-            )
-          })}
-
           {/* Commit dots and labels */}
           {commits.map((commit, i) => {
             const lane = commitLanes.get(commit.hash) ?? 0
-            const x = lane * LANE_WIDTH + SVG_LEFT_PAD
+            const x = laneXMap.get(lane) ?? SVG_LEFT_PAD
             const y = i * COMMIT_SPACING + 20
             const color = BRANCH_COLORS[lane % BRANCH_COLORS.length]
             const isHead = commit.refs.some(r => r.startsWith('HEAD'))
@@ -236,7 +261,7 @@ export function GitTreeGraph({
 
             return (
               <g key={commit.hash} className={`git-tree-graph__commit-group${isSelected ? ' git-tree-graph__commit-group--selected' : ''}`}>
-                {/* Merge dot: outer ring in merge-source color */}
+                {/* Merge dot: outer ring */}
                 {isMerge && (
                   <circle
                     cx={x} cy={y}
@@ -258,10 +283,10 @@ export function GitTreeGraph({
                   style={{ cursor: 'pointer', filter: isHead ? `drop-shadow(0 0 4px ${color})` : 'none' }}
                   onClick={() => onCommitClick(commit.hash)}
                 />
-                {/* Commit message */}
+                {/* Commit message — always starts at fixed left margin */}
                 <text
-                  x={x + LABEL_X_OFFSET}
-                  y={y - 4}
+                  x={LABEL_LEFT_MARGIN}
+                  y={y + 4}
                   fill="#e6edf3"
                   fontSize={11}
                   className="git-tree-graph__label"
@@ -272,8 +297,8 @@ export function GitTreeGraph({
                 </text>
                 {/* Author + time */}
                 <text
-                  x={x + LABEL_X_OFFSET}
-                  y={y + 10}
+                  x={LABEL_LEFT_MARGIN}
+                  y={y + 16}
                   fill="#8b949e"
                   fontSize={9}
                 >
@@ -286,8 +311,8 @@ export function GitTreeGraph({
                   return (
                     <g key={ri}>
                       <rect
-                        x={x + LABEL_X_OFFSET + ri * (textWidth + 4)}
-                        y={y - 18}
+                        x={LABEL_LEFT_MARGIN + ri * (textWidth + 4)}
+                        y={y - 10}
                         width={textWidth}
                         height={14}
                         rx={7}
@@ -296,8 +321,8 @@ export function GitTreeGraph({
                         strokeWidth={0.5}
                       />
                       <text
-                        x={x + LABEL_X_OFFSET + ri * (textWidth + 4) + textWidth / 2}
-                        y={y - 9}
+                        x={LABEL_LEFT_MARGIN + ri * (textWidth + 4) + textWidth / 2}
+                        y={y - 1}
                         fill={refColor}
                         fontSize={8}
                         textAnchor="middle"
