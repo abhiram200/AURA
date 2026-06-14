@@ -118,6 +118,31 @@ export interface UserPreferences {
   useOfExamples: string | null
 }
 
+export interface TaskGroup {
+  id: string
+  name: string
+  color: string
+  icon: string
+  createdAt: string
+}
+
+export interface TaskItem {
+  id: string
+  text: string
+  completed: boolean
+  category: 'personal' | 'work' | 'shopping' | 'health' | 'learning' | 'none'
+  priority: 'low' | 'medium' | 'high'
+  groupId: string | null
+  dueDate: string | null
+  createdAt: string
+  order: number
+}
+
+export interface TaskData {
+  groups: TaskGroup[]
+  items: TaskItem[]
+}
+
 export interface OllamaModel {
   name: string
   size: number

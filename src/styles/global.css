@@ -3,6 +3,7 @@
 @import './playground.css';
 @import './workspace.css';
 @import './aura.css';
+@import './tasks.css';
 @import 'highlight.js/styles/atom-one-dark.css';
 
 /* Animation intensity: subtle disables all CSS animations */
