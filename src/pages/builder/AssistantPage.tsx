@@ -136,8 +136,11 @@ export function AssistantPage({ projectId, projectName, workspacePath: _workspac
         {onOpenGitTree && (
           <button className="assistant-page__git-tree-btn" onClick={onOpenGitTree} title="Git tree">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <circle cx="18" cy="18" r="3" /><circle cx="6" cy="6" r="3" /><circle cx="18" cy="6" r="3" />
-              <path d="M6 9v1c0 1.5.5 3 3 3s3-1.5 3-3V9" /><path d="M18 9v6" />
+              <line x1="6" y1="3" x2="6" y2="21"></line>
+              <path d="M8.5 15 C14 15, 18 11, 18 3"></path>
+              <circle cx="6" cy="3" r="2.5" fill="currentColor"></circle>
+              <circle cx="6" cy="15" r="2.5" fill="currentColor"></circle>
+              <circle cx="18" cy="3" r="2.5" fill="currentColor"></circle>
             </svg>
           </button>
         )}

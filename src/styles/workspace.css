@@ -1365,9 +1365,10 @@
 
 /* AssistantPage git-tree button */
 .assistant-page__git-tree-btn {
+  margin-left: auto;
   background: none;
   border: 1px solid var(--assistant-border, var(--border-color));
-  color: var(--assistant-fg, var(--text-primary));
+  color: var(--assistant-muted, var(--text-tertiary));
   width: 28px;
   height: 28px;
   border-radius: 6px;
