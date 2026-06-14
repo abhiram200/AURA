@@ -221,11 +221,6 @@ export function Sidebar({ onClose, onManageGroups }: SidebarProps) {
             );
           })}
 
-          {groups.length === 0 && (
-            <p className="text-xs text-text-tertiary px-3 py-2">
-              No groups yet. Click <Settings2 className="inline h-3 w-3" /> to create one.
-            </p>
-          )}
         </div>
       </div>
 
