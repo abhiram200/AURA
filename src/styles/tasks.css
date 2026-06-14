@@ -1,33 +1,8 @@
-/* Tasks tab — Tailwind v4 theme tokens + AURA theme mapping */
+/* Tasks tab — original TaskNova styling, scoped under .tasks-page */
 
 @import "tailwindcss";
 
-/* Register color tokens with Tailwind so utility classes (bg-surface, text-primary, etc.) work */
 @theme {
-  --color-primary: var(--accent-secondary);
-  --color-primary-light: #a78bfa;
-  --color-primary-dark: var(--accent-secondary);
-  --color-surface: var(--bg-secondary);
-  --color-surface-hover: var(--bg-tertiary);
-  --color-surface-raised: var(--bg-input);
-  --color-text: var(--text-primary);
-  --color-text-secondary: var(--text-secondary);
-  --color-text-tertiary: var(--text-tertiary);
-  --color-border: var(--card-border);
-  --color-border-focus: var(--accent-secondary);
-  --color-accent: #e879f9;
-  --color-danger: #fb7185;
-  --color-danger-light: rgba(251, 113, 133, 0.1);
-  --color-success: #34d399;
-  --color-success-light: rgba(52, 211, 153, 0.1);
-  --color-warning: #fbbf24;
-  --color-warning-light: rgba(251, 191, 36, 0.1);
-}
-
-/* Light theme overrides — AURA uses .dark class on <body> for dark mode,
-   so the @theme defaults above serve as dark-mode values (AURA's default).
-   Light mode overrides go under :root:not(.dark). */
-:root:not(.dark) {
   --color-primary: #7c3aed;
   --color-primary-light: #8b5cf6;
   --color-primary-dark: #6d28d9;
@@ -48,8 +23,6 @@
   --color-warning-light: #fef3c7;
 }
 
-/* Dark mode — keep the @theme defaults which map to AURA's dark variables.
-   We only need to override values that differ from the @theme block. */
 .dark {
   --color-primary: #a78bfa;
   --color-primary-light: #c4b5fd;
@@ -71,7 +44,6 @@
   --color-warning-light: #2a1f06;
 }
 
-/* Tasks page container */
 .tasks-page {
   color: var(--color-text);
   background: var(--color-surface);
@@ -82,23 +54,41 @@
   -moz-osx-font-smoothing: grayscale;
 }
 
-/* Smooth transitions on theme change */
 .tasks-page * {
   transition: background-color 0.2s ease, border-color 0.2s ease, color 0.2s ease;
 }
 
-/* Buttons */
 .tasks-page button {
   cursor: pointer;
 }
+
 .tasks-page button:disabled {
   cursor: not-allowed;
 }
 
-/* Focus ring */
+/* Custom scrollbar */
+.tasks-page ::-webkit-scrollbar {
+  width: 6px;
+}
+
+.tasks-page ::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.tasks-page ::-webkit-scrollbar-thumb {
+  background: var(--color-border);
+  border-radius: 3px;
+}
+
+.tasks-page ::-webkit-scrollbar-thumb:hover {
+  background: var(--color-text-tertiary);
+}
+
+/* Focus ring utility */
 .tasks-page .focus-ring {
   outline: none;
 }
+
 .tasks-page .focus-ring:focus-visible {
   outline: 2px solid var(--color-border-focus);
   outline-offset: 2px;
@@ -107,52 +97,70 @@
 
 /* Checkbox animation */
 @keyframes checkmark {
-  from { stroke-dashoffset: 20; }
-  to { stroke-dashoffset: 0; }
+  from {
+    stroke-dashoffset: 20;
+  }
+  to {
+    stroke-dashoffset: 0;
+  }
 }
+
 .tasks-page .checkmark-animate {
   animation: checkmark 0.2s ease-out forwards;
 }
 
-/* Popover animations */
+/* Popover enter/exit animations */
 @keyframes popoverFadeIn {
-  from { opacity: 0; transform: scale(0.95) translateY(-4px); }
-  to { opacity: 1; transform: scale(1) translateY(0); }
+  from {
+    opacity: 0;
+    transform: scale(0.95) translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
 }
+
 @keyframes popoverFadeOut {
-  from { opacity: 1; transform: scale(1) translateY(0); }
-  to { opacity: 0; transform: scale(0.95) translateY(-4px); }
+  from {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+  to {
+    opacity: 0;
+    transform: scale(0.95) translateY(-4px);
+  }
 }
+
 .tasks-page .popover-enter {
   animation: popoverFadeIn 0.15s ease-out forwards;
 }
+
 .tasks-page .popover-exit {
   animation: popoverFadeOut 0.1s ease-in forwards;
 }
 
-/* Tooltip animations */
+/* Tooltip animations (replaces missing tailwindcss-animate) */
 @keyframes tooltipFadeIn {
-  from { opacity: 0; transform: scale(0.95); }
-  to { opacity: 1; transform: scale(1); }
-}
-@keyframes tooltipFadeOut {
-  from { opacity: 1; transform: scale(1); }
-  to { opacity: 0; transform: scale(0.95); }
+  from {
+    opacity: 0;
+    transform: scale(0.95);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
 }
 
-/* Custom scrollbar */
-.tasks-page ::-webkit-scrollbar {
-  width: 6px;
-}
-.tasks-page ::-webkit-scrollbar-track {
-  background: transparent;
-}
-.tasks-page ::-webkit-scrollbar-thumb {
-  background: var(--color-border);
-  border-radius: 3px;
-}
-.tasks-page ::-webkit-scrollbar-thumb:hover {
-  background: var(--color-text-tertiary);
+@keyframes tooltipFadeOut {
+  from {
+    opacity: 1;
+    transform: scale(1);
+  }
+  to {
+    opacity: 0;
+    transform: scale(0.95);
+  }
 }
 
 /* Reduced motion */
