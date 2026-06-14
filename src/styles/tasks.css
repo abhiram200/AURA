@@ -1,8 +1,9 @@
-/* Tasks tab — Tailwind + theme mapping to AURA */
+/* Tasks tab — Tailwind v4 theme tokens + AURA theme mapping */
+
 @import "tailwindcss";
 
-/* Dark theme (AURA default) */
-.tasks-page {
+/* Register color tokens with Tailwind so utility classes (bg-surface, text-primary, etc.) work */
+@theme {
   --color-primary: var(--accent-secondary);
   --color-primary-light: #a78bfa;
   --color-primary-dark: var(--accent-secondary);
@@ -21,8 +22,59 @@
   --color-success-light: rgba(52, 211, 153, 0.1);
   --color-warning: #fbbf24;
   --color-warning-light: rgba(251, 191, 36, 0.1);
-  color: var(--text-primary);
-  background: var(--bg-primary);
+}
+
+/* Light theme overrides — AURA uses .dark class on <body> for dark mode,
+   so the @theme defaults above serve as dark-mode values (AURA's default).
+   Light mode overrides go under :root:not(.dark). */
+:root:not(.dark) {
+  --color-primary: #7c3aed;
+  --color-primary-light: #8b5cf6;
+  --color-primary-dark: #6d28d9;
+  --color-surface: #ffffff;
+  --color-surface-hover: #f5f3ff;
+  --color-surface-raised: #ede9fe;
+  --color-text: #1e1b4b;
+  --color-text-secondary: #3b3680;
+  --color-text-tertiary: #6b65a8;
+  --color-border: #c4b5fd;
+  --color-border-focus: #7c3aed;
+  --color-accent: #d946ef;
+  --color-danger: #e11d48;
+  --color-danger-light: #fff1f2;
+  --color-success: #059669;
+  --color-success-light: #d1fae5;
+  --color-warning: #d97706;
+  --color-warning-light: #fef3c7;
+}
+
+/* Dark mode — keep the @theme defaults which map to AURA's dark variables.
+   We only need to override values that differ from the @theme block. */
+.dark {
+  --color-primary: #a78bfa;
+  --color-primary-light: #c4b5fd;
+  --color-primary-dark: #7c3aed;
+  --color-surface: #0c0a1d;
+  --color-surface-hover: #1a1640;
+  --color-surface-raised: #221f45;
+  --color-text: #f0eaff;
+  --color-text-secondary: #c4b5fd;
+  --color-text-tertiary: #8b7fc7;
+  --color-border: #3b3680;
+  --color-border-focus: #a78bfa;
+  --color-accent: #e879f9;
+  --color-danger: #fb7185;
+  --color-danger-light: #2a0610;
+  --color-success: #34d399;
+  --color-success-light: #062a18;
+  --color-warning: #fbbf24;
+  --color-warning-light: #2a1f06;
+}
+
+/* Tasks page container */
+.tasks-page {
+  color: var(--color-text);
+  background: var(--color-surface);
   height: 100%;
   overflow-y: auto;
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
@@ -30,26 +82,17 @@
   -moz-osx-font-smoothing: grayscale;
 }
 
-/* Light theme override */
-.light .tasks-page {
-  --color-primary: var(--accent-secondary);
-  --color-primary-light: #8b5cf6;
-  --color-primary-dark: #6d28d9;
-  --color-surface: var(--bg-tertiary);
-  --color-surface-hover: var(--bg-secondary);
-  --color-surface-raised: #ede9fe;
-  --color-text: var(--text-primary);
-  --color-text-secondary: var(--text-secondary);
-  --color-text-tertiary: var(--text-tertiary);
-  --color-border: var(--card-border);
-  --color-border-focus: var(--accent-secondary);
-  --color-accent: #c026d3;
-  --color-danger: #e11d48;
-  --color-danger-light: #fff1f2;
-  --color-success: #059669;
-  --color-success-light: #d1fae5;
-  --color-warning: #d97706;
-  --color-warning-light: #fef3c7;
+/* Smooth transitions on theme change */
+.tasks-page * {
+  transition: background-color 0.2s ease, border-color 0.2s ease, color 0.2s ease;
+}
+
+/* Buttons */
+.tasks-page button {
+  cursor: pointer;
+}
+.tasks-page button:disabled {
+  cursor: not-allowed;
 }
 
 /* Focus ring */
@@ -97,7 +140,7 @@
   to { opacity: 0; transform: scale(0.95); }
 }
 
-/* Scrollbar for tasks */
+/* Custom scrollbar */
 .tasks-page ::-webkit-scrollbar {
   width: 6px;
 }
@@ -110,14 +153,6 @@
 }
 .tasks-page ::-webkit-scrollbar-thumb:hover {
   background: var(--color-text-tertiary);
-}
-
-/* Buttons */
-.tasks-page button {
-  cursor: pointer;
-}
-.tasks-page button:disabled {
-  cursor: not-allowed;
 }
 
 /* Reduced motion */
