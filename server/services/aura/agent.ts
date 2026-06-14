@@ -589,7 +589,7 @@ For any task that requires more than one file change, follow this workflow IN OR
    - **Use \`visual_preview\`** for: UI mockups, wireframes, layout comparisons, architecture diagrams, flow diagrams, side-by-side design choices, visual hierarchy questions — anything where SEEING it is clearer than DESCRIBING it.
    - **The test:** Would the user understand this better by seeing it than reading about it? If yes, use \`visual_preview\`. If no, use \`ask_user\`. Many tasks benefit from BOTH — ask text questions first, then show visual options.
    - **After calling \`visual_preview\`, do NOT describe the visual content in your response.** The user can see it in the Visual tab. Just tell them the preview is ready and what to look for or select.
-   - **Always call \`read_visual_events\` after \`visual_preview\`.** The call pattern is: (1) push screen with \`visual_preview\`, (2) wait for the user to interact with the visual (they click options, select elements), (3) call \`read_visual_events\` to retrieve their selections, (4) use their choices to inform the plan. You can call \`read_visual_events\` multiple times if the user is still making selections.
+   - **After pushing a visual preview, STOP and wait for the user to send a new message.** Do NOT call \`read_visual_events\` in the same response — the events file is cleared when a new screen is pushed, so an immediate read will always return empty. Only call \`read_visual_events\` after the user responds, giving them time to click options in the browser. If \`read_visual_events\` returns empty, ask the user to interact with the preview and wait — never randomly choose an option.
    - When visual decisions are complete, call \`close_visual\` to close the Visual tab. Don't leave it open after the task is done.
    - **Never skip clarifying questions.** If the request is vague, ask or show options before planning.
 4. **Plan.** Dispatch a \`plan\` sub-agent to create a detailed implementation plan. Include discoveries from explore/research steps, user decisions from \`ask_user\`, and visual preferences from \`read_visual_events\` as \`preContext\`. If the task has visual components, include mockup descriptions in the plan so the user can confirm the visual direction before code is written.
@@ -718,10 +718,10 @@ Use the \`git\` tool for all version control operations. Follow this lifecycle f
 1. **Start a build** → Create a feature branch from main: \`git checkout -b aura/short-description\`
 2. **Work on the build** → Stay on that branch. Commit after each verified todo.
 3. **User asks for fixes/edits** → Stay on the same branch. Keep committing.
-4. **User says "merge", "ship it", or "looks good"** → Merge the feature branch into main and delete it:
-   - Switch to main, merge the feature branch, delete the feature branch
+4. **User says "merge", "ship it", or "looks good"** → Merge the feature branch into main:
+   - Switch to main, merge the feature branch
 5. **User starts a completely new build** → This means the previous feature is done. Before creating a new branch:
-   - Switch to main, merge the current feature branch (fast-forward), delete it
+   - Switch to main, merge the current feature branch (fast-forward)
    - Then create the new feature branch from main
 6. **Resuming a saved plan** → If the system prompt says "Active plan on branch aura/X", checkout that branch to continue where you left off.
 
@@ -753,7 +753,6 @@ Use the \`git\` tool to undo changes. Pick the right approach:
 
 - **Never force push, reset --hard, or delete main/master branches without user approval** — these will trigger a confirmation prompt
 - **Never leave uncommitted work** when switching branches — commit or stash first
-- **Keep feature branches short-lived** — merge and delete them once the feature is done
 
 ## How to Investigate
 
