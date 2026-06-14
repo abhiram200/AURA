@@ -1,5 +1,3 @@
-/* Tasks tab — original TaskNova styling, scoped to .tasks-page */
-
 @import "tailwindcss";
 
 @theme {
@@ -44,73 +42,65 @@
   --color-warning-light: #2a1f06;
 }
 
-/* ── Scoped global styles ──────────────────────────────────────────── */
-
-.tasks-page * {
+* {
   transition: background-color 0.2s ease, border-color 0.2s ease, color 0.2s ease;
 }
 
-.tasks-page button {
+/* All buttons should show pointer cursor */
+button {
   cursor: pointer;
 }
 
-.tasks-page button:disabled {
+button:disabled {
   cursor: not-allowed;
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .tasks-page * {
+  * {
     animation-duration: 0.01ms !important;
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
   }
 }
 
-/* ── Tasks page container ───────────────────────────────────────────── */
-
-.tasks-page {
-  color: var(--color-text);
-  background-color: var(--color-surface);
-  height: 100%;
-  overflow: hidden;
+body {
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  background-color: var(--color-surface);
+  color: var(--color-text);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
 
-/* ── Custom scrollbar ───────────────────────────────────────────────── */
-
-.tasks-page ::-webkit-scrollbar {
+/* Custom scrollbar */
+::-webkit-scrollbar {
   width: 6px;
 }
 
-.tasks-page ::-webkit-scrollbar-track {
+::-webkit-scrollbar-track {
   background: transparent;
 }
 
-.tasks-page ::-webkit-scrollbar-thumb {
+::-webkit-scrollbar-thumb {
   background: var(--color-border);
   border-radius: 3px;
 }
 
-.tasks-page ::-webkit-scrollbar-thumb:hover {
+::-webkit-scrollbar-thumb:hover {
   background: var(--color-text-tertiary);
 }
 
-/* ── Focus ring ──────────────────────────────────────────────────────── */
-
-.tasks-page .focus-ring {
+/* Focus ring utility */
+.focus-ring {
   outline: none;
 }
 
-.tasks-page .focus-ring:focus-visible {
+.focus-ring:focus-visible {
   outline: 2px solid var(--color-border-focus);
   outline-offset: 2px;
   border-radius: 4px;
 }
 
-/* ── Checkbox animation ─────────────────────────────────────────────── */
-
+/* Checkbox animation */
 @keyframes checkmark {
   from {
     stroke-dashoffset: 20;
@@ -120,12 +110,11 @@
   }
 }
 
-.tasks-page .checkmark-animate {
+.checkmark-animate {
   animation: checkmark 0.2s ease-out forwards;
 }
 
-/* ── Popover enter/exit animations ───────────────────────────────────── */
-
+/* Popover enter/exit animations */
 @keyframes popoverFadeIn {
   from {
     opacity: 0;
@@ -148,16 +137,15 @@
   }
 }
 
-.tasks-page .popover-enter {
+.popover-enter {
   animation: popoverFadeIn 0.15s ease-out forwards;
 }
 
-.tasks-page .popover-exit {
+.popover-exit {
   animation: popoverFadeOut 0.1s ease-in forwards;
 }
 
-/* ── Tooltip animations ─────────────────────────────────────────────── */
-
+/* Tooltip animations (replaces missing tailwindcss-animate) */
 @keyframes tooltipFadeIn {
   from {
     opacity: 0;

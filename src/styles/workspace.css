@@ -1023,35 +1023,6 @@
   height: 100%;
   display: flex;
   flex-direction: column;
-  background: var(--tasks-bg, var(--bg-primary));
-}
-
-.tasks-page__empty {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  padding: 40px;
-}
-
-.tasks-page__empty-icon {
-  margin-bottom: 16px;
-  opacity: 0.4;
-  color: var(--accent-primary, #00f0ff);
-}
-
-.tasks-page__empty-title {
-  font-size: 22px;
-  font-weight: 600;
-  color: var(--text-primary);
-  margin: 0 0 8px;
-}
-
-.tasks-page__empty-subtitle {
-  font-size: 14px;
-  color: var(--text-tertiary);
-  margin: 0;
 }
 
 /* === Git Tree Panel === */
