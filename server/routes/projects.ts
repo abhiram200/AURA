@@ -1,6 +1,7 @@
 import { Router } from 'express'
-import { mkdir, access } from 'fs/promises'
+import { mkdir, access, writeFile } from 'fs/promises'
 import { execFile } from 'child_process'
+import path from 'path'
 import type { ProjectService } from '../services/project.ts'
 import type { OllamaService } from '../services/ollama.ts'
 import type { FileStore } from '../storage/fileStore.ts'
@@ -106,6 +107,41 @@ export function createProjectsRouter(projectService: ProjectService, ollama: Oll
       }
 
       await mkdir(workspacePath, { recursive: true })
+
+      // Initialize git repo with .gitignore and initial commit
+      try {
+        const gitignoreContent = `.aura/*
+node_modules/
+dist/
+.env
+.env.local
+*.log
+.DS_Store
+Thumbs.db
+`
+        await writeFile(path.join(workspacePath, '.gitignore'), gitignoreContent, 'utf-8')
+
+        await new Promise<void>((resolve, reject) => {
+          execFile('git', ['init'], { cwd: workspacePath, timeout: 15000 }, (err) => {
+            if (err) reject(err); else resolve()
+          })
+        })
+
+        await new Promise<void>((resolve, reject) => {
+          execFile('git', ['add', '-A'], { cwd: workspacePath, timeout: 15000 }, (err) => {
+            if (err) reject(err); else resolve()
+          })
+        })
+
+        await new Promise<void>((resolve, reject) => {
+          execFile('git', ['commit', '-m', 'chore: initial commit', '--no-gpg-sign'], { cwd: workspacePath, timeout: 15000 }, (err) => {
+            if (err) reject(err); else resolve()
+          })
+        })
+      } catch (gitError) {
+        // Git init is best-effort — project creation should succeed even if git is unavailable
+        console.warn(`[Projects] Git init failed for ${workspacePath}:`, gitError instanceof Error ? gitError.message : gitError)
+      }
 
       const project = await projectService.create(name, description ?? '', workspacePath)
       res.status(201).json(project)
