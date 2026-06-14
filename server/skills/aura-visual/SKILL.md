@@ -35,16 +35,30 @@ Call `visual_preview` with:
 - `content`: an HTML content fragment using the provided CSS classes (see below). NOT a full HTML document — the frame provides everything.
 - `title`: a brief description like "Dashboard Layout Options"
 
-### 2. Tell the user
+### 2. Tell the user, then STOP AND WAIT
 
 After pushing a screen, tell the user:
 - A visual preview is available in the Visual tab
 - A brief text summary of what's on screen
 - Ask them to look at it and respond in the chat
 
-### 3. Read interactions
+⚠️ **CRITICAL: YOU MUST STOP HERE.** Do NOT call `read_visual_events` in the same response where you pushed the preview. The events file is cleared when a new screen is pushed, so calling `read_visual_events` immediately will always return an empty array — the user has not had time to click anything yet.
 
-After the user responds, call `read_visual_events` to see their clicks/selections from the browser. Merge this with their chat message for the full picture.
+**The correct flow is:**
+1. Push `visual_preview` → tell the user → **end your response**
+2. Wait for the user to send a new message (they click options in the browser, then type in chat)
+3. Only THEN call `read_visual_events` to collect their interactions
+
+**The wrong flow (DO NOT DO THIS):**
+1. Push `visual_preview`
+2. Immediately call `read_visual_events` → gets `[]` (empty!)
+3. Proceed as if the user made no choice → randomly picks an option → starts editing
+
+If you call `read_visual_events` and get an empty result, it means the user hasn't interacted yet. Do NOT guess or randomly choose — ask the user again to interact with the visual preview and wait for their next message.
+
+### 3. Read interactions (only after user responds)
+
+After the user sends a new message, call `read_visual_events` to see their clicks/selections from the browser. Merge this with their chat message for the full picture.
 
 ### 4. Iterate or advance
 
@@ -52,6 +66,8 @@ If feedback changes the current screen, push a new version:
 ```
 visual_preview(filename="dashboard-v2", content=..., title="Dashboard Layout Options v2")
 ```
+
+Then **stop again** and wait for the user to respond before reading events.
 
 Only move on when the current visual question is resolved.
 

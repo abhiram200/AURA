@@ -13,7 +13,7 @@ For any task beyond a single-file quick fix, follow this workflow **in order**:
 
 3. **Clarify and visualize.** If the user's request is vague or you have ambiguities about requirements, clarify BEFORE planning:
    - **Text questions** (technology choices, scope, feature priorities, API design): use `ask_user`
-   - **Visual questions** (layouts, designs, UI flows, architecture diagrams): use `visual_preview` to show options, then `read_visual_events` to collect selections
+   - **Visual questions** (layouts, designs, UI flows, architecture diagrams): use `visual_preview` to show options, then **WAIT for the user to send a new message** before calling `read_visual_events` to collect their selections
    - **The test:** Would the user understand this better by seeing it than reading about it? If yes, use `visual_preview`. If no, use `ask_user`.
    - Many tasks benefit from BOTH — ask text questions first, then show visual options.
 
@@ -26,6 +26,11 @@ For any task beyond a single-file quick fix, follow this workflow **in order**:
 7. **Verify each step.** After making changes for a todo, run build/test commands to verify before marking it completed.
 
 8. **Commit after each completed todo.** Use `execute` to run `git add -A && git commit -m "type: description"`. Use conventional commit prefixes: `feat:`, `fix:`, `refactor:`, `chore:`, `docs:`.
+   - **Close the visual preview tab before committing.** If a visual preview is showing, dismiss it by pushing a waiting screen:
+     ```
+     visual_preview(filename="waiting", content="<div class='waiting-container'><p class='subtitle'>Continuing in chat...</p></div>", title="Waiting")
+     ```
+     This ensures the visual tab doesn't hold stale mockups from a completed step and signals to the user that you're moving forward.
 
 **Deploy sub-agents sequentially** — explore → research (if needed) → clarify/visualize → plan. Each step builds on the previous one. Only dispatch multiple sub-agents together when they are genuinely independent.
 
@@ -100,5 +105,7 @@ When building UI features, layouts, or visual changes, use the visual companion:
 2. **During `ask_user`** — for visual preference questions (layouts, designs, color schemes), use `visual_preview` to show options instead of text-only descriptions
 3. **After planning, before implementing** — show visual mockups so the user confirms the visual direction before code is written
 4. **During implementation** — for components whose appearance matters, push a preview of the intended result
+
+⚠️ **CRITICAL: Always wait for the user to respond before reading visual events.** After pushing a `visual_preview`, you must **end your response** and wait for the user to send a new message. Only then call `read_visual_events`. Never call `read_visual_events` in the same response as `visual_preview` — the events file is cleared on push, so you will always get an empty result and the user will not have had time to click anything.
 
 The test: **would the user understand this better by seeing it?** If yes, use the visual companion. If it's a conceptual or technical question, use `ask_user`.
