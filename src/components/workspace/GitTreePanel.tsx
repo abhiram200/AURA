@@ -77,7 +77,7 @@ export function GitTreePanel({ projectId, open, onClose, onBranchChange }: GitTr
     }
   }, [open, onClose])
 
-  // Lane assignment for branch tags (shared between list and graph)
+  // Lane assignment for branch tags (list view only; graph has its own)
   const { laneMap, localBranches } = useMemo(() => {
     if (!gitTree.data) return { laneMap: new Map<string, number>(), localBranches: [] as GitBranch[] }
     const locals = gitTree.data.branches.filter(b => !b.isRemote)
@@ -86,7 +86,8 @@ export function GitTreePanel({ projectId, open, onClose, onBranchChange }: GitTr
       map.set(b.name, i % BRANCH_COLORS.length)
     })
     gitTree.data.branches.filter(b => b.isRemote).forEach(b => {
-      const localName = b.name.replace(/^remotes\/[^/]+\//, '')
+      // b.name from git for-each-ref %(refname:short) is "origin/main", not "remotes/origin/main"
+      const localName = b.name.replace(/^[^/]+\//, '')
       if (map.has(localName)) {
         map.set(b.name, map.get(localName)!)
       } else {

@@ -177,9 +177,10 @@ export async function getGitLog(projectPath: string, maxCount = 100): Promise<{ 
     })
 
   // Get branches — use git for-each-ref for reliable parsing
+  // Use %(objectname) (full hash) to match commit hashes from git log %H
   // Local branches
   const localBranchOutput = await execGit(
-    ['for-each-ref', '--format=%(refname:short) %(objectname:short)', 'refs/heads/'],
+    ['for-each-ref', '--format=%(refname:short) %(objectname)', 'refs/heads/'],
     projectPath
   )
   // Current branch
@@ -201,7 +202,7 @@ export async function getGitLog(projectPath: string, maxCount = 100): Promise<{ 
   // Remote branches
   try {
     const remoteBranchOutput = await execGit(
-      ['for-each-ref', '--format=%(refname:short) %(objectname:short)', 'refs/remotes/'],
+      ['for-each-ref', '--format=%(refname:short) %(objectname)', 'refs/remotes/'],
       projectPath
     )
     for (const line of remoteBranchOutput.trim().split('\n').filter(l => l.trim())) {

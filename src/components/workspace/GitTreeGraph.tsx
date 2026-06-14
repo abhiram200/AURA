@@ -6,11 +6,12 @@ const BRANCH_COLORS = [
   '#ff6b6b', '#45b7d1', '#96ceb4', '#ff8a5c', '#6c63ff',
 ]
 
-const COMMIT_SPACING = 44
+const COMMIT_SPACING = 52
 const DOT_RADIUS = 5
 const MERGE_DOT_RADIUS = 6
 const SVG_LEFT_PAD = 30
-const LABEL_LEFT_MARGIN = 60
+const LABEL_OFFSET = 14 // px after the dot center for label start
+const MAX_MSG_LEN = 48 // max commit message chars shown in graph
 
 function formatRelativeTime(timestamp: number): string {
   const now = Date.now() / 1000
@@ -38,14 +39,26 @@ interface LaneAssignment {
   usedLanes: Set<number>
 }
 
-function assignLanes(commits: GitCommit[], branches: GitBranch[]): LaneAssignment {
+function assignLanes(commits: GitCommit[], branches: GitBranch[], currentBranch: string | null): LaneAssignment {
   const laneMap = new Map<string, number>()
   const locals = branches.filter(b => !b.isRemote)
-  locals.forEach((b, i) => {
+
+  // Sort local branches: main/master first, then current branch, then alphabetically
+  // This ensures the primary branch claims the shared ancestry line
+  const sortedLocals = [...locals].sort((a, b) => {
+    if (a.name === 'main' || a.name === 'master') return -1
+    if (b.name === 'main' || b.name === 'master') return 1
+    if (a.name === currentBranch) return -1
+    if (b.name === currentBranch) return 1
+    return a.name.localeCompare(b.name)
+  })
+
+  sortedLocals.forEach((b, i) => {
     laneMap.set(b.name, i)
   })
   branches.filter(b => b.isRemote).forEach(b => {
-    const localName = b.name.replace(/^remotes\/[^/]+\//, '')
+    // b.name from git for-each-ref %(refname:short) is "origin/main", not "remotes/origin/main"
+    const localName = b.name.replace(/^[^/]+\//, '')
     if (laneMap.has(localName)) {
       laneMap.set(b.name, laneMap.get(localName)!)
     } else {
@@ -53,36 +66,55 @@ function assignLanes(commits: GitCommit[], branches: GitBranch[]): LaneAssignmen
     }
   })
 
+  // Build commit lookup for parent traversal
+  const commitMap = new Map<string, GitCommit>()
+  for (const commit of commits) {
+    commitMap.set(commit.hash, commit)
+  }
+
   const commitLanes = new Map<string, number>()
 
-  // First pass: assign commits that have explicit branch refs
-  for (const commit of commits) {
-    const branchRefs = commit.refs.filter(r => !r.startsWith('HEAD'))
-    for (const ref of branchRefs) {
-      const refName = ref.replace(/^HEAD -> /, '')
-      if (laneMap.has(refName)) {
-        commitLanes.set(commit.hash, laneMap.get(refName)!)
-        break
-      }
+  // Trace first-parent chains from each branch HEAD backward.
+  // Process primary branch first so it claims shared ancestry.
+  // Each branch always claims its HEAD commit (even if already claimed),
+  // then stops tracing at shared ancestors.
+  for (const branch of sortedLocals) {
+    const lane = laneMap.get(branch.name)!
+    // Always claim HEAD commit on this branch's lane
+    commitLanes.set(branch.commitHash, lane)
+    let currentHash: string | undefined = branch.commitHash
+    let isFirst = true
+    while (currentHash) {
+      if (!isFirst && commitLanes.has(currentHash)) break // shared ancestor — stop
+      if (!isFirst) commitLanes.set(currentHash, lane)
+      isFirst = false
+      const commit = commitMap.get(currentHash)
+      if (!commit || commit.parentHashes.length === 0) break
+      currentHash = commit.parentHashes[0] // follow first parent
     }
   }
 
-  // Second pass: commits without explicit refs inherit from first parent
-  for (const commit of commits) {
-    if (commitLanes.has(commit.hash)) continue
-    if (commit.parentHashes.length > 0) {
-      const parentLane = commitLanes.get(commit.parentHashes[0])
-      if (parentLane !== undefined) {
-        commitLanes.set(commit.hash, parentLane)
-      } else {
-        commitLanes.set(commit.hash, 0)
-      }
-    } else {
-      commitLanes.set(commit.hash, 0)
+  // Also trace remote branches onto their local branch's lane
+  for (const branch of branches.filter(b => b.isRemote)) {
+    const lane = laneMap.get(branch.name)
+    if (lane === undefined) continue
+    // Only trace if the remote HEAD is different from local HEAD
+    const localName = branch.name.replace(/^[^/]+\//, '')
+    const localBranch = sortedLocals.find(b => b.name === localName)
+    if (localBranch && branch.commitHash === localBranch.commitHash) continue
+    commitLanes.set(branch.commitHash, lane)
+    let currentHash: string | undefined = branch.commitHash
+    let isFirst = true
+    while (currentHash) {
+      if (!isFirst && commitLanes.has(currentHash)) break
+      if (!isFirst) commitLanes.set(currentHash, lane)
+      isFirst = false
+      const commit = commitMap.get(currentHash)
+      if (!commit || commit.parentHashes.length === 0) break
+      currentHash = commit.parentHashes[0]
     }
   }
 
-  // Only include lanes that are actually used by commits
   const usedLanes = new Set(commitLanes.values())
   return { laneMap, commitLanes, usedLanes }
 }
@@ -105,11 +137,22 @@ export function GitTreeGraph({
   checkingOut,
 }: GitTreeGraphProps) {
   const { laneMap, commitLanes, usedLanes } = useMemo(
-    () => assignLanes(commits, branches),
-    [commits, branches]
+    () => assignLanes(commits, branches, currentBranch),
+    [commits, branches, currentBranch]
   )
 
   const localBranches = useMemo(() => branches.filter(b => !b.isRemote), [branches])
+
+  // Invert: commit hash -> list of local branch names that point to it
+  const commitBranchLabels = useMemo(() => {
+    const map = new Map<string, string[]>()
+    for (const b of localBranches) {
+      const list = map.get(b.commitHash) ?? []
+      list.push(b.name)
+      map.set(b.commitHash, list)
+    }
+    return map
+  }, [localBranches])
 
   // Compute lane X positions: spread used lanes evenly
   const laneXMap = useMemo(() => {
@@ -121,16 +164,19 @@ export function GitTreeGraph({
     return map
   }, [usedLanes])
 
-  const maxLaneX = useMemo(() => {
-    let max = 0
+  // SVG width: rightmost lane + room for truncated text
+  const svgWidth = useMemo(() => {
+    let maxX = SVG_LEFT_PAD
     for (const x of laneXMap.values()) {
-      if (x > max) max = x
+      if (x > maxX) maxX = x
     }
-    return max
+    return maxX + LABEL_OFFSET + MAX_MSG_LEN * 6 + 16
   }, [laneXMap])
-
-  const svgWidth = Math.max(maxLaneX + 260, 340)
   const svgHeight = commits.length * COMMIT_SPACING + 40
+
+  function truncateMsg(msg: string): string {
+    return msg.length > MAX_MSG_LEN ? msg.slice(0, MAX_MSG_LEN) + '…' : msg
+  }
 
   const connections = useMemo(() => {
     const conns: Connection[] = []
@@ -162,9 +208,8 @@ export function GitTreeGraph({
     return conns
   }, [commits, commitLanes, laneXMap])
 
-  // Build a map from commit hash to index for same-lane line segments
+  // Build same-lane vertical segments
   const sameLaneSegments = useMemo(() => {
-    // Group commits by lane, then create line segments connecting consecutive commits on the same lane
     const laneCommits = new Map<number, { y: number; hash: string }[]>()
     commits.forEach((commit, i) => {
       const lane = commitLanes.get(commit.hash) ?? 0
@@ -175,10 +220,8 @@ export function GitTreeGraph({
     const segments: { lane: number; y1: number; y2: number }[] = []
     for (const [lane, items] of laneCommits) {
       if (items.length === 1) {
-        // Single commit — draw a short stub
         segments.push({ lane, y1: items[0].y - 15, y2: items[0].y + 15 })
       } else {
-        // Connect first to last
         segments.push({ lane, y1: items[0].y, y2: items[items.length - 1].y })
       }
     }
@@ -257,7 +300,29 @@ export function GitTreeGraph({
             const isHead = commit.refs.some(r => r.startsWith('HEAD'))
             const isMerge = commit.parentHashes.length > 1
             const isSelected = selectedHash === commit.hash
-            const branchRefs = commit.refs.filter(r => !r.startsWith('HEAD'))
+
+            // Only show local branch labels on their HEAD commit
+            const branchLabels = commitBranchLabels.get(commit.hash) ?? []
+
+            // Show remote refs that are NOT the tracking branch of a local label
+            // (e.g., show "origin/gh-pages" but not "origin/main" if "main" is already shown)
+            const localBranchSet = new Set(branchLabels)
+            const remoteLabels = commit.refs
+              .filter(r => !r.startsWith('HEAD'))
+              .filter(r => {
+                if (r.startsWith('origin/')) {
+                  const shortName = r.replace(/^origin\//, '')
+                  // Skip if a local branch with that name is already shown
+                  return !localBranchSet.has(shortName)
+                }
+                return false
+              })
+
+            // Whether this commit row needs extra height for branch labels
+            const hasLabels = branchLabels.length > 0 || remoteLabels.length > 0
+
+            // Label start X: right next to the dot
+            const labelX = x + LABEL_OFFSET
 
             return (
               <g key={commit.hash} className={`git-tree-graph__commit-group${isSelected ? ' git-tree-graph__commit-group--selected' : ''}`}>
@@ -283,56 +348,94 @@ export function GitTreeGraph({
                   style={{ cursor: 'pointer', filter: isHead ? `drop-shadow(0 0 4px ${color})` : 'none' }}
                   onClick={() => onCommitClick(commit.hash)}
                 />
-                {/* Commit message — always starts at fixed left margin */}
+
+                {/* Branch labels (only on branch HEAD commits) — positioned next to dot */}
+                {hasLabels && (
+                  <g>
+                    {branchLabels.map((name, ri) => {
+                      const refColor = BRANCH_COLORS[(laneMap.get(name) ?? lane) % BRANCH_COLORS.length]
+                      const textWidth = name.length * 5.5 + 14
+                      const pillX = labelX + ri * (textWidth + 4)
+                      return (
+                        <g key={`local-${name}`}>
+                          <rect
+                            x={pillX}
+                            y={y - 12}
+                            width={textWidth}
+                            height={14}
+                            rx={7}
+                            fill={`${refColor}22`}
+                            stroke={`${refColor}55`}
+                            strokeWidth={0.5}
+                          />
+                          <text
+                            x={pillX + textWidth / 2}
+                            y={y - 3}
+                            fill={refColor}
+                            fontSize={8}
+                            textAnchor="middle"
+                            fontWeight={600}
+                          >
+                            {name}
+                          </text>
+                        </g>
+                      )
+                    })}
+                    {remoteLabels.map((ref, ri) => {
+                      const refColor = BRANCH_COLORS[(laneMap.get(ref) ?? lane) % BRANCH_COLORS.length]
+                      const displayName = ref.replace(/^origin\//, '')
+                      const textWidth = displayName.length * 5.5 + 14
+                      const offset = (branchLabels.length + ri) * (textWidth + 4)
+                      const pillX = labelX + offset
+                      return (
+                        <g key={`remote-${ref}`}>
+                          <rect
+                            x={pillX}
+                            y={y - 12}
+                            width={textWidth}
+                            height={14}
+                            rx={7}
+                            fill={`${refColor}22`}
+                            stroke={`${refColor}55`}
+                            strokeWidth={0.5}
+                          />
+                          <text
+                            x={pillX + textWidth / 2}
+                            y={y - 3}
+                            fill={refColor}
+                            fontSize={8}
+                            textAnchor="middle"
+                            fontWeight={600}
+                          >
+                            {displayName}
+                          </text>
+                        </g>
+                      )
+                    })}
+                  </g>
+                )}
+
+                {/* Commit message — positioned next to dot */}
                 <text
-                  x={LABEL_LEFT_MARGIN}
-                  y={y + 4}
+                  x={labelX}
+                  y={hasLabels ? y + 10 : y + 4}
                   fill="#e6edf3"
                   fontSize={11}
                   className="git-tree-graph__label"
                   style={{ cursor: 'pointer', pointerEvents: 'all' }}
                   onClick={() => onCommitClick(commit.hash)}
                 >
-                  {commit.shortHash} {commit.message}
+                  {commit.shortHash} {truncateMsg(commit.message)}
                 </text>
                 {/* Author + time */}
                 <text
-                  x={LABEL_LEFT_MARGIN}
-                  y={y + 16}
+                  x={labelX}
+                  y={hasLabels ? y + 22 : y + 16}
                   fill="#8b949e"
                   fontSize={9}
                 >
                   {commit.author} · {formatRelativeTime(commit.date)}
                 </text>
-                {/* Branch ref tags */}
-                {branchRefs.map((ref, ri) => {
-                  const refColor = BRANCH_COLORS[laneMap.get(ref) ?? lane % BRANCH_COLORS.length]
-                  const textWidth = ref.length * 5.5 + 14
-                  return (
-                    <g key={ri}>
-                      <rect
-                        x={LABEL_LEFT_MARGIN + ri * (textWidth + 4)}
-                        y={y - 10}
-                        width={textWidth}
-                        height={14}
-                        rx={7}
-                        fill={`${refColor}22`}
-                        stroke={`${refColor}55`}
-                        strokeWidth={0.5}
-                      />
-                      <text
-                        x={LABEL_LEFT_MARGIN + ri * (textWidth + 4) + textWidth / 2}
-                        y={y - 1}
-                        fill={refColor}
-                        fontSize={8}
-                        textAnchor="middle"
-                        fontWeight={600}
-                      >
-                        {ref.replace(/^origin\//, '')}
-                      </text>
-                    </g>
-                  )
-                })}
               </g>
             )
           })}
