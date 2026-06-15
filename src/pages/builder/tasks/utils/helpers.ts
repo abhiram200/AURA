@@ -5,7 +5,7 @@ import type { Todo, TodoFilters, Priority } from '../types';
 import {
   Briefcase, Code, Lightbulb,
   Palette, Rocket, Users,
-  Globe, Shield, Zap, BookOpen,
+  Globe, ShieldCheck, Zap, BookOpen,
   Terminal, Database, Bug, FlaskConical, FileCode,
   Cpu, BarChart3, FolderGit2, Webhook, Blocks,
 } from 'lucide-react';
@@ -112,7 +112,7 @@ export function sortWithCompletedLast(todos: Todo[]): Todo[] {
 const ICON_MAP: Record<string, React.ComponentType<{ className?: string; style?: React.CSSProperties }>> = {
   Briefcase, Code, Lightbulb,
   Palette, Rocket, Users,
-  Globe, Shield, Zap, BookOpen,
+  Globe, ShieldCheck, Zap, BookOpen,
   Terminal, Database, Bug, FlaskConical, FileCode,
   Cpu, BarChart3, FolderGit2, Webhook, Blocks,
 };

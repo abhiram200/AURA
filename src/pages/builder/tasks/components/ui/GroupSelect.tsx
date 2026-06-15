@@ -7,7 +7,7 @@ import { GROUP_COLORS, GROUP_ICONS } from '../../utils/constants';
 import {
   Briefcase, Code, Lightbulb,
   Palette, Rocket, Users,
-  Globe, Shield, Zap, BookOpen,
+  Globe, ShieldCheck, Zap, BookOpen,
   Terminal, Database, Bug, FlaskConical, FileCode,
   Cpu, BarChart3, FolderGit2, Webhook, Blocks,
 } from 'lucide-react';
@@ -15,7 +15,7 @@ import {
 const ICON_MAP: Record<string, React.ComponentType<{ className?: string; style?: React.CSSProperties }>> = {
   Briefcase, Code, Lightbulb,
   Palette, Rocket, Users,
-  Globe, Shield, Zap, BookOpen,
+  Globe, ShieldCheck, Zap, BookOpen,
   Terminal, Database, Bug, FlaskConical, FileCode,
   Cpu, BarChart3, FolderGit2, Webhook, Blocks,
 };

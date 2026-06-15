@@ -31,7 +31,7 @@ export const GROUP_ICONS = [
   'Rocket',
   'Users',
   'Globe',
-  'Shield',
+  'ShieldCheck',
   'Zap',
   'BookOpen',
   'Terminal',
