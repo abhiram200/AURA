@@ -6,7 +6,6 @@ export interface TaskTodo {
   id: string
   text: string
   completed: boolean
-  category: string
   priority: string
   groupId: string | null
   dueDate: string | null
@@ -25,7 +24,6 @@ export interface TaskGroup {
 export interface ProjectTaskData {
   todos: TaskTodo[]
   groups: TaskGroup[]
-  lastCategory: string
   lastPriority: string
   lastGroupId: string | null
   groupSortOrders: Record<string, string>
@@ -37,7 +35,6 @@ function defaultTaskData(): ProjectTaskData {
   return {
     todos: [],
     groups: [],
-    lastCategory: 'none',
     lastPriority: 'medium',
     lastGroupId: null,
     groupSortOrders: {},

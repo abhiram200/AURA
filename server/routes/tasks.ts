@@ -25,7 +25,7 @@ export function createTasksRouter(taskService: TaskService) {
   router.put('/:projectId/tasks', async (req, res) => {
     try {
       const { projectId } = req.params
-      const { todos, groups, lastCategory, lastPriority, lastGroupId, groupSortOrders, groupFilterPriority } = req.body
+      const { todos, groups, lastPriority, lastGroupId, groupSortOrders, groupFilterPriority } = req.body
 
       if (!Array.isArray(todos) || !Array.isArray(groups)) {
         res.status(400).json({ error: 'todos and groups must be arrays' })
@@ -35,7 +35,6 @@ export function createTasksRouter(taskService: TaskService) {
       const data = await taskService.setTaskData(projectId, {
         todos,
         groups,
-        lastCategory: lastCategory ?? 'none',
         lastPriority: lastPriority ?? 'medium',
         lastGroupId: lastGroupId ?? null,
         groupSortOrders: groupSortOrders ?? {},

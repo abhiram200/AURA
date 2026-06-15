@@ -8,7 +8,7 @@ interface EmptyStateProps {
 }
 
 const messages: Record<FilterStatus, { title: string; description: string }> = {
-  all: { title: 'No tasks yet', description: 'Add your first task to get started with TaskNova!' },
+  all: { title: 'No tasks yet', description: 'Add your first task to get started!' },
   active: { title: 'No active tasks', description: 'All your tasks are completed. Nice work!' },
   completed: { title: 'No completed tasks', description: 'Complete some tasks to see them here.' },
 };

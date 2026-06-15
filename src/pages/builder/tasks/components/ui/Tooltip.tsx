@@ -15,7 +15,7 @@ export function Tooltip({
   content,
   children,
   side = 'top',
-  sideOffset = 6,
+  sideOffset = 4,
   delayDuration = 300,
   className,
 }: TooltipProps) {
@@ -30,14 +30,21 @@ export function Tooltip({
             side={side}
             sideOffset={sideOffset}
             className={cn(
-              'tasks-app z-50 rounded-lg bg-surface-raised px-2.5 py-1.5 text-xs font-medium text-text border border-border',
-              'shadow-lg select-none',
-              'popover-enter',
+              'tasks-app z-50 border border-border shadow-md select-none popover-enter',
               className,
             )}
+            style={{
+              padding: '4px 8px',
+              borderRadius: '6px',
+              fontSize: '11px',
+              lineHeight: '1.4',
+              fontWeight: 500,
+              color: 'var(--color-text-secondary)',
+              backgroundColor: 'var(--color-surface)',
+            }}
           >
             {content}
-            <TooltipPrimitive.Arrow className="fill-surface-raised" />
+            <TooltipPrimitive.Arrow className="fill-surface" />
           </TooltipPrimitive.Content>
         </TooltipPrimitive.Portal>
       </TooltipPrimitive.Root>

@@ -236,42 +236,37 @@ export const TodoItem = forwardRef<HTMLDivElement, TodoItemProps>(function TodoI
         )}
       </div>
 
-      {/* Right side: tags normally, delete button when editing */}
+      {/* Right side: due date, group badge, priority pill, delete pill */}
       {!isDragOverlayItem && (
         <div className="shrink-0 flex items-center gap-1.5 justify-end">
-          {isEditing ? (
-            <Tooltip content="Delete">
-              <button
-                onMouseDown={(e) => e.preventDefault()}
-                onClick={() => {
-                  deleteTodo(todo.id);
-                  setEditingId(null);
-                }}
-                className="p-1.5 rounded-lg text-text-tertiary hover:bg-danger-light hover:text-danger transition-colors shrink-0"
+          {!isEditing && todo.dueDate && (
+            <Tooltip content={isOverdue(todo.dueDate) ? 'Overdue!' : isDueToday(todo.dueDate) ? 'Due today' : 'Due date'}>
+              <span
+                className={cn(
+                  'flex items-center gap-1 text-xs whitespace-nowrap',
+                  isOverdue(todo.dueDate) ? 'text-danger font-medium' : 'text-text-tertiary',
+                  isDueToday(todo.dueDate) && 'text-warning font-medium',
+                )}
               >
-                <Trash2 className="h-3.5 w-3.5" />
-              </button>
+                <Calendar className="h-3 w-3" />
+                {formatDueDate(todo.dueDate)}
+              </span>
             </Tooltip>
-          ) : (
-            <>
-              {todo.dueDate && (
-                <Tooltip content={isOverdue(todo.dueDate) ? 'Overdue!' : isDueToday(todo.dueDate) ? 'Due today' : 'Due date'}>
-                  <span
-                    className={cn(
-                      'flex items-center gap-1 text-xs whitespace-nowrap',
-                      isOverdue(todo.dueDate) ? 'text-danger font-medium' : 'text-text-tertiary',
-                      isDueToday(todo.dueDate) && 'text-warning font-medium',
-                    )}
-                  >
-                    <Calendar className="h-3 w-3" />
-                    {formatDueDate(todo.dueDate)}
-                  </span>
-                </Tooltip>
-              )}
-              {!hideGroupBadge && <GroupBadge groupId={todo.groupId} />}
-              <PriorityBadge priority={todo.priority} onPriorityChange={(p) => updateTodo(todo.id, { priority: p })} />
-            </>
           )}
+          {!isEditing && !hideGroupBadge && <GroupBadge groupId={todo.groupId} />}
+          <PriorityBadge priority={todo.priority} onPriorityChange={(p) => updateTodo(todo.id, { priority: p })} />
+          <Tooltip content="Delete task">
+            <button
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => {
+                deleteTodo(todo.id);
+                if (isEditing) setEditingId(null);
+              }}
+              className="p-1.5 rounded-lg text-text-tertiary hover:bg-danger-light hover:text-danger transition-colors shrink-0 cursor-pointer"
+            >
+              <Trash2 className="h-4 w-4" />
+            </button>
+          </Tooltip>
         </div>
       )}
 
