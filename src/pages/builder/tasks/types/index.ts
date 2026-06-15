@@ -1,4 +1,3 @@
-export type Category = 'personal' | 'work' | 'shopping' | 'health' | 'learning' | 'none';
 export type Priority = 'low' | 'medium' | 'high';
 export type FilterStatus = 'all' | 'active' | 'completed';
 
@@ -14,7 +13,6 @@ export interface Todo {
   id: string;
   text: string;
   completed: boolean;
-  category: Category;
   priority: Priority;
   groupId: string | null;
   dueDate: string | null;
@@ -25,7 +23,6 @@ export interface Todo {
 export interface TodoFilters {
   status: FilterStatus;
   search: string;
-  category: Category | 'all';
   priority: Priority | 'all';
   groupId: string | 'all' | 'ungrouped';
 }
@@ -33,7 +30,6 @@ export interface TodoFilters {
 export const DEFAULT_FILTERS: TodoFilters = {
   status: 'all',
   search: '',
-  category: 'all',
   priority: 'all',
   groupId: 'all',
 };

@@ -1,12 +1,13 @@
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 import { format, formatDistanceToNow, isPast, isToday, isTomorrow } from 'date-fns';
-import type { Todo, TodoFilters, Category, Priority } from '../types';
+import type { Todo, TodoFilters, Priority } from '../types';
 import {
-  Briefcase, Code, GraduationCap, Heart, Home, Lightbulb,
-  Music, Palette, Rocket, Star, Trophy, Users,
-  Globe, Leaf, Shield, Zap, Coffee, BookOpen,
-  Dumbbell, Plane,
+  Briefcase, Code, Lightbulb,
+  Palette, Rocket, Users,
+  Globe, Shield, Zap, BookOpen,
+  Terminal, Database, Bug, FlaskConical, FileCode,
+  Cpu, BarChart3, FolderGit2, Webhook, Blocks,
 } from 'lucide-react';
 
 export function cn(...inputs: ClassValue[]) {
@@ -19,7 +20,6 @@ export function generateId(): string {
 
 export function createTodo(
   text: string,
-  category: Category = 'none',
   priority: Priority = 'medium',
   dueDate: string | null = null,
   groupId: string | null = null,
@@ -28,7 +28,6 @@ export function createTodo(
     id: generateId(),
     text,
     completed: false,
-    category,
     priority,
     dueDate,
     groupId,
@@ -65,7 +64,6 @@ export function getFilteredTodos(todos: Todo[], filters: TodoFilters): Todo[] {
   return todos.filter((todo) => {
     if (filters.status === 'active' && todo.completed) return false;
     if (filters.status === 'completed' && !todo.completed) return false;
-    if (filters.category !== 'all' && todo.category !== filters.category) return false;
     if (filters.priority !== 'all' && todo.priority !== filters.priority) return false;
     if (filters.groupId === 'ungrouped' && todo.groupId !== null) return false;
     if (filters.groupId !== 'all' && filters.groupId !== 'ungrouped' && todo.groupId !== filters.groupId) return false;
@@ -112,10 +110,11 @@ export function sortWithCompletedLast(todos: Todo[]): Todo[] {
 }
 
 const ICON_MAP: Record<string, React.ComponentType<{ className?: string; style?: React.CSSProperties }>> = {
-  Briefcase, Code, GraduationCap, Heart, Home, Lightbulb,
-  Music, Palette, Rocket, Star, Trophy, Users,
-  Globe, Leaf, Shield, Zap, Coffee, BookOpen,
-  Dumbbell, Plane,
+  Briefcase, Code, Lightbulb,
+  Palette, Rocket, Users,
+  Globe, Shield, Zap, BookOpen,
+  Terminal, Database, Bug, FlaskConical, FileCode,
+  Cpu, BarChart3, FolderGit2, Webhook, Blocks,
 };
 
 export function getIconComponent(iconName: string): React.ComponentType<{ className?: string; style?: React.CSSProperties }> | null {

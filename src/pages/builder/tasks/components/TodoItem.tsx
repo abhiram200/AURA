@@ -5,7 +5,6 @@ import { motion } from 'framer-motion';
 import { GripVertical, Trash2, Calendar, Pencil } from 'lucide-react';
 import { useTodoStore } from '../store/todoStore';
 import { Checkbox } from './ui/Checkbox';
-import { CategoryBadge } from './CategoryBadge';
 import { PriorityBadge } from './PriorityBadge';
 import { GroupBadge } from './GroupBadge';
 import { Tooltip } from './ui/Tooltip';
@@ -270,7 +269,6 @@ export const TodoItem = forwardRef<HTMLDivElement, TodoItemProps>(function TodoI
                 </Tooltip>
               )}
               {!hideGroupBadge && <GroupBadge groupId={todo.groupId} />}
-              <CategoryBadge category={todo.category} />
               <PriorityBadge priority={todo.priority} onPriorityChange={(p) => updateTodo(todo.id, { priority: p })} />
             </>
           )}
@@ -295,7 +293,6 @@ export const TodoItem = forwardRef<HTMLDivElement, TodoItemProps>(function TodoI
             </Tooltip>
           )}
           {!hideGroupBadge && <GroupBadge groupId={todo.groupId} />}
-          <CategoryBadge category={todo.category} />
           <PriorityBadge priority={todo.priority} />
         </div>
       )}

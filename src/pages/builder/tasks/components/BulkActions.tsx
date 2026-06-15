@@ -1,9 +1,9 @@
 import { motion, AnimatePresence } from 'framer-motion';
-import { Trash2, Check, Tag, Flag, X, Layers } from 'lucide-react';
+import { Trash2, Check, Flag, X, Layers } from 'lucide-react';
 import { useTodoStore } from '../store/todoStore';
 import { Checkbox } from './ui/Checkbox';
 import { Tooltip } from './ui/Tooltip';
-import { ALL_CATEGORIES, ALL_PRIORITIES, CATEGORY_CONFIG, PRIORITY_CONFIG } from '../utils/constants';
+import { ALL_PRIORITIES, PRIORITY_CONFIG } from '../utils/constants';
 import { getFilteredTodos, sortByOrder, getIconComponent } from '../utils/helpers';
 
 export function BulkActions() {
@@ -14,7 +14,6 @@ export function BulkActions() {
   const clearSelection = useTodoStore((s) => s.clearSelection);
   const bulkDelete = useTodoStore((s) => s.bulkDelete);
   const bulkToggleComplete = useTodoStore((s) => s.bulkToggleComplete);
-  const bulkSetCategory = useTodoStore((s) => s.bulkSetCategory);
   const bulkSetPriority = useTodoStore((s) => s.bulkSetPriority);
   const bulkSetGroup = useTodoStore((s) => s.bulkSetGroup);
   const groups = useTodoStore((s) => s.groups);
@@ -62,29 +61,6 @@ export function BulkActions() {
               <Check className="h-3.5 w-3.5" />
               Toggle done
             </button>
-          </Tooltip>
-
-          <Tooltip content="Set category">
-            <div className="relative group">
-              <button className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg text-text-secondary hover:bg-surface-raised hover:text-text transition-colors cursor-pointer">
-                <Tag className="h-3.5 w-3.5" />
-                Category
-              </button>
-              <div className="absolute bottom-full right-0 mb-2 hidden group-hover:block">
-                <div className="bg-surface border border-border rounded-lg shadow-lg py-1 min-w-[140px]">
-                  {ALL_CATEGORIES.map((c) => (
-                    <button
-                      key={c}
-                      onClick={() => bulkSetCategory(c)}
-                      className="w-full text-left px-3 py-1.5 text-xs hover:bg-surface-raised transition-colors"
-                      style={{ color: CATEGORY_CONFIG[c].color }}
-                    >
-                      {CATEGORY_CONFIG[c].label}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            </div>
           </Tooltip>
 
           <Tooltip content="Set priority">

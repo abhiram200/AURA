@@ -1,13 +1,4 @@
-import type { Category, Priority } from '../types';
-
-export const CATEGORY_CONFIG: Record<Category, { label: string; color: string; bgColor: string }> = {
-  personal: { label: 'Personal', color: '#7c3aed', bgColor: '#7c3aed20' },
-  work: { label: 'Work', color: '#2563eb', bgColor: '#2563eb20' },
-  shopping: { label: 'Shopping', color: '#d97706', bgColor: '#d9770620' },
-  health: { label: 'Health', color: '#059669', bgColor: '#05966920' },
-  learning: { label: 'Learning', color: '#db2777', bgColor: '#db277720' },
-  none: { label: 'No Category', color: '#6b7280', bgColor: '#6b728020' },
-};
+import type { Priority } from '../types';
 
 export const PRIORITY_CONFIG: Record<Priority, { label: string; color: string; bgColor: string }> = {
   low: { label: 'Low', color: '#16a34a', bgColor: '#16a34a20' },
@@ -15,7 +6,6 @@ export const PRIORITY_CONFIG: Record<Priority, { label: string; color: string; b
   high: { label: 'High', color: '#dc2626', bgColor: '#dc262620' },
 };
 
-export const ALL_CATEGORIES: Category[] = ['personal', 'work', 'shopping', 'health', 'learning', 'none'];
 export const ALL_PRIORITIES: Priority[] = ['low', 'medium', 'high'];
 
 export const GROUP_COLORS = [
@@ -36,22 +26,22 @@ export const GROUP_COLORS = [
 export const GROUP_ICONS = [
   'Briefcase',
   'Code',
-  'GraduationCap',
-  'Heart',
-  'Home',
   'Lightbulb',
-  'Music',
   'Palette',
   'Rocket',
-  'Star',
-  'Trophy',
   'Users',
   'Globe',
-  'Leaf',
   'Shield',
   'Zap',
-  'Coffee',
   'BookOpen',
-  'Dumbbell',
-  'Plane',
+  'Terminal',
+  'Database',
+  'Bug',
+  'FlaskConical',
+  'FileCode',
+  'Cpu',
+  'BarChart3',
+  'FolderGit2',
+  'Webhook',
+  'Blocks',
 ];

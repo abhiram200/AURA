@@ -2,17 +2,19 @@ import { cn } from '../../utils/helpers';
 import { GROUP_ICONS } from '../../utils/constants';
 import { Tooltip } from './Tooltip';
 import {
-  Briefcase, Code, GraduationCap, Heart, Home, Lightbulb,
-  Music, Palette, Rocket, Star, Trophy, Users,
-  Globe, Leaf, Shield, Zap, Coffee, BookOpen,
-  Dumbbell, Plane,
+  Briefcase, Code, Lightbulb,
+  Palette, Rocket, Users,
+  Globe, Shield, Zap, BookOpen,
+  Terminal, Database, Bug, FlaskConical, FileCode,
+  Cpu, BarChart3, FolderGit2, Webhook, Blocks,
 } from 'lucide-react';
 
 const ICON_MAP: Record<string, React.ComponentType<{ className?: string; style?: React.CSSProperties }>> = {
-  Briefcase, Code, GraduationCap, Heart, Home, Lightbulb,
-  Music, Palette, Rocket, Star, Trophy, Users,
-  Globe, Leaf, Shield, Zap, Coffee, BookOpen,
-  Dumbbell, Plane,
+  Briefcase, Code, Lightbulb,
+  Palette, Rocket, Users,
+  Globe, Shield, Zap, BookOpen,
+  Terminal, Database, Bug, FlaskConical, FileCode,
+  Cpu, BarChart3, FolderGit2, Webhook, Blocks,
 };
 
 interface IconPickerProps {

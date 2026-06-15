@@ -1,8 +1,7 @@
 import { useState, useRef, useEffect } from 'react';
-import { Plus, Calendar, Tag, Flag, Layers } from 'lucide-react';
+import { Plus, Calendar, Flag, Layers } from 'lucide-react';
 import { useTodoStore } from '../store/todoStore';
 import { cn } from '../utils/helpers';
-import { CategorySelect } from './ui/CategorySelect';
 import { GroupSelect } from './ui/GroupSelect';
 import { Button } from './ui/Button';
 import { Tooltip } from './ui/Tooltip';
@@ -11,10 +10,8 @@ import { ALL_PRIORITIES, PRIORITY_CONFIG } from '../utils/constants';
 
 export function TodoForm() {
   const addTodo = useTodoStore((s) => s.addTodo);
-  const lastCategory = useTodoStore((s) => s.lastCategory);
   const lastPriority = useTodoStore((s) => s.lastPriority);
   const lastGroupId = useTodoStore((s) => s.lastGroupId);
-  const setLastCategory = useTodoStore((s) => s.setLastCategory);
   const setLastPriority = useTodoStore((s) => s.setLastPriority);
   const setLastGroupId = useTodoStore((s) => s.setLastGroupId);
   const [text, setText] = useState('');
@@ -43,7 +40,7 @@ export function TodoForm() {
     e.preventDefault();
     if (!text.trim()) return;
 
-    addTodo(text.trim(), lastCategory, lastPriority, dueDate || null, lastGroupId || null);
+    addTodo(text.trim(), lastPriority, dueDate || null, lastGroupId || null);
     setText('');
     setDueDate('');
     // Reset textarea height after clearing
@@ -54,7 +51,7 @@ export function TodoForm() {
   };
 
   return (
-    <form onSubmit={handleSubmit} className="mb-6">
+    <form onSubmit={handleSubmit}>
       <div className="flex gap-3 items-start">
         <div className="flex-1 relative">
           <div className="relative">
@@ -83,12 +80,17 @@ export function TodoForm() {
         </Button>
       </div>
 
-      <div className="mt-4 flex flex-wrap gap-4 pt-4 border-t border-border">
+      <div className="mt-3 flex flex-wrap gap-4">
         <div className="flex items-center gap-2 min-w-[160px]">
-          <Tag className="h-4 w-4 text-text-tertiary flex-shrink-0" />
-          <CategorySelect
-            value={lastCategory}
-            onValueChange={(v) => setLastCategory(v)}
+          <Tooltip content="Assign this task to a project group">
+            <span className="flex items-center gap-1 text-text-tertiary cursor-help flex-shrink-0">
+              <Layers className="h-4 w-4" />
+              <span className="text-xs">Group</span>
+            </span>
+          </Tooltip>
+          <GroupSelect
+            value={lastGroupId}
+            onValueChange={setLastGroupId}
             className="flex-1"
           />
         </div>
@@ -107,7 +109,7 @@ export function TodoForm() {
               const nextIndex = (currentIndex + 1) % ALL_PRIORITIES.length;
               setLastPriority(ALL_PRIORITIES[nextIndex]);
             }}
-            className="px-2.5 py-1 rounded-md text-xs font-medium transition-all cursor-pointer hover:brightness-110"
+            className="w-[72px] py-1 rounded-md text-xs font-medium text-center transition-all cursor-pointer hover:brightness-110"
             style={{
               backgroundColor: PRIORITY_CONFIG[lastPriority].bgColor,
               color: PRIORITY_CONFIG[lastPriority].color,
@@ -116,20 +118,6 @@ export function TodoForm() {
           >
             {PRIORITY_CONFIG[lastPriority].label}
           </button>
-        </div>
-
-        <div className="flex items-center gap-2 min-w-[160px]">
-          <Tooltip content="Assign this task to a project group">
-            <span className="flex items-center gap-1 text-text-tertiary cursor-help flex-shrink-0">
-              <Layers className="h-4 w-4" />
-              <span className="text-xs">Group</span>
-            </span>
-          </Tooltip>
-          <GroupSelect
-            value={lastGroupId}
-            onValueChange={setLastGroupId}
-            className="flex-1"
-          />
         </div>
 
         <div className="flex items-center gap-2 min-w-[200px]">

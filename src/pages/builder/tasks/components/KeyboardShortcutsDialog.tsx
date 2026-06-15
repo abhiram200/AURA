@@ -110,13 +110,13 @@ export function KeyboardShortcutsDialog({ isOpen, onClose }: KeyboardShortcutsDi
         {/* Creating & Editing Todos */}
         <Section title="Creating & Editing Todos" icon={Square}>
           <TipRow description="Type in the input field and press Enter or click Add to create a todo" />
-          <TipRow description="Click the category, priority, or group icons to set defaults for new todos" />
+          <TipRow description="Click the priority or group icons to set defaults for new todos" />
           <TipRow description="Set a due date using the calendar picker — it remembers your last choices" />
           <TipRow description="Double-click on a todo's text to edit it" />
           <TipRow description="Press Enter to save changes, or Escape to cancel editing" />
           <TipRow description="Click the round checkbox to mark a todo as completed" />
           <TipRow description="Click the priority badge to cycle through Low → Medium → High" />
-          <TipRow description="Hover over a todo to see its due date, category, and group badges" />
+          <TipRow description="Hover over a todo to see its due date and group badges" />
         </Section>
 
         {/* Drag & Drop */}
@@ -132,7 +132,7 @@ export function KeyboardShortcutsDialog({ isOpen, onClose }: KeyboardShortcutsDi
         <Section title="Filtering & Search" icon={Filter}>
           <TipRow description="Use the search bar to filter todos by text — results update as you type" />
           <TipRow description="Click the status filters in the sidebar: All, Active, or Completed" />
-          <TipRow description="Click a category in the sidebar to show only todos in that category" />
+          <TipRow description="Click a group in the sidebar to show only todos in that group" />
           <TipRow description="Click a priority level in the sidebar to filter by priority" />
           <TipRow description="Click a group in the sidebar to show only todos in that group" />
           <TipRow description="Click the same filter again to deselect it and show all items" />
@@ -153,7 +153,7 @@ export function KeyboardShortcutsDialog({ isOpen, onClose }: KeyboardShortcutsDi
         <Section title="Bulk Actions" icon={CheckSquare}>
           <TipRow description="Select one or more todos using the checkboxes on the left" />
           <TipRow description="A toolbar appears at the bottom when items are selected" />
-          <TipRow description="Toggle all selected todos as complete/incomplete, change their category, priority, or group" />
+          <TipRow description="Toggle all selected todos as complete/incomplete, change their priority, or group" />
           <TipRow description="Delete all selected todos at once" />
           <TipRow description="Use the Select All checkbox to select or deselect all visible todos" />
         </Section>
@@ -168,7 +168,7 @@ export function KeyboardShortcutsDialog({ isOpen, onClose }: KeyboardShortcutsDi
         {/* Tips */}
         <Section title="Tips & Tricks" icon={Lightbulb}>
           <TipRow description="All your data is saved locally — no account needed, everything stays in your browser" />
-          <TipRow description="The form remembers your last-used category, priority, and group for faster entry" />
+          <TipRow description="The form remembers your last-used priority and group for faster entry" />
           <TipRow description="Use Clear Completed at the bottom to remove all finished todos at once" />
           <TipRow description="Press Escape anywhere to dismiss dialogs, cancel editing, or clear your selection" />
         </Section>

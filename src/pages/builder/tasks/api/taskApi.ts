@@ -1,11 +1,10 @@
-import type { Todo, TaskGroup, Category, Priority } from '../types'
+import type { Todo, TaskGroup, Priority } from '../types'
 
 const API_BASE = '/api/projects'
 
 export interface PersistedTaskState {
   todos: Todo[]
   groups: TaskGroup[]
-  lastCategory: Category
   lastPriority: Priority
   lastGroupId: string | null
   groupSortOrders: Record<string, 'manual' | 'priority' | 'priority-asc' | 'completed-last'>
@@ -16,7 +15,6 @@ interface TaskDataResponse {
   projectId: string
   todos: Todo[]
   groups: TaskGroup[]
-  lastCategory: Category
   lastPriority: Priority
   lastGroupId: string | null
   groupSortOrders: Record<string, string>

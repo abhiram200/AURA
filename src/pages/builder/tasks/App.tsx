@@ -128,11 +128,13 @@ export function TasksApp({ projectId }: TasksAppProps) {
         {/* Main content */}
         <main className="flex-1 min-w-0 overflow-y-auto">
           <div className="max-w-5xl mx-auto px-6 pt-4 pb-6 lg:px-8 lg:pt-6 lg:pb-8">
-            {/* Add Todo Form */}
-            <TodoForm />
+            {/* Add Todo Form — grouped as one visual unit */}
+            <div className="rounded-xl border border-border bg-surface-raised/50 p-4 mb-6">
+              <TodoForm />
+            </div>
 
             {/* Search */}
-            <div className="mb-6">
+            <div className="mb-4">
               <TodoSearch />
             </div>
 

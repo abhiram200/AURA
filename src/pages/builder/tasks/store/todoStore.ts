@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import type { Todo, TodoFilters, Category, Priority, TaskGroup } from '../types'
+import type { Todo, TodoFilters, Priority, TaskGroup } from '../types'
 import { DEFAULT_FILTERS } from '../types'
 import { generateId } from '../utils/helpers'
 import { fetchTaskData, saveTaskData } from '../api/taskApi'
@@ -8,7 +8,6 @@ interface TodoState {
   // Persisted (synced with server)
   todos: Todo[]
   groups: TaskGroup[]
-  lastCategory: Category
   lastPriority: Priority
   lastGroupId: string | null
   groupSortOrders: Record<string, 'manual' | 'priority' | 'priority-asc' | 'completed-last'>
@@ -24,7 +23,7 @@ interface TodoState {
 }
 
 interface TodoActions {
-  addTodo: (text: string, category: Category, priority: Priority, dueDate: string | null, groupId?: string | null) => void
+  addTodo: (text: string, priority: Priority, dueDate: string | null, groupId?: string | null) => void
   updateTodo: (id: string, updates: Partial<Omit<Todo, 'id'>>) => void
   deleteTodo: (id: string) => void
   toggleTodo: (id: string) => void
@@ -36,12 +35,10 @@ interface TodoActions {
   clearSelection: () => void
   bulkDelete: () => void
   bulkToggleComplete: () => void
-  bulkSetCategory: (category: Category) => void
   bulkSetPriority: (priority: Priority) => void
   bulkSetGroup: (groupId: string | null) => void
   setEditingId: (id: string | null) => void
   clearCompleted: () => void
-  setLastCategory: (category: Category) => void
   setLastPriority: (priority: Priority) => void
   setLastGroupId: (groupId: string | null) => void
   toggleGroupSort: (groupId: string, filterActive?: boolean) => void
@@ -64,7 +61,6 @@ export const useTodoStore = create<TodoState & TodoActions>()(
   (set, get) => ({
     todos: [],
     groups: [],
-    lastCategory: 'none' as Category,
     lastPriority: 'medium' as Priority,
     lastGroupId: null,
     groupSortOrders: {},
@@ -76,21 +72,20 @@ export const useTodoStore = create<TodoState & TodoActions>()(
     syncError: null,
     projectId: null,
 
-    addTodo: (text, category, priority, dueDate, groupId = null) => {
+    addTodo: (text, priority, dueDate, groupId = null) => {
       const todos = get().todos
       const maxOrder = todos.length > 0 ? Math.max(...todos.map((t) => t.order)) : -1
       const newTodo: Todo = {
         id: generateId(),
         text,
         completed: false,
-        category,
         priority,
         groupId,
         dueDate,
         createdAt: new Date().toISOString(),
         order: maxOrder + 1,
       }
-      set({ todos: [...todos, newTodo], lastCategory: category, lastPriority: priority, lastGroupId: groupId })
+      set({ todos: [...todos, newTodo], lastPriority: priority, lastGroupId: groupId })
       get()._syncToServer()
     },
 
@@ -185,16 +180,6 @@ export const useTodoStore = create<TodoState & TodoActions>()(
       get()._syncToServer()
     },
 
-    bulkSetCategory: (category) => {
-      const { selectedIds, todos } = get()
-      set({
-        todos: todos.map((todo) =>
-          selectedIds.includes(todo.id) ? { ...todo, category } : todo,
-        ),
-      })
-      get()._syncToServer()
-    },
-
     bulkSetPriority: (priority) => {
       const { selectedIds, todos } = get()
       set({
@@ -221,11 +206,6 @@ export const useTodoStore = create<TodoState & TodoActions>()(
 
     clearCompleted: () => {
       set({ todos: get().todos.filter((t) => !t.completed) })
-      get()._syncToServer()
-    },
-
-    setLastCategory: (category) => {
-      set({ lastCategory: category })
       get()._syncToServer()
     },
 
@@ -342,7 +322,6 @@ export const useTodoStore = create<TodoState & TodoActions>()(
         projectId,
         todos: [],
         groups: [],
-        lastCategory: 'none' as Category,
         lastPriority: 'medium' as Priority,
         lastGroupId: null,
         groupSortOrders: {},
@@ -357,7 +336,6 @@ export const useTodoStore = create<TodoState & TodoActions>()(
         // Migration: if server data is empty and localStorage has data, migrate it
         let todos = data.todos
         let groups = data.groups
-        let lastCategory = data.lastCategory as Category
         let lastPriority = data.lastPriority as Priority
         let lastGroupId = data.lastGroupId
         let groupSortOrders = (data.groupSortOrders ?? {}) as Record<string, 'manual' | 'priority' | 'priority-asc' | 'completed-last'>
@@ -372,13 +350,12 @@ export const useTodoStore = create<TodoState & TodoActions>()(
               if (localState && Array.isArray(localState.todos) && localState.todos.length > 0) {
                 todos = localState.todos
                 groups = localState.groups ?? []
-                lastCategory = localState.lastCategory ?? 'none'
                 lastPriority = localState.lastPriority ?? 'medium'
                 lastGroupId = localState.lastGroupId ?? null
                 groupSortOrders = localState.groupSortOrders ?? {}
                 groupFilterPriority = localState.groupFilterPriority ?? {}
                 // Push migrated data to server
-                await saveTaskData(projectId, { todos, groups, lastCategory, lastPriority, lastGroupId, groupSortOrders, groupFilterPriority })
+                await saveTaskData(projectId, { todos, groups, lastPriority, lastGroupId, groupSortOrders, groupFilterPriority })
                 // Clear localStorage after migration
                 localStorage.removeItem('tasknova-storage')
                 localStorage.removeItem('todo-app-storage')
@@ -393,7 +370,6 @@ export const useTodoStore = create<TodoState & TodoActions>()(
           projectId,
           todos,
           groups,
-          lastCategory,
           lastPriority,
           lastGroupId,
           groupSortOrders,
@@ -409,14 +385,14 @@ export const useTodoStore = create<TodoState & TodoActions>()(
     },
 
     _syncToServer: async () => {
-      const { projectId, todos, groups, lastCategory, lastPriority, lastGroupId, groupSortOrders, groupFilterPriority } = get()
+      const { projectId, todos, groups, lastPriority, lastGroupId, groupSortOrders, groupFilterPriority } = get()
       if (!projectId) return
 
       // Debounce: clear any pending sync and schedule a new one
       if (syncTimer) clearTimeout(syncTimer)
       syncTimer = setTimeout(async () => {
         try {
-          await saveTaskData(projectId, { todos, groups, lastCategory, lastPriority, lastGroupId, groupSortOrders, groupFilterPriority })
+          await saveTaskData(projectId, { todos, groups, lastPriority, lastGroupId, groupSortOrders, groupFilterPriority })
           set({ syncError: null })
         } catch (e) {
           set({ syncError: e instanceof Error ? e.message : 'Sync failed' })
