@@ -1,7 +1,7 @@
 import { Query, type Language, type Tree } from 'web-tree-sitter'
 import { AuraEdgeType } from './types.ts'
 import type { AuraNode, AuraEdge } from './types.ts'
-import { CSS_EXTENSIONS, SCSS_EXTENSIONS, HTML_EXTENSIONS, C_EXTENSIONS, CPP_EXTENSIONS, CSHARP_EXTENSIONS } from './extensions.ts'
+import { CSS_EXTENSIONS, SCSS_EXTENSIONS, HTML_EXTENSIONS, C_EXTENSIONS, CPP_EXTENSIONS, CSHARP_EXTENSIONS, GO_EXTENSIONS, RUST_EXTENSIONS } from './extensions.ts'
 
 type SyntaxNode = {
   type: string
@@ -24,7 +24,7 @@ export class AuraDataFlow {
   ): AuraEdge[] {
     // Skip data flow analysis for non-executable file types (CSS/SCSS/HTML)
     const ext = filePath.substring(filePath.lastIndexOf('.'))
-    if (CSS_EXTENSIONS.has(ext) || SCSS_EXTENSIONS.has(ext) || HTML_EXTENSIONS.has(ext) || C_EXTENSIONS.has(ext) || CPP_EXTENSIONS.has(ext) || CSHARP_EXTENSIONS.has(ext)) {
+    if (CSS_EXTENSIONS.has(ext) || SCSS_EXTENSIONS.has(ext) || HTML_EXTENSIONS.has(ext) || C_EXTENSIONS.has(ext) || CPP_EXTENSIONS.has(ext) || CSHARP_EXTENSIONS.has(ext) || GO_EXTENSIONS.has(ext) || RUST_EXTENSIONS.has(ext)) {
       return []
     }
 

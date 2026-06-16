@@ -21,7 +21,7 @@ import type {
   FileHashEntry,
 } from './types.ts'
 import { computeProgress } from './types.ts'
-import { PY_EXTENSIONS, CSS_EXTENSIONS, SCSS_EXTENSIONS, HTML_EXTENSIONS, VUE_EXTENSIONS, PHP_EXTENSIONS, JAVA_EXTENSIONS, C_EXTENSIONS, CPP_EXTENSIONS, CSHARP_EXTENSIONS } from './extensions.ts'
+import { PY_EXTENSIONS, CSS_EXTENSIONS, SCSS_EXTENSIONS, HTML_EXTENSIONS, VUE_EXTENSIONS, PHP_EXTENSIONS, JAVA_EXTENSIONS, C_EXTENSIONS, CPP_EXTENSIONS, CSHARP_EXTENSIONS, GO_EXTENSIONS, RUST_EXTENSIONS } from './extensions.ts'
 import { getGitHead } from './git.ts'
 import { BM25SearchEngine } from './search/bm25.ts'
 import { EmbeddingService } from './search/embedding.ts'
@@ -472,7 +472,7 @@ export class AuraIndexer {
           const wildcard = match[1] || ''
           const resolved = replacement.replace(/\*/g, wildcard)
           // Try common extensions
-          const extensions = ['', '.ts', '.tsx', '.js', '.jsx', '.vue', '.php', '.phtml', '.java', '.h', '.hpp', '.c', '.cpp', '/index.ts', '/index.tsx', '/index.js', '/index.jsx', '/index.vue']
+          const extensions = ['', '.ts', '.tsx', '.js', '.jsx', '.vue', '.php', '.phtml', '.java', '.h', '.hpp', '.c', '.cpp', '.go', '.rs', '/index.ts', '/index.tsx', '/index.js', '/index.jsx', '/index.vue']
           for (const ext of extensions) {
             const candidate = resolved + ext
             if (fileNodeMap.has(candidate)) return candidate
@@ -973,8 +973,114 @@ export class AuraIndexer {
         continue
       }
 
+      // ── Go import resolution ──
+      const isGoImport = GO_EXTENSIONS.has(sourceExt)
+
+      if (isGoImport) {
+        const importKind = edge.metadata?.importKind as string | undefined
+
+        if (importKind === 'go-stdlib' || importKind === 'go-external') {
+          // Standard library or external package — no local resolution possible
+          edge.confidence = 0.3
+          continue
+        }
+
+        // Internal Go package paths: "myproject/internal/handler"
+        // Try resolving to local .go files
+        const goExtensions = ['.go', '/index.go']
+        let matched = false
+        for (const ext of goExtensions) {
+          const candidate = rawImportPath + ext
+          if (fileNodeMap.has(candidate)) {
+            edge.target = candidate
+            edge.confidence = 0.7
+            matched = true
+            break
+          }
+        }
+        if (!matched) {
+          // Try short-name matching: last path segment
+          const lastSegment = rawImportPath.split('/').pop()!
+          for (const [nodeId] of fileNodeMap) {
+            if (nodeId.endsWith(`/${lastSegment}.go`) || nodeId.endsWith(`/${lastSegment}/index.go`)) {
+              edge.target = nodeId
+              edge.confidence = 0.5
+              matched = true
+              break
+            }
+          }
+        }
+        if (!matched) {
+          edge.confidence = 0.3
+        }
+        continue
+      }
+
+      // ── Rust import resolution ──
+      const isRustImport = RUST_EXTENSIONS.has(sourceExt)
+
+      if (isRustImport) {
+        const importKind = edge.metadata?.importKind as string | undefined
+        let resolvedPath = rawImportPath
+
+        if (importKind === 'rust-stdlib') {
+          // std::/core::/alloc:: — standard library
+          edge.confidence = 0.3
+          continue
+        }
+
+        // Strip crate::/self::/super:: prefixes and convert :: to /
+        resolvedPath = resolvedPath.replace(/^(crate|self|super)::/, '')
+        resolvedPath = resolvedPath.replace(/::/g, '/')
+
+        if (resolvedPath) {
+          // Try resolving to local .rs files
+          const rustExtensions = ['.rs', '/mod.rs', '/lib.rs']
+          let matched = false
+          for (const ext of rustExtensions) {
+            const candidate = resolvedPath + ext
+            if (fileNodeMap.has(candidate)) {
+              edge.target = candidate
+              edge.confidence = 0.7
+              matched = true
+              break
+            }
+          }
+          if (!matched) {
+            // Try with src/ prefix
+            for (const ext of rustExtensions) {
+              const candidate = `src/${resolvedPath}${ext}`
+              if (fileNodeMap.has(candidate)) {
+                edge.target = candidate
+                edge.confidence = 0.7
+                matched = true
+                break
+              }
+            }
+          }
+          if (!matched) {
+            // Try short-name matching
+            const lastSegment = resolvedPath.split('/').pop()!
+            for (const [nodeId] of fileNodeMap) {
+              if (nodeId.endsWith(`/${lastSegment}.rs`) || nodeId.endsWith(`/${lastSegment}/mod.rs`)) {
+                edge.target = nodeId
+                edge.confidence = 0.5
+                matched = true
+                break
+              }
+            }
+          }
+          if (!matched) {
+            edge.confidence = 0.3
+          }
+        } else {
+          edge.confidence = 0.3
+        }
+        continue
+      }
+
       // ── JS/TS/Vue import resolution ──
-      // Only reach here for JS/TS/Vue imports (Python, CSS/SCSS, HTML, PHP, Java, C/C++, C# are handled above)
+      // Only reach here for JS/TS/Vue imports (Python, CSS/SCSS, HTML, PHP, Java, C/C++, C#, Go, Rust are handled above)
       if (!rawImportPath.startsWith('.')) {
         // Non-relative import — try tsconfig path aliases (e.g. "@/types" -> "./src/types")
         const aliasResolved = this.resolveAlias(rawImportPath, fileNodeMap)

@@ -10,6 +10,8 @@ export const JAVA_EXTENSIONS = new Set(['.java'])
 export const C_EXTENSIONS = new Set(['.c', '.h'])
 export const CPP_EXTENSIONS = new Set(['.cpp', '.cxx', '.cc', '.hpp', '.hxx', '.hh', '.c++', '.h++'])
 export const CSHARP_EXTENSIONS = new Set(['.cs'])
+export const GO_EXTENSIONS = new Set(['.go'])
+export const RUST_EXTENSIONS = new Set(['.rs'])
 
 export const PARSABLE_EXTENSIONS = new Set([
   ...JS_EXTENSIONS,
@@ -24,4 +26,6 @@ export const PARSABLE_EXTENSIONS = new Set([
   ...C_EXTENSIONS,
   ...CPP_EXTENSIONS,
   ...CSHARP_EXTENSIONS,
+  ...GO_EXTENSIONS,
+  ...RUST_EXTENSIONS,
 ])

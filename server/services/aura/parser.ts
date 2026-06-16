@@ -23,6 +23,8 @@ import {
   C_EXTENSIONS,
   CPP_EXTENSIONS,
   CSHARP_EXTENSIONS,
+  GO_EXTENSIONS,
+  RUST_EXTENSIONS,
   PARSABLE_EXTENSIONS,
 } from './extensions.ts'
 
@@ -91,6 +93,8 @@ export class AuraParser {
   private cLang: Language | null = null
   private cppLang: Language | null = null
   private csharpLang: Language | null = null
+  private goLang: Language | null = null
+  private rustLang: Language | null = null
   private parser: Parser | null = null
   private dataFlowAnalyzer = new AuraDataFlow()
 
@@ -172,6 +176,20 @@ export class AuraParser {
       console.warn('tree-sitter-c_sharp.wasm not found; C# support disabled')
     }
 
+    try {
+      const goWasm = path.join(grammarsDir, 'tree-sitter-go.wasm')
+      this.goLang = await Language.load(goWasm)
+    } catch {
+      console.warn('tree-sitter-go.wasm not found; Go support disabled')
+    }
+
+    try {
+      const rustWasm = path.join(grammarsDir, 'tree-sitter-rust.wasm')
+      this.rustLang = await Language.load(rustWasm)
+    } catch {
+      console.warn('tree-sitter-rust.wasm not found; Rust support disabled')
+    }
+
     // Note: tree-sitter-vue cannot be compiled to WASM due to its external scanner.
     // Vue SFC parsing uses regex-based block extraction + sub-parsing with JS/TS/CSS/SCSS grammars.
     // this.vueLang is not needed and remains null.
@@ -221,6 +239,12 @@ export class AuraParser {
     if (CSHARP_EXTENSIONS.has(ext)) {
       return this.csharpLang
     }
+    if (GO_EXTENSIONS.has(ext)) {
+      return this.goLang
+    }
+    if (RUST_EXTENSIONS.has(ext)) {
+      return this.rustLang
+    }
     // Vue doesn't use tree-sitter-vue (it has an incompatible external scanner).
     // parseVueFile uses regex-based block extraction + sub-parsing.
     if (VUE_EXTENSIONS.has(ext)) {
@@ -267,6 +291,12 @@ export class AuraParser {
     }
     if (CSHARP_EXTENSIONS.has(ext)) {
       return this.parseCSharpFile(filePath, source)
+    }
+    if (GO_EXTENSIONS.has(ext)) {
+      return this.parseGoFile(filePath, source)
+    }
+    if (RUST_EXTENSIONS.has(ext)) {
+      return this.parseRustFile(filePath, source)
     }
     if (VUE_EXTENSIONS.has(ext)) {
       return await this.parseVueFile(filePath, source)
@@ -4319,6 +4349,1177 @@ export class AuraParser {
       'Dispose', 'Finalize', 'MemberwiseClone', 'ReferenceEquals',
       'nameof', 'typeof', 'sizeof', 'checked', 'unchecked',
       'get', 'set', 'value',
+    ])
+    return builtins.has(name)
+  }
+
+  // ── Go parsing ──────────────────────────────────────────────────────────────
+
+  private parseGoFile(filePath: string, source: string): ParseResult {
+    const language = this.selectLanguage(filePath)
+    if (!language || !this.parser) {
+      return { filePath, symbols: [], imports: [], calls: [], heritage: [], contains: [], dataFlow: [] }
+    }
+
+    this.parser.setLanguage(language)
+    const tree = this.parser.parse(source)
+    if (!tree) {
+      return { filePath, symbols: [], imports: [], calls: [], heritage: [], contains: [], dataFlow: [] }
+    }
+
+    try {
+      const symbols: AuraNode[] = []
+      const imports: AuraEdge[] = []
+      const calls: AuraEdge[] = []
+      const heritage: AuraEdge[] = []
+      const contains: AuraEdge[] = []
+      const seenIds = new Set<string>()
+
+      this.extractGoDeclarations(tree, filePath, symbols, contains, seenIds)
+      this.extractGoImports(tree, filePath, imports)
+      this.extractGoCalls(tree, filePath, calls, symbols)
+      this.extractGoHeritage(tree, filePath, heritage)
+
+      return { filePath, symbols, imports, calls, heritage, contains, dataFlow: [] }
+    } finally {
+      tree.delete()
+    }
+  }
+
+  private extractGoDeclarations(
+    tree: Tree,
+    filePath: string,
+    symbols: AuraNode[],
+    contains: AuraEdge[],
+    seenIds: Set<string>,
+  ): void {
+    const walk = (node: SyntaxNode): void => {
+      // Package clause — tree-sitter-go uses package_identifier child, not a named field
+      if (node.type === 'package_clause') {
+        let nameNode: SyntaxNode | null = node.childForFieldName('name')
+        if (!nameNode) {
+          // Fallback: find package_identifier child directly
+          for (let i = 0; i < node.childCount; i++) {
+            const child = node.child(i)!
+            if (child.type === 'package_identifier') {
+              nameNode = child
+              break
+            }
+          }
+        }
+        if (nameNode) {
+          const name = nameNode.text
+          const symbolId = `${filePath}:pkg:${name}`
+          if (!seenIds.has(symbolId)) {
+            seenIds.add(symbolId)
+            symbols.push({
+              id: symbolId,
+              kind: AuraNodeKind.Namespace,
+              name,
+              filePath,
+              range: { startLine: node.startPosition.row + 1, endLine: node.endPosition.row + 1 },
+              exported: true,
+            })
+            contains.push({ source: filePath, target: symbolId, type: AuraEdgeType.CONTAINS, confidence: 1.0 })
+          }
+        }
+      }
+
+      // Function declarations
+      if (node.type === 'function_declaration') {
+        const nameNode = node.childForFieldName('name')
+        if (nameNode) {
+          const name = nameNode.text
+          const symbolId = `${filePath}:${name}`
+          if (!seenIds.has(symbolId)) {
+            seenIds.add(symbolId)
+            const isExported = name[0] === name[0].toUpperCase() && name[0] !== name[0].toLowerCase()
+            symbols.push({
+              id: symbolId,
+              kind: AuraNodeKind.Function,
+              name,
+              filePath,
+              range: { startLine: node.startPosition.row + 1, endLine: node.endPosition.row + 1 },
+              exported: isExported,
+            })
+            contains.push({ source: filePath, target: symbolId, type: AuraEdgeType.CONTAINS, confidence: 1.0 })
+          }
+        }
+      }
+
+      // Method declarations (with receiver)
+      if (node.type === 'method_declaration') {
+        const nameNode = node.childForFieldName('name')
+        if (nameNode) {
+          const name = nameNode.text
+          const receiverType = this.extractGoReceiverType(node)
+          const symbolId = receiverType ? `${filePath}:${receiverType}.${name}` : `${filePath}:${name}`
+          if (!seenIds.has(symbolId)) {
+            seenIds.add(symbolId)
+            const isExported = name[0] === name[0].toUpperCase() && name[0] !== name[0].toLowerCase()
+            symbols.push({
+              id: symbolId,
+              kind: AuraNodeKind.Method,
+              name: receiverType ? `${receiverType}.${name}` : name,
+              filePath,
+              range: { startLine: node.startPosition.row + 1, endLine: node.endPosition.row + 1 },
+              exported: isExported,
+              metadata: receiverType ? { receiver: receiverType } : undefined,
+            })
+            contains.push({ source: filePath, target: symbolId, type: AuraEdgeType.CONTAINS, confidence: 1.0 })
+          }
+        }
+      }
+
+      // Type declarations
+      if (node.type === 'type_declaration') {
+        // type_declaration contains type_spec or type_alias
+        for (let i = 0; i < node.childCount; i++) {
+          const child = node.child(i)!
+          if (child.type === 'type_spec') {
+            const nameNode = child.childForFieldName('name')
+            const typeNode = child.childForFieldName('type')
+            if (nameNode) {
+              const name = nameNode.text
+              const symbolId = `${filePath}:${name}`
+              if (!seenIds.has(symbolId)) {
+                seenIds.add(symbolId)
+                const isExported = name[0] === name[0].toUpperCase() && name[0] !== name[0].toLowerCase()
+                let kind = AuraNodeKind.TypeAlias
+                if (typeNode) {
+                  if (typeNode.type === 'struct_type') kind = AuraNodeKind.Struct
+                  else if (typeNode.type === 'interface_type') kind = AuraNodeKind.Interface
+                }
+                symbols.push({
+                  id: symbolId,
+                  kind,
+                  name,
+                  filePath,
+                  range: { startLine: node.startPosition.row + 1, endLine: node.endPosition.row + 1 },
+                  exported: isExported,
+                })
+                contains.push({ source: filePath, target: symbolId, type: AuraEdgeType.CONTAINS, confidence: 1.0 })
+              }
+            }
+          } else if (child.type === 'type_alias') {
+            const nameNode = child.childForFieldName('name')
+            if (nameNode) {
+              const name = nameNode.text
+              const symbolId = `${filePath}:${name}`
+              if (!seenIds.has(symbolId)) {
+                seenIds.add(symbolId)
+                const isExported = name[0] === name[0].toUpperCase() && name[0] !== name[0].toLowerCase()
+                symbols.push({
+                  id: symbolId,
+                  kind: AuraNodeKind.TypeAlias,
+                  name,
+                  filePath,
+                  range: { startLine: node.startPosition.row + 1, endLine: node.endPosition.row + 1 },
+                  exported: isExported,
+                })
+                contains.push({ source: filePath, target: symbolId, type: AuraEdgeType.CONTAINS, confidence: 1.0 })
+              }
+            }
+          }
+        }
+      }
+
+      // Var declarations
+      if (node.type === 'var_declaration') {
+        for (let i = 0; i < node.childCount; i++) {
+          const child = node.child(i)!
+          if (child.type === 'var_spec') {
+            const nameNode = child.childForFieldName('name')
+            if (nameNode) {
+              const name = nameNode.text
+              const symbolId = `${filePath}:${name}`
+              if (!seenIds.has(symbolId)) {
+                seenIds.add(symbolId)
+                const isExported = name[0] === name[0].toUpperCase() && name[0] !== name[0].toLowerCase()
+                symbols.push({
+                  id: symbolId,
+                  kind: AuraNodeKind.Variable,
+                  name,
+                  filePath,
+                  range: { startLine: node.startPosition.row + 1, endLine: node.endPosition.row + 1 },
+                  exported: isExported,
+                })
+                contains.push({ source: filePath, target: symbolId, type: AuraEdgeType.CONTAINS, confidence: 1.0 })
+              }
+            }
+          }
+        }
+      }
+
+      // Const declarations
+      if (node.type === 'const_declaration') {
+        for (let i = 0; i < node.childCount; i++) {
+          const child = node.child(i)!
+          if (child.type === 'const_spec') {
+            const nameNode = child.childForFieldName('name')
+            if (nameNode) {
+              const name = nameNode.text
+              const symbolId = `${filePath}:${name}`
+              if (!seenIds.has(symbolId)) {
+                seenIds.add(symbolId)
+                const isExported = name[0] === name[0].toUpperCase() && name[0] !== name[0].toLowerCase()
+                symbols.push({
+                  id: symbolId,
+                  kind: AuraNodeKind.Variable,
+                  name,
+                  filePath,
+                  range: { startLine: node.startPosition.row + 1, endLine: node.endPosition.row + 1 },
+                  exported: isExported,
+                  metadata: { kind: 'const' },
+                })
+                contains.push({ source: filePath, target: symbolId, type: AuraEdgeType.CONTAINS, confidence: 1.0 })
+              }
+            }
+          }
+        }
+      }
+
+      for (let i = 0; i < node.childCount; i++) {
+        walk(node.child(i)!)
+      }
+    }
+    walk(tree.rootNode)
+  }
+
+  private extractGoReceiverType(node: SyntaxNode): string | null {
+    // method_declaration has a receiver field: (parameter_list (parameter_declaration name: (identifier) type: (pointer_type (type_identifier))))
+    const receiver = node.childForFieldName('receiver')
+    if (!receiver) return null
+    // Walk the receiver parameter_list to find the type
+    for (let i = 0; i < receiver.childCount; i++) {
+      const child = receiver.child(i)!
+      if (child.type === 'parameter_declaration') {
+        const typeNode = child.childForFieldName('type')
+        if (typeNode) {
+          if (typeNode.type === 'pointer_type' || typeNode.type === 'qualified_type') {
+            // Dig into pointer_type to find type_identifier
+            for (let j = 0; j < typeNode.childCount; j++) {
+              const inner = typeNode.child(j)!
+              if (inner.type === 'type_identifier') return inner.text
+            }
+            // If no type_identifier found, return the text without the *
+            const text = typeNode.text
+            return text.replace(/^\*/, '')
+          }
+          if (typeNode.type === 'type_identifier') return typeNode.text
+          return typeNode.text
+        }
+      }
+    }
+    return null
+  }
+
+  private extractGoImports(
+    tree: Tree,
+    filePath: string,
+    imports: AuraEdge[],
+  ): void {
+    const walk = (node: SyntaxNode): void => {
+      if (node.type === 'import_declaration') {
+        // Can have import_spec_list (grouped) or a single import_spec
+        for (let i = 0; i < node.childCount; i++) {
+          const child = node.child(i)!
+          if (child.type === 'import_spec_list') {
+            for (let j = 0; j < child.childCount; j++) {
+              const spec = child.child(j)!
+              if (spec.type === 'import_spec') {
+                this.extractGoImportSpec(spec, filePath, imports)
+              }
+            }
+          } else if (child.type === 'import_spec') {
+            this.extractGoImportSpec(child, filePath, imports)
+          }
+        }
+      }
+
+      for (let i = 0; i < node.childCount; i++) {
+        walk(node.child(i)!)
+      }
+    }
+    walk(tree.rootNode)
+  }
+
+  private extractGoImportSpec(spec: SyntaxNode, filePath: string, imports: AuraEdge[]): void {
+    const pathNode = spec.childForFieldName('path')
+    if (pathNode) {
+      // path is interpreted_string_literal or raw_string_literal — strip quotes
+      let importPath = pathNode.text
+      if (importPath.startsWith('"') && importPath.endsWith('"')) {
+        importPath = importPath.slice(1, -1)
+      } else if (importPath.startsWith('`') && importPath.endsWith('`')) {
+        importPath = importPath.slice(1, -1)
+      }
+      // Also check for interpreted_string_literal_content
+      if (!importPath && pathNode.childCount > 0) {
+        const content = pathNode.child(0)!
+        if (content.type === 'interpreted_string_literal_content') {
+          importPath = content.text
+        }
+      }
+
+      if (importPath) {
+        // Determine confidence based on path type
+        let confidence = 0.9
+        let importKind = 'go-import'
+        if (!importPath.includes('/') && !importPath.includes('.')) {
+          // Standard library like "fmt", "os" — no local resolution
+          confidence = 0.3
+          importKind = 'go-stdlib'
+        } else if (importPath.includes('.')) {
+          // External package like "github.com/..." — likely external
+          confidence = 0.3
+          importKind = 'go-external'
+        } else if (importPath.startsWith('./') || importPath.startsWith('../')) {
+          // Relative import
+          confidence = 0.8
+          importKind = 'go-relative'
+        }
+
+        // Check for import alias: import alias "path"
+        const nameNode = spec.childForFieldName('name')
+        const alias = nameNode ? nameNode.text : undefined
+
+        imports.push({
+          source: filePath,
+          target: importPath,
+          type: AuraEdgeType.IMPORTS,
+          confidence,
+          metadata: { rawImportPath: importPath, importKind, ...(alias ? { alias } : {}) },
+        })
+      }
+    }
+  }
+
+  private extractGoCalls(
+    tree: Tree,
+    filePath: string,
+    calls: AuraEdge[],
+    symbols: AuraNode[],
+  ): void {
+    const seenCalls = new Set<string>()
+
+    const walk = (node: SyntaxNode): void => {
+      // Function/method calls
+      if (node.type === 'call_expression') {
+        const funcNode = node.childForFieldName('function')
+        if (funcNode) {
+          if (funcNode.type === 'selector_expression') {
+            // Method call: obj.Method()
+            const fieldNode = funcNode.childForFieldName('field')
+            const operandNode = funcNode.childForFieldName('operand')
+            const methodName = fieldNode?.text ?? ''
+            const objectName = operandNode?.text ?? ''
+            const callName = funcNode.text
+            if (methodName && !this.isGoBuiltin(methodName)) {
+              const enclosingSymbol = this.findEnclosingSymbolFromTree(node, symbols, filePath)
+              const source = enclosingSymbol ? enclosingSymbol.id : filePath
+              const dedupeKey = `${source}→${callName}`
+              if (!seenCalls.has(dedupeKey)) {
+                seenCalls.add(dedupeKey)
+                calls.push({
+                  source,
+                  target: callName,
+                  type: AuraEdgeType.CALLS,
+                  confidence: 0.5,
+                  metadata: { callName, callTargetKind: 'member', objectName, methodName },
+                })
+              }
+            }
+          } else if (funcNode.type === 'identifier') {
+            // Direct function call: funcName()
+            const callName = funcNode.text
+            if (callName && !this.isGoBuiltin(callName)) {
+              const enclosingSymbol = this.findEnclosingSymbolFromTree(node, symbols, filePath)
+              const source = enclosingSymbol ? enclosingSymbol.id : filePath
+              const dedupeKey = `${source}→${callName}`
+              if (!seenCalls.has(dedupeKey)) {
+                seenCalls.add(dedupeKey)
+                calls.push({
+                  source,
+                  target: callName,
+                  type: AuraEdgeType.CALLS,
+                  confidence: 0.7,
+                  metadata: { callName, callTargetKind: 'direct' },
+                })
+              }
+            }
+          }
+        }
+      }
+
+      for (let i = 0; i < node.childCount; i++) {
+        walk(node.child(i)!)
+      }
+    }
+    walk(tree.rootNode)
+  }
+
+  private extractGoHeritage(
+    tree: Tree,
+    filePath: string,
+    heritage: AuraEdge[],
+  ): void {
+    const walk = (node: SyntaxNode): void => {
+      // Struct embedding — walk struct_type for embedded fields
+      if (node.type === 'struct_type') {
+        // Find the containing type_declaration to get the struct name
+        let structName = ''
+        let parent = node.parent
+        while (parent) {
+          if (parent.type === 'type_spec') {
+            const nameNode = parent.childForFieldName('name')
+            if (nameNode) structName = nameNode.text
+            break
+          }
+          parent = parent.parent
+        }
+
+        const source = structName ? `${filePath}:${structName}` : filePath
+
+        // Walk field_declaration_list for embedded fields
+        for (let i = 0; i < node.childCount; i++) {
+          const child = node.child(i)!
+          if (child.type === 'field_declaration_list') {
+            for (let j = 0; j < child.childCount; j++) {
+              const field = child.child(j)!
+              if (field.type === 'field_declaration') {
+                // Embedded field: no field_identifier, just a type_identifier or pointer_type
+                const fieldNameNode = field.childForFieldName('name')
+                if (!fieldNameNode) {
+                  // This is an embedded field
+                  for (let k = 0; k < field.childCount; k++) {
+                    const fChild = field.child(k)!
+                    if (fChild.type === 'type_identifier') {
+                      heritage.push({
+                        source,
+                        target: fChild.text,
+                        type: AuraEdgeType.EXTENDS,
+                        confidence: 0.8,
+                        metadata: { rawTargetName: fChild.text, heritageKind: 'struct-embed' },
+                      })
+                    } else if (fChild.type === 'pointer_type') {
+                      // *BaseStruct embedding
+                      for (let l = 0; l < fChild.childCount; l++) {
+                        const ptrChild = fChild.child(l)!
+                        if (ptrChild.type === 'type_identifier') {
+                          heritage.push({
+                            source,
+                            target: ptrChild.text,
+                            type: AuraEdgeType.EXTENDS,
+                            confidence: 0.8,
+                            metadata: { rawTargetName: ptrChild.text, heritageKind: 'struct-embed-pointer' },
+                          })
+                        }
+                      }
+                    } else if (fChild.type === 'qualified_type') {
+                      heritage.push({
+                        source,
+                        target: fChild.text,
+                        type: AuraEdgeType.EXTENDS,
+                        confidence: 0.7,
+                        metadata: { rawTargetName: fChild.text, heritageKind: 'struct-embed-qualified' },
+                      })
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+
+      // Interface embedding
+      if (node.type === 'interface_type') {
+        let ifaceName = ''
+        let parent = node.parent
+        while (parent) {
+          if (parent.type === 'type_spec') {
+            const nameNode = parent.childForFieldName('name')
+            if (nameNode) ifaceName = nameNode.text
+            break
+          }
+          parent = parent.parent
+        }
+
+        const source = ifaceName ? `${filePath}:${ifaceName}` : filePath
+
+        // Walk for embedded interfaces (type_identifier or qualified_type children that are NOT method_elem)
+        for (let i = 0; i < node.childCount; i++) {
+          const child = node.child(i)!
+          for (let j = 0; j < child.childCount; j++) {
+            const inner = child.child(j)!
+            if (inner.type === 'type_identifier' && child.type !== 'method_elem') {
+              heritage.push({
+                source,
+                target: inner.text,
+                type: AuraEdgeType.EXTENDS,
+                confidence: 0.8,
+                metadata: { rawTargetName: inner.text, heritageKind: 'interface-embed' },
+              })
+            }
+          }
+        }
+      }
+
+      for (let i = 0; i < node.childCount; i++) {
+        walk(node.child(i)!)
+      }
+    }
+    walk(tree.rootNode)
+  }
+
+  private isGoBuiltin(name: string): boolean {
+    const builtins = new Set([
+      // Built-in functions
+      'append', 'cap', 'close', 'copy', 'delete', 'len', 'make', 'new',
+      'panic', 'print', 'println', 'recover', 'complex', 'real', 'imag',
+      // Built-in types
+      'bool', 'byte', 'complex64', 'complex128', 'error', 'float32', 'float64',
+      'int', 'int8', 'int16', 'int32', 'int64', 'rune', 'string',
+      'uint', 'uint8', 'uint16', 'uint32', 'uint64', 'uintptr',
+      // Common stdlib functions used as selectors
+      'Println', 'Printf', 'Sprintf', 'Fprintf', 'Sprintln', 'Fprintln',
+      'Fatal', 'Fatalf', 'Panic', 'Panicf',
+      'Handle', 'HandleFunc', 'ListenAndServe',
+      'Read', 'Write', 'Close', 'Flush', 'Open', 'Create',
+      'String', 'Error', 'Format', 'MarshalJSON', 'UnmarshalJSON',
+    ])
+    return builtins.has(name)
+  }
+
+  // ── Rust parsing ────────────────────────────────────────────────────────────
+
+  private parseRustFile(filePath: string, source: string): ParseResult {
+    const language = this.selectLanguage(filePath)
+    if (!language || !this.parser) {
+      return { filePath, symbols: [], imports: [], calls: [], heritage: [], contains: [], dataFlow: [] }
+    }
+
+    this.parser.setLanguage(language)
+    const tree = this.parser.parse(source)
+    if (!tree) {
+      return { filePath, symbols: [], imports: [], calls: [], heritage: [], contains: [], dataFlow: [] }
+    }
+
+    try {
+      const symbols: AuraNode[] = []
+      const imports: AuraEdge[] = []
+      const calls: AuraEdge[] = []
+      const heritage: AuraEdge[] = []
+      const contains: AuraEdge[] = []
+      const seenIds = new Set<string>()
+
+      this.extractRustDeclarations(tree, filePath, symbols, contains, seenIds)
+      this.extractRustImports(tree, filePath, imports)
+      this.extractRustCalls(tree, filePath, calls, symbols)
+      this.extractRustHeritage(tree, filePath, heritage)
+
+      return { filePath, symbols, imports, calls, heritage, contains, dataFlow: [] }
+    } finally {
+      tree.delete()
+    }
+  }
+
+  private extractRustDeclarations(
+    tree: Tree,
+    filePath: string,
+    symbols: AuraNode[],
+    contains: AuraEdge[],
+    seenIds: Set<string>,
+  ): void {
+    const walk = (node: SyntaxNode): void => {
+      // Function items
+      if (node.type === 'function_item') {
+        const nameNode = node.childForFieldName('name')
+        if (nameNode) {
+          const name = nameNode.text
+          const symbolId = `${filePath}:${name}`
+          if (!seenIds.has(symbolId)) {
+            seenIds.add(symbolId)
+            const isPub = this.hasRustPubModifier(node)
+            symbols.push({
+              id: symbolId,
+              kind: AuraNodeKind.Function,
+              name,
+              filePath,
+              range: { startLine: node.startPosition.row + 1, endLine: node.endPosition.row + 1 },
+              exported: isPub,
+              metadata: isPub ? { modifiers: ['pub'] } : undefined,
+            })
+            contains.push({ source: filePath, target: symbolId, type: AuraEdgeType.CONTAINS, confidence: 1.0 })
+          }
+        }
+      }
+
+      // Struct items
+      if (node.type === 'struct_item') {
+        const nameNode = node.childForFieldName('name')
+        if (nameNode) {
+          const name = nameNode.text
+          const symbolId = `${filePath}:${name}`
+          if (!seenIds.has(symbolId)) {
+            seenIds.add(symbolId)
+            const isPub = this.hasRustPubModifier(node)
+            symbols.push({
+              id: symbolId,
+              kind: AuraNodeKind.Struct,
+              name,
+              filePath,
+              range: { startLine: node.startPosition.row + 1, endLine: node.endPosition.row + 1 },
+              exported: isPub,
+              metadata: isPub ? { modifiers: ['pub'] } : undefined,
+            })
+            contains.push({ source: filePath, target: symbolId, type: AuraEdgeType.CONTAINS, confidence: 1.0 })
+          }
+        }
+      }
+
+      // Enum items
+      if (node.type === 'enum_item') {
+        const nameNode = node.childForFieldName('name')
+        if (nameNode) {
+          const name = nameNode.text
+          const symbolId = `${filePath}:${name}`
+          if (!seenIds.has(symbolId)) {
+            seenIds.add(symbolId)
+            const isPub = this.hasRustPubModifier(node)
+            symbols.push({
+              id: symbolId,
+              kind: AuraNodeKind.Enum,
+              name,
+              filePath,
+              range: { startLine: node.startPosition.row + 1, endLine: node.endPosition.row + 1 },
+              exported: isPub,
+              metadata: isPub ? { modifiers: ['pub'] } : undefined,
+            })
+            contains.push({ source: filePath, target: symbolId, type: AuraEdgeType.CONTAINS, confidence: 1.0 })
+          }
+        }
+      }
+
+      // Trait items
+      if (node.type === 'trait_item') {
+        const nameNode = node.childForFieldName('name')
+        if (nameNode) {
+          const name = nameNode.text
+          const symbolId = `${filePath}:${name}`
+          if (!seenIds.has(symbolId)) {
+            seenIds.add(symbolId)
+            const isPub = this.hasRustPubModifier(node)
+            symbols.push({
+              id: symbolId,
+              kind: AuraNodeKind.Interface,
+              name,
+              filePath,
+              range: { startLine: node.startPosition.row + 1, endLine: node.endPosition.row + 1 },
+              exported: isPub,
+              metadata: isPub ? { modifiers: ['pub'] } : undefined,
+            })
+            contains.push({ source: filePath, target: symbolId, type: AuraEdgeType.CONTAINS, confidence: 1.0 })
+          }
+        }
+      }
+
+      // Type items (aliases)
+      if (node.type === 'type_item') {
+        const nameNode = node.childForFieldName('name')
+        if (nameNode) {
+          const name = nameNode.text
+          const symbolId = `${filePath}:${name}`
+          if (!seenIds.has(symbolId)) {
+            seenIds.add(symbolId)
+            const isPub = this.hasRustPubModifier(node)
+            symbols.push({
+              id: symbolId,
+              kind: AuraNodeKind.TypeAlias,
+              name,
+              filePath,
+              range: { startLine: node.startPosition.row + 1, endLine: node.endPosition.row + 1 },
+              exported: isPub,
+              metadata: isPub ? { modifiers: ['pub'] } : undefined,
+            })
+            contains.push({ source: filePath, target: symbolId, type: AuraEdgeType.CONTAINS, confidence: 1.0 })
+          }
+        }
+      }
+
+      // Module items
+      if (node.type === 'mod_item') {
+        const nameNode = node.childForFieldName('name')
+        if (nameNode) {
+          const name = nameNode.text
+          const symbolId = `${filePath}:${name}`
+          if (!seenIds.has(symbolId)) {
+            seenIds.add(symbolId)
+            const isPub = this.hasRustPubModifier(node)
+            symbols.push({
+              id: symbolId,
+              kind: AuraNodeKind.Namespace,
+              name,
+              filePath,
+              range: { startLine: node.startPosition.row + 1, endLine: node.endPosition.row + 1 },
+              exported: isPub,
+              metadata: isPub ? { modifiers: ['pub'] } : undefined,
+            })
+            contains.push({ source: filePath, target: symbolId, type: AuraEdgeType.CONTAINS, confidence: 1.0 })
+          }
+        }
+      }
+
+      // Macro definitions
+      if (node.type === 'macro_definition') {
+        const nameNode = node.childForFieldName('name')
+        if (nameNode) {
+          const name = nameNode.text
+          const symbolId = `${filePath}:${name}`
+          if (!seenIds.has(symbolId)) {
+            seenIds.add(symbolId)
+            symbols.push({
+              id: symbolId,
+              kind: AuraNodeKind.Macro,
+              name,
+              filePath,
+              range: { startLine: node.startPosition.row + 1, endLine: node.endPosition.row + 1 },
+              exported: true,
+            })
+            contains.push({ source: filePath, target: symbolId, type: AuraEdgeType.CONTAINS, confidence: 1.0 })
+          }
+        }
+      }
+
+      // Const items
+      if (node.type === 'const_item') {
+        const nameNode = node.childForFieldName('name')
+        if (nameNode) {
+          const name = nameNode.text
+          const symbolId = `${filePath}:${name}`
+          if (!seenIds.has(symbolId)) {
+            seenIds.add(symbolId)
+            const isPub = this.hasRustPubModifier(node)
+            symbols.push({
+              id: symbolId,
+              kind: AuraNodeKind.Variable,
+              name,
+              filePath,
+              range: { startLine: node.startPosition.row + 1, endLine: node.endPosition.row + 1 },
+              exported: isPub,
+              metadata: { kind: 'const', ...(isPub ? { modifiers: ['pub'] } : {}) },
+            })
+            contains.push({ source: filePath, target: symbolId, type: AuraEdgeType.CONTAINS, confidence: 1.0 })
+          }
+        }
+      }
+
+      // Static items
+      if (node.type === 'static_item') {
+        const nameNode = node.childForFieldName('name')
+        if (nameNode) {
+          const name = nameNode.text
+          const symbolId = `${filePath}:${name}`
+          if (!seenIds.has(symbolId)) {
+            seenIds.add(symbolId)
+            const isPub = this.hasRustPubModifier(node)
+            symbols.push({
+              id: symbolId,
+              kind: AuraNodeKind.Variable,
+              name,
+              filePath,
+              range: { startLine: node.startPosition.row + 1, endLine: node.endPosition.row + 1 },
+              exported: isPub,
+              metadata: { modifiers: ['static', ...(isPub ? ['pub'] : [])] },
+            })
+            contains.push({ source: filePath, target: symbolId, type: AuraEdgeType.CONTAINS, confidence: 1.0 })
+          }
+        }
+      }
+
+      // Impl items — extract methods as Method symbols
+      if (node.type === 'impl_item') {
+        const typeNode = node.childForFieldName('type')
+        const selfType = typeNode?.text ?? ''
+        const traitNode = node.childForFieldName('trait')
+        const traitName = traitNode?.text ?? ''
+
+        // Walk body for function_item children
+        const bodyNode = node.childForFieldName('body')
+        if (bodyNode) {
+          for (let i = 0; i < bodyNode.childCount; i++) {
+            const child = bodyNode.child(i)!
+            if (child.type === 'function_item') {
+              const nameNode = child.childForFieldName('name')
+              if (nameNode) {
+                const name = nameNode.text
+                const fullName = selfType ? `${selfType}::${name}` : name
+                const symbolId = `${filePath}:${fullName}`
+                if (!seenIds.has(symbolId)) {
+                  seenIds.add(symbolId)
+                  const isPub = this.hasRustPubModifier(child)
+                  symbols.push({
+                    id: symbolId,
+                    kind: AuraNodeKind.Method,
+                    name: fullName,
+                    filePath,
+                    range: { startLine: child.startPosition.row + 1, endLine: child.endPosition.row + 1 },
+                    exported: isPub || !!traitName, // Trait impl methods are effectively public
+                    metadata: {
+                      ...(selfType ? { selfType } : {}),
+                      ...(traitName ? { trait: traitName } : {}),
+                      ...(isPub ? { modifiers: ['pub'] } : {}),
+                    },
+                  })
+                  contains.push({ source: filePath, target: symbolId, type: AuraEdgeType.CONTAINS, confidence: 1.0 })
+                }
+              }
+            }
+          }
+        }
+      }
+
+      for (let i = 0; i < node.childCount; i++) {
+        walk(node.child(i)!)
+      }
+    }
+    walk(tree.rootNode)
+  }
+
+  private hasRustPubModifier(node: SyntaxNode): boolean {
+    // Check preceding siblings for 'pub' keyword
+    const parent = node.parent
+    if (!parent) {
+      // Top-level — check the node's own children for 'pub'
+      for (let i = 0; i < node.childCount; i++) {
+        const child = node.child(i)!
+        if (child.type === 'visibility_modifier') return true
+        if (child.type === 'pub') return true
+        // Stop at first named child (the item name)
+        if (child.isNamed) break
+      }
+      return false
+    }
+    // Check the node's own children for visibility_modifier
+    for (let i = 0; i < node.childCount; i++) {
+      const child = node.child(i)!
+      if (child.type === 'visibility_modifier') return true
+      if (child.type === 'pub') return true
+      if (child.isNamed) break
+    }
+    return false
+  }
+
+  private extractRustImports(
+    tree: Tree,
+    filePath: string,
+    imports: AuraEdge[],
+  ): void {
+    const walk = (node: SyntaxNode): void => {
+      if (node.type === 'use_declaration') {
+        const argNode = node.childForFieldName('argument')
+        if (argNode) {
+          this.extractRustUsePath(argNode, filePath, imports)
+        }
+      }
+
+      for (let i = 0; i < node.childCount; i++) {
+        walk(node.child(i)!)
+      }
+    }
+    walk(tree.rootNode)
+  }
+
+  private extractRustUsePath(node: SyntaxNode, filePath: string, imports: AuraEdge[]): void {
+    if (node.type === 'scoped_identifier') {
+      // e.g. std::collections::HashMap
+      const path = node.text
+      let confidence = 0.5
+      let importKind = 'rust-use'
+      if (path.startsWith('std::') || path.startsWith('core::') || path.startsWith('alloc::')) {
+        confidence = 0.3
+        importKind = 'rust-stdlib'
+      } else if (path.startsWith('crate::') || path.startsWith('self::') || path.startsWith('super::')) {
+        confidence = 0.7
+        importKind = 'rust-local'
+      }
+      imports.push({
+        source: filePath,
+        target: path,
+        type: AuraEdgeType.IMPORTS,
+        confidence,
+        metadata: { rawImportPath: path, importKind },
+      })
+    } else if (node.type === 'scoped_use_list') {
+      // e.g. std::io::{Read, Write} — extract path + items
+      const pathNode = node.childForFieldName('path')
+      const listNode = node.childForFieldName('list')
+      const basePath = pathNode?.text ?? ''
+      if (listNode && listNode.type === 'use_list') {
+        for (let i = 0; i < listNode.childCount; i++) {
+          const child = listNode.child(i)!
+          if (child.type === 'identifier') {
+            const fullPath = basePath ? `${basePath}::${child.text}` : child.text
+            let confidence = 0.5
+            let importKind = 'rust-use'
+            if (fullPath.startsWith('std::') || fullPath.startsWith('core::')) {
+              confidence = 0.3
+              importKind = 'rust-stdlib'
+            } else if (fullPath.startsWith('crate::') || fullPath.startsWith('self::') || fullPath.startsWith('super::')) {
+              confidence = 0.7
+              importKind = 'rust-local'
+            }
+            imports.push({
+              source: filePath,
+              target: fullPath,
+              type: AuraEdgeType.IMPORTS,
+              confidence,
+              metadata: { rawImportPath: fullPath, importKind },
+            })
+          }
+        }
+      }
+    } else if (node.type === 'use_list') {
+      // Grouped items: {A, B, C}
+      for (let i = 0; i < node.childCount; i++) {
+        const child = node.child(i)!
+        if (child.type === 'identifier') {
+          imports.push({
+            source: filePath,
+            target: child.text,
+            type: AuraEdgeType.IMPORTS,
+            confidence: 0.5,
+            metadata: { rawImportPath: child.text, importKind: 'rust-use' },
+          })
+        } else if (child.type === 'scoped_identifier') {
+          this.extractRustUsePath(child, filePath, imports)
+        }
+      }
+    } else if (node.type === 'use_wildcard') {
+      // use std::io::prelude::*
+      const pathNode = node.childForFieldName('path')
+      const path = pathNode?.text ?? node.text
+      imports.push({
+        source: filePath,
+        target: path,
+        type: AuraEdgeType.IMPORTS,
+        confidence: 0.3,
+        metadata: { rawImportPath: path, importKind: 'rust-glob' },
+      })
+    } else if (node.type === 'use_as_clause') {
+      // use std::io::Result as IoResult
+      const pathNode = node.childForFieldName('path')
+      const aliasNode = node.childForFieldName('alias')
+      const path = pathNode?.text ?? ''
+      const alias = aliasNode?.text ?? ''
+      let confidence = 0.5
+      let importKind = 'rust-use-alias'
+      if (path.startsWith('std::') || path.startsWith('core::')) {
+        confidence = 0.3
+        importKind = 'rust-stdlib'
+      } else if (path.startsWith('crate::') || path.startsWith('self::') || path.startsWith('super::')) {
+        confidence = 0.7
+        importKind = 'rust-local'
+      }
+      imports.push({
+        source: filePath,
+        target: path,
+        type: AuraEdgeType.IMPORTS,
+        confidence,
+        metadata: { rawImportPath: path, importKind, ...(alias ? { alias } : {}) },
+      })
+    } else if (node.type === 'identifier') {
+      // Simple identifier import
+      imports.push({
+        source: filePath,
+        target: node.text,
+        type: AuraEdgeType.IMPORTS,
+        confidence: 0.5,
+        metadata: { rawImportPath: node.text, importKind: 'rust-use' },
+      })
+    }
+  }
+
+  private extractRustCalls(
+    tree: Tree,
+    filePath: string,
+    calls: AuraEdge[],
+    symbols: AuraNode[],
+  ): void {
+    const seenCalls = new Set<string>()
+
+    const walk = (node: SyntaxNode): void => {
+      // Direct function calls
+      if (node.type === 'call_expression') {
+        const funcNode = node.childForFieldName('function')
+        if (funcNode) {
+          if (funcNode.type === 'identifier') {
+            const callName = funcNode.text
+            if (callName && !this.isRustBuiltin(callName)) {
+              const enclosingSymbol = this.findEnclosingSymbolFromTree(node, symbols, filePath)
+              const source = enclosingSymbol ? enclosingSymbol.id : filePath
+              const dedupeKey = `${source}→${callName}`
+              if (!seenCalls.has(dedupeKey)) {
+                seenCalls.add(dedupeKey)
+                calls.push({
+                  source,
+                  target: callName,
+                  type: AuraEdgeType.CALLS,
+                  confidence: 0.7,
+                  metadata: { callName, callTargetKind: 'direct' },
+                })
+              }
+            }
+          } else if (funcNode.type === 'scoped_identifier') {
+            // Qualified call: Server::new(), HashMap::new()
+            const callName = funcNode.text
+            if (callName && !this.isRustBuiltin(callName)) {
+              const enclosingSymbol = this.findEnclosingSymbolFromTree(node, symbols, filePath)
+              const source = enclosingSymbol ? enclosingSymbol.id : filePath
+              const dedupeKey = `${source}→${callName}`
+              if (!seenCalls.has(dedupeKey)) {
+                seenCalls.add(dedupeKey)
+                calls.push({
+                  source,
+                  target: callName,
+                  type: AuraEdgeType.CALLS,
+                  confidence: 0.6,
+                  metadata: { callName, callTargetKind: 'scoped' },
+                })
+              }
+            }
+          } else if (funcNode.type === 'field_expression') {
+            // Method call chain: self.handle().unwrap() — the outer call is on the field_expression
+            // The inner method call is handled via method_call_expression
+            // We extract the method name from the field_expression
+            const fieldNode = funcNode.childForFieldName('field')
+            const methodName = fieldNode?.text ?? ''
+            if (methodName && !this.isRustBuiltin(methodName)) {
+              const enclosingSymbol = this.findEnclosingSymbolFromTree(node, symbols, filePath)
+              const source = enclosingSymbol ? enclosingSymbol.id : filePath
+              const callName = funcNode.text
+              const dedupeKey = `${source}→${callName}`
+              if (!seenCalls.has(dedupeKey)) {
+                seenCalls.add(dedupeKey)
+                calls.push({
+                  source,
+                  target: callName,
+                  type: AuraEdgeType.CALLS,
+                  confidence: 0.5,
+                  metadata: { callName, callTargetKind: 'member', methodName },
+                })
+              }
+            }
+          }
+        }
+      }
+
+      // Method calls: object.method()
+      if (node.type === 'method_call_expression') {
+        const methodNode = node.childForFieldName('method')
+        const objectNode = node.childForFieldName('object')
+        const methodName = methodNode?.text ?? ''
+        const objectName = objectNode?.text ?? ''
+        if (methodName && !this.isRustBuiltin(methodName)) {
+          const enclosingSymbol = this.findEnclosingSymbolFromTree(node, symbols, filePath)
+          const source = enclosingSymbol ? enclosingSymbol.id : filePath
+          const callName = objectName ? `${objectName}.${methodName}` : methodName
+          const dedupeKey = `${source}→${callName}`
+          if (!seenCalls.has(dedupeKey)) {
+            seenCalls.add(dedupeKey)
+            calls.push({
+              source,
+              target: callName,
+              type: AuraEdgeType.CALLS,
+              confidence: 0.5,
+              metadata: { callName, callTargetKind: 'member', methodName, objectName },
+            })
+          }
+        }
+      }
+
+      for (let i = 0; i < node.childCount; i++) {
+        walk(node.child(i)!)
+      }
+    }
+    walk(tree.rootNode)
+  }
+
+  private extractRustHeritage(
+    tree: Tree,
+    filePath: string,
+    heritage: AuraEdge[],
+  ): void {
+    const walk = (node: SyntaxNode): void => {
+      // impl Trait for Type → IMPLEMENTS edge
+      if (node.type === 'impl_item') {
+        const typeNode = node.childForFieldName('type')
+        const traitNode = node.childForFieldName('trait')
+        if (typeNode && traitNode) {
+          const selfType = typeNode.text
+          const traitName = traitNode.text
+          heritage.push({
+            source: `${filePath}:${selfType}`,
+            target: traitName,
+            type: AuraEdgeType.IMPLEMENTS,
+            confidence: 0.9,
+            metadata: { rawTargetName: traitName, heritageKind: 'impl-trait' },
+          })
+        }
+      }
+
+      // trait Sub: Super → EXTENDS edge
+      if (node.type === 'trait_item') {
+        const nameNode = node.childForFieldName('name')
+        const name = nameNode?.text ?? ''
+        if (name) {
+          // Check for trait_bounds
+          const boundsNode = node.childForFieldName('bounds')
+          if (boundsNode && boundsNode.type === 'trait_bounds') {
+            for (let i = 0; i < boundsNode.childCount; i++) {
+              const child = boundsNode.child(i)!
+              if (child.type === 'type_identifier') {
+                heritage.push({
+                  source: `${filePath}:${name}`,
+                  target: child.text,
+                  type: AuraEdgeType.EXTENDS,
+                  confidence: 0.9,
+                  metadata: { rawTargetName: child.text, heritageKind: 'trait-supertrait' },
+                })
+              }
+            }
+          }
+        }
+      }
+
+      for (let i = 0; i < node.childCount; i++) {
+        walk(node.child(i)!)
+      }
+    }
+    walk(tree.rootNode)
+  }
+
+  private isRustBuiltin(name: string): boolean {
+    const builtins = new Set([
+      // Primitives
+      'i8', 'i16', 'i32', 'i64', 'i128', 'isize',
+      'u8', 'u16', 'u32', 'u64', 'u128', 'usize',
+      'f32', 'f64', 'bool', 'char', 'str',
+      // Common std/prelude
+      'println', 'eprintln', 'print', 'eprint', 'format', 'panic',
+      'assert', 'assert_eq', 'assert_ne', 'debug_assert', 'debug_assert_eq',
+      'todo', 'unimplemented', 'unreachable', 'compile_error',
+      'clone', 'copy', 'drop', 'default',
+      // Common std methods
+      'into', 'from', 'try_from', 'try_into', 'as_ref', 'as_mut',
+      'to_string', 'to_owned',
+      'len', 'is_empty', 'push', 'pop', 'insert', 'remove', 'contains',
+      'iter', 'into_iter', 'next', 'map', 'filter', 'collect',
+      'unwrap', 'expect', 'ok', 'err', 'is_ok', 'is_err', 'unwrap_or',
+      'Some', 'None', 'Ok', 'Err', 'true', 'false',
+      // Prelude macros
+      'vec', 'dbg', 'write', 'writeln',
     ])
     return builtins.has(name)
   }
