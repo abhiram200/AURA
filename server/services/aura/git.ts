@@ -1,6 +1,20 @@
 import { execFile } from 'child_process'
 import path from 'path'
+import { access, unlink } from 'fs/promises'
 import type { GitDiffOptions, FileDiff, HunkRange } from './types.ts'
+
+/** Remove stale .git/index.lock if present (left behind by crashed/interrupted git processes). */
+async function removeStaleGitLock(projectPath: string): Promise<void> {
+  const lockPath = path.join(projectPath, '.git', 'index.lock')
+  try {
+    await access(lockPath)
+    // Lock file exists — remove it. It's stale since we're about to run the
+    // only git operation, so no other git process should be holding it.
+    await unlink(lockPath)
+  } catch {
+    // File doesn't exist — nothing to do
+  }
+}
 
 function execGit(args: string[], cwd: string): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -220,6 +234,7 @@ export async function getGitLog(projectPath: string, maxCount = 100): Promise<{ 
 
 export async function gitCheckout(projectPath: string, branch: string): Promise<{ success: boolean; error?: string }> {
   try {
+    await removeStaleGitLock(projectPath)
     await execGit(['checkout', branch], projectPath)
     return { success: true }
   } catch (err: any) {
@@ -229,6 +244,7 @@ export async function gitCheckout(projectPath: string, branch: string): Promise<
 
 export async function gitRevert(projectPath: string, commitHash: string, strategy: 'revert' | 'reset'): Promise<{ success: boolean; error?: string }> {
   try {
+    await removeStaleGitLock(projectPath)
     if (strategy === 'revert') {
       await execGit(['revert', '--no-edit', commitHash], projectPath)
     } else {
