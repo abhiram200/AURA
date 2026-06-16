@@ -1,4 +1,6 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
+import { EditorView } from '@codemirror/view'
+import { openSearchPanel } from '@codemirror/search'
 import { useWorkspace } from '../../hooks/useWorkspace'
 import { useSettings } from '../../hooks/useSettings'
 import { useTheme } from '../../hooks/useTheme'
@@ -96,6 +98,17 @@ export function WorkspacePage({ projectId, projectName, workspacePath, pendingFi
     } else if (ctrl && e.key === 'p') {
       e.preventDefault()
       setShowQuickOpen(true)
+    } else if (ctrl && e.key === 'f') {
+      e.preventDefault()
+      // Focus the editor and open CodeMirror's search panel
+      const editorEl = document.querySelector('.code-editor .cm-editor')
+      if (editorEl) {
+        const view = EditorView.find(editorEl as HTMLElement)
+        if (view) {
+          view.focus()
+          openSearchPanel(view)
+        }
+      }
     }
   }, [ws])
 
