@@ -21,6 +21,8 @@ import { yaml } from '@codemirror/lang-yaml'
 import { php } from '@codemirror/lang-php'
 import { less } from '@codemirror/lang-less'
 import { sass } from '@codemirror/lang-sass'
+import { vue } from '@codemirror/lang-vue'
+import { csharp } from '@replit/codemirror-lang-csharp'
 import { StreamLanguage } from '@codemirror/language'
 import { shell } from '@codemirror/legacy-modes/mode/shell'
 import * as prettier from 'prettier'
@@ -110,16 +112,18 @@ function getLanguageExtension(path: string) {
   if (path.endsWith('.ts')) return javascript({ typescript: true })
   if (path.endsWith('.js') || path.endsWith('.mjs') || path.endsWith('.cjs')) return javascript()
   if (path.endsWith('.css')) return css()
-  if (path.endsWith('.scss')) return sass()
+  if (path.endsWith('.scss') || path.endsWith('.sass')) return sass()
   if (path.endsWith('.less')) return less()
   if (path.endsWith('.html') || path.endsWith('.htm')) return html()
   if (path.endsWith('.json')) return json()
   if (path.endsWith('.md') || path.endsWith('.markdown')) return markdown()
   if (path.endsWith('.py') || path.endsWith('.pyw')) return python()
-  if (path.endsWith('.c') || path.endsWith('.h') || path.endsWith('.cpp') || path.endsWith('.cc') || path.endsWith('.cxx') || path.endsWith('.hpp') || path.endsWith('.hh')) return cpp()
+  if (path.endsWith('.c') || path.endsWith('.h') || path.endsWith('.cpp') || path.endsWith('.cc') || path.endsWith('.cxx') || path.endsWith('.hpp') || path.endsWith('.hxx') || path.endsWith('.hh') || path.endsWith('.c++') || path.endsWith('.h++')) return cpp()
+  if (path.endsWith('.cs')) return csharp()
   if (path.endsWith('.java')) return java()
   if (path.endsWith('.rs')) return rust()
   if (path.endsWith('.go')) return go()
+  if (path.endsWith('.vue')) return vue()
   if (path.endsWith('.sql')) return sql()
   if (path.endsWith('.xml') || path.endsWith('.svg') || path.endsWith('.xsl') || path.endsWith('.xslt') || path.endsWith('.xsd')) return xml()
   if (path.endsWith('.yml') || path.endsWith('.yaml')) return yaml()
