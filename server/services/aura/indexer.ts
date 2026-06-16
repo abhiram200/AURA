@@ -472,7 +472,7 @@ export class AuraIndexer {
           const wildcard = match[1] || ''
           const resolved = replacement.replace(/\*/g, wildcard)
           // Try common extensions
-          const extensions = ['', '.ts', '.tsx', '.js', '.jsx', '.vue', '.php', '.java', '/index.ts', '/index.tsx', '/index.js', '/index.jsx', '/index.vue']
+          const extensions = ['', '.ts', '.tsx', '.js', '.jsx', '.vue', '.php', '.phtml', '.java', '/index.ts', '/index.tsx', '/index.js', '/index.jsx', '/index.vue']
           for (const ext of extensions) {
             const candidate = resolved + ext
             if (fileNodeMap.has(candidate)) return candidate
@@ -507,7 +507,7 @@ export class AuraIndexer {
       // is NOT a Python import. Only treat as Python if the source file is .py, or if the
       // import path has no slashes and contains dots (Python absolute import like "os.path").
       const sourceExt = path.extname(edge.source)
-      const isPythonImport = sourceExt === '.py' || (!rawImportPath.startsWith('.') && !rawImportPath.includes('/') && rawImportPath.includes('.'))
+      const isPythonImport = PY_EXTENSIONS.has(sourceExt) || (!rawImportPath.startsWith('.') && !rawImportPath.includes('/') && rawImportPath.includes('.'))
 
       // ── Python import resolution ──
       if (isPythonImport) {
@@ -531,11 +531,11 @@ export class AuraIndexer {
         }
 
         // Try Python file resolution
-        const pyExtensions = ['.py', '/__init__.py']
+        const pyExtensions = ['.py', '.pyw', '/__init__.py', '/__init__.pyw']
         let matched = false
 
         // Skip self-imports (a file importing from its own module)
-        const sourceBase = edge.source.replace(/\.py$/, '')
+        const sourceBase = edge.source.replace(/\.(py|pyw)$/, '')
         if (modulePath === sourceBase || modulePath === path.basename(sourceBase)) {
           // Remove the edge entirely — self-imports are redundant
           edge.confidence = 0
@@ -663,7 +663,7 @@ export class AuraIndexer {
           }
           const sourceDir = path.dirname(edge.source)
           const resolvedPath = path.normalize(path.join(sourceDir, rawImportPath)).replace(/\\/g, '/')
-          const phpExtensions = ['.php', '/index.php']
+          const phpExtensions = ['.php', '.phtml', '/index.php', '/index.phtml']
           let matched = false
           for (const ext of phpExtensions) {
             const candidate = resolvedPath + ext
@@ -686,7 +686,7 @@ export class AuraIndexer {
           const namespacePath = rawImportPath.replace(/\\/g, '/')
           // Try mapping namespace to PSR-4 style paths
           // Common patterns: App/Models/User → app/Models/User.php, app/Models/User/index.php
-          const phpExtensions = ['.php', '/index.php']
+          const phpExtensions = ['.php', '.phtml', '/index.php', '/index.phtml']
           let matched = false
           // Try lowercase namespace mapping: App → app
           const lowerPath = namespacePath.charAt(0).toLowerCase() + namespacePath.slice(1)

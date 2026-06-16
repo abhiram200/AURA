@@ -1837,13 +1837,16 @@ export class AuraParser {
       }
 
       // Method calls: $obj->method(args) or ClassName::method(args)
-      if (node.type === 'method_call_expression' || node.type === 'scoped_call_expression') {
+      // tree-sitter-php uses 'member_call_expression' for -> calls and 'scoped_call_expression' for :: calls
+      if (node.type === 'method_call_expression' || node.type === 'member_call_expression' || node.type === 'scoped_call_expression') {
         let callName = ''
         let objName = ''
 
-        if (node.type === 'method_call_expression') {
+        if (node.type === 'method_call_expression' || node.type === 'member_call_expression') {
           const methodNode = node.childForFieldName('method')
+            ?? node.childForFieldName('name')  // 'member_call_expression' uses 'name' field
           const objectNode = node.childForFieldName('object')
+            ?? node.childForFieldName('scope')  // fallback
           callName = methodNode?.text ?? ''
           objName = objectNode?.text ?? ''
         } else {
