@@ -11,10 +11,8 @@ import type {
   RouteMapResult,
   ResponseShapeField,
 } from './types.ts'
+import { JS_EXTENSIONS, TS_EXTENSIONS, PY_EXTENSIONS } from './extensions.ts'
 
-const JS_EXTENSIONS = new Set(['.js', '.jsx', '.mjs', '.cjs'])
-const TS_EXTENSIONS = new Set(['.ts', '.tsx'])
-const PY_EXTENSIONS = new Set(['.py'])
 const HTTP_METHODS = new Set(['get', 'post', 'put', 'delete', 'patch', 'all', 'use', 'head', 'options'])
 const ROUTER_IDENTIFIERS = new Set(['app', 'router', 'server', 'api', 'route', 'rtr'])
 const PY_ROUTER_IDENTIFIERS = new Set(['app', 'router', 'bp', 'blueprint', 'api', 'web'])

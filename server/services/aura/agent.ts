@@ -763,7 +763,7 @@ Use the \`git\` tool to undo changes. Pick the right approach:
 
 ## Limitations
 
-- The dependency graph only indexes JavaScript (.js, .jsx, .mjs, .cjs), TypeScript (.ts, .tsx), and Python (.py) files. For any other language, use \`read_file\`, \`search_pattern\`, and \`search_web\` instead of graph tools.
+- The dependency graph indexes JavaScript (.js, .jsx, .mjs, .cjs), TypeScript (.ts, .tsx), Python (.py), CSS (.css), SCSS/Sass (.scss, .sass), HTML (.html, .htm), and Vue SFC (.vue) files. For any other language (Less, JSON, Markdown, C/C++, Java, Rust, Go, SQL, XML, YAML, PHP, Shell, etc.), use \`read_file\`, \`search_pattern\`, and \`search_web\` instead of graph tools.
 - If the graph doesn't index the language you're analyzing, say so clearly: "The dependency graph doesn't index [language] files, so I'll use file search and reading instead."
 
 ## Folder Context Files
@@ -2880,7 +2880,7 @@ ${agentPrompt}
 
 ## Limitations
 
-- The dependency graph only indexes JavaScript (.js, .jsx, .mjs, .cjs), TypeScript (.ts, .tsx), and Python (.py) files. For any other language, use \`read_file\`, \`search_pattern\`, and \`search_web\` instead of graph tools.
+- The dependency graph indexes JavaScript (.js, .jsx, .mjs, .cjs), TypeScript (.ts, .tsx), Python (.py), CSS (.css), SCSS/Sass (.scss, .sass), HTML (.html, .htm), and Vue SFC (.vue) files. For any other language (Less, JSON, Markdown, C/C++, Java, Rust, Go, SQL, XML, YAML, PHP, Shell, etc.), use \`read_file\`, \`search_pattern\`, and \`search_web\` instead of graph tools.
 - If the graph doesn't index the language you're analyzing, say so clearly: "The dependency graph doesn't index [language] files, so I'll use file search and reading instead."
 
 ## Folder Context Files

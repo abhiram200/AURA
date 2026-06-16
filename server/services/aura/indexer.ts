@@ -21,6 +21,7 @@ import type {
   FileHashEntry,
 } from './types.ts'
 import { computeProgress } from './types.ts'
+import { CSS_EXTENSIONS, SCSS_EXTENSIONS, HTML_EXTENSIONS, VUE_EXTENSIONS } from './extensions.ts'
 import { getGitHead } from './git.ts'
 import { BM25SearchEngine } from './search/bm25.ts'
 import { EmbeddingService } from './search/embedding.ts'
@@ -471,7 +472,7 @@ export class AuraIndexer {
           const wildcard = match[1] || ''
           const resolved = replacement.replace(/\*/g, wildcard)
           // Try common extensions
-          const extensions = ['', '.ts', '.tsx', '.js', '.jsx', '/index.ts', '/index.tsx', '/index.js', '/index.jsx']
+          const extensions = ['', '.ts', '.tsx', '.js', '.jsx', '.vue', '/index.ts', '/index.tsx', '/index.js', '/index.jsx', '/index.vue']
           for (const ext of extensions) {
             const candidate = resolved + ext
             if (fileNodeMap.has(candidate)) return candidate
@@ -508,8 +509,8 @@ export class AuraIndexer {
       const sourceExt = path.extname(edge.source)
       const isPythonImport = sourceExt === '.py' || (!rawImportPath.startsWith('.') && !rawImportPath.includes('/') && rawImportPath.includes('.'))
 
+      // ── Python import resolution ──
       if (isPythonImport) {
-        // Python import resolution
         // Convert dotted module path to file path: "utils.helper" → "utils/helper"
         // Handle relative imports: ".module" → relative to current directory
         let modulePath: string
@@ -557,30 +558,77 @@ export class AuraIndexer {
         } else if (!matched) {
           edge.confidence = 0.5
         }
-      } else {
-        // JS/TS import resolution
+      }
+
+      // ── CSS/SCSS import resolution ──
+      const isStyleImport = CSS_EXTENSIONS.has(sourceExt) || SCSS_EXTENSIONS.has(sourceExt) ||
+        (VUE_EXTENSIONS.has(sourceExt) && (edge.metadata?.importKind === 'css-import' || edge.metadata?.importKind === 'use' || edge.metadata?.importKind === 'forward'))
+
+      if (isStyleImport && !isPythonImport) {
         if (!rawImportPath.startsWith('.')) {
-          // Non-relative import — try tsconfig path aliases (e.g. "@/types" -> "./src/types")
-          const aliasResolved = this.resolveAlias(rawImportPath, fileNodeMap)
-          if (aliasResolved) {
-            edge.target = aliasResolved
-            edge.confidence = 0.9
-          } else {
-            // Unresolvable bare specifier (e.g. 'react', 'express') — keep with low confidence
-            edge.confidence = 0.3
-          }
+          // Non-relative: could be a package or partial — low confidence
+          edge.confidence = 0.3
           continue
         }
 
-        // Resolve relative import path
+        // Resolve relative style import
         const sourceDir = path.dirname(edge.source)
         const resolvedPath = path.normalize(path.join(sourceDir, rawImportPath)).replace(/\\/g, '/')
 
-        // Try extensions
-        const extensions = ['.ts', '.tsx', '.js', '.jsx', '/index.ts', '/index.tsx', '/index.js', '/index.jsx']
-        let matched = false
+        // SCSS partial resolution: try _ prefix (e.g. @use "variables" → _variables.scss)
+        const styleExtensions = ['.scss', '.sass', '.css', '/index.scss', '/index.css']
+        const partialPrefix = path.basename(resolvedPath)
+        const partialDir = path.dirname(resolvedPath)
+        const partialPath = path.normalize(path.join(partialDir, '_' + partialPrefix)).replace(/\\/g, '/')
 
-        for (const ext of extensions) {
+        let matched = false
+        // Try partial first (SCSS convention: @use "vars" resolves to _vars.scss)
+        for (const ext of styleExtensions) {
+          const candidate = partialPath + ext
+          if (fileNodeMap.has(candidate)) {
+            edge.target = candidate
+            edge.confidence = 0.9
+            matched = true
+            break
+          }
+        }
+        if (!matched) {
+          for (const ext of styleExtensions) {
+            const candidate = resolvedPath + ext
+            if (fileNodeMap.has(candidate)) {
+              edge.target = candidate
+              edge.confidence = 0.9
+              matched = true
+              break
+            }
+          }
+        }
+        if (!matched && fileNodeMap.has(resolvedPath)) {
+          edge.target = resolvedPath
+          edge.confidence = 0.9
+        } else if (!matched) {
+          edge.confidence = 0.5
+        }
+        continue
+      }
+
+      // ── HTML import resolution ──
+      const isHtmlImport = HTML_EXTENSIONS.has(sourceExt) ||
+        (VUE_EXTENSIONS.has(sourceExt) && (edge.metadata?.importKind === 'html-script' || edge.metadata?.importKind === 'html-link'))
+
+      if (isHtmlImport && !isPythonImport) {
+        if (!rawImportPath.startsWith('.') && !rawImportPath.startsWith('/')) {
+          edge.confidence = 0.3
+          continue
+        }
+
+        const sourceDir = path.dirname(edge.source)
+        const resolvedPath = path.normalize(path.join(sourceDir, rawImportPath)).replace(/\\/g, '/')
+
+        const htmlExtensions = ['.js', '.ts', '.tsx', '.jsx', '.css', '.scss', '.vue',
+          '/index.js', '/index.ts', '/index.tsx', '/index.jsx']
+        let matched = false
+        for (const ext of htmlExtensions) {
           const candidate = resolvedPath + ext
           if (fileNodeMap.has(candidate)) {
             edge.target = candidate
@@ -589,15 +637,55 @@ export class AuraIndexer {
             break
           }
         }
+        if (!matched && fileNodeMap.has(resolvedPath)) {
+          edge.target = resolvedPath
+          edge.confidence = 0.9
+        } else if (!matched) {
+          edge.confidence = 0.5
+        }
+        continue
+      }
 
-        if (!matched) {
-          // Check if the raw path itself matches a file node
-          if (fileNodeMap.has(resolvedPath)) {
-            edge.target = resolvedPath
-            edge.confidence = 0.9
-          } else {
-            edge.confidence = 0.5
-          }
+      // ── JS/TS/Vue import resolution ──
+      // Only reach here for JS/TS/Vue imports (Python, CSS/SCSS, HTML are handled above)
+      if (!rawImportPath.startsWith('.')) {
+        // Non-relative import — try tsconfig path aliases (e.g. "@/types" -> "./src/types")
+        const aliasResolved = this.resolveAlias(rawImportPath, fileNodeMap)
+        if (aliasResolved) {
+          edge.target = aliasResolved
+          edge.confidence = 0.9
+        } else {
+          // Unresolvable bare specifier (e.g. 'react', 'express') — keep with low confidence
+          edge.confidence = 0.3
+        }
+        continue
+      }
+
+      // Resolve relative import path
+      const sourceDir = path.dirname(edge.source)
+      const resolvedPath = path.normalize(path.join(sourceDir, rawImportPath)).replace(/\\/g, '/')
+
+      // Try extensions (including .vue for Vue component imports)
+      const extensions = ['.ts', '.tsx', '.js', '.jsx', '.vue', '/index.ts', '/index.tsx', '/index.js', '/index.jsx', '/index.vue']
+      let matched = false
+
+      for (const ext of extensions) {
+        const candidate = resolvedPath + ext
+        if (fileNodeMap.has(candidate)) {
+          edge.target = candidate
+          edge.confidence = 0.9
+          matched = true
+          break
+        }
+      }
+
+      if (!matched) {
+        // Check if the raw path itself matches a file node
+        if (fileNodeMap.has(resolvedPath)) {
+          edge.target = resolvedPath
+          edge.confidence = 0.9
+        } else {
+          edge.confidence = 0.5
         }
       }
 
@@ -1042,7 +1130,7 @@ export class AuraIndexer {
 
   private async ensureGitignore(): Promise<void> {
     const gitignorePath = path.join(this.projectPath, '.gitignore')
-    const entries = ['.aura/', '.synapse/']
+    const entries = ['.aura/']
     let content = ''
     try {
       content = await fs.readFile(gitignorePath, 'utf-8')

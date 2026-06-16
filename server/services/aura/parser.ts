@@ -10,6 +10,16 @@ import type {
   AuraEdge,
 } from './types.ts'
 import { AuraDataFlow } from './data-flow.ts'
+import {
+  JS_EXTENSIONS,
+  TS_EXTENSIONS,
+  PY_EXTENSIONS,
+  CSS_EXTENSIONS,
+  SCSS_EXTENSIONS,
+  HTML_EXTENSIONS,
+  VUE_EXTENSIONS,
+  PARSABLE_EXTENSIONS,
+} from './extensions.ts'
 
 export interface ParseResult {
   filePath: string
@@ -38,10 +48,6 @@ const IGNORED_DIRS = new Set([
   '.vscode',
   '.idea',
 ])
-
-const JS_EXTENSIONS = new Set(['.js', '.jsx', '.mjs', '.cjs'])
-const TS_EXTENSIONS = new Set(['.ts', '.tsx'])
-const PY_EXTENSIONS = new Set(['.py'])
 
 const PY_BUILTINS = new Set([
   'print', 'len', 'range', 'str', 'int', 'float', 'list', 'dict', 'set', 'tuple',
@@ -72,6 +78,9 @@ export class AuraParser {
   private tsLang: Language | null = null
   private tsxLang: Language | null = null
   private pyLang: Language | null = null
+  private htmlLang: Language | null = null
+  private cssLang: Language | null = null
+  private scssLang: Language | null = null
   private parser: Parser | null = null
   private dataFlowAnalyzer = new AuraDataFlow()
 
@@ -97,6 +106,31 @@ export class AuraParser {
       console.warn('tree-sitter-python.wasm not found; Python support disabled')
     }
 
+    try {
+      const htmlWasm = path.join(grammarsDir, 'tree-sitter-html.wasm')
+      this.htmlLang = await Language.load(htmlWasm)
+    } catch {
+      console.warn('tree-sitter-html.wasm not found; HTML support disabled')
+    }
+
+    try {
+      const cssWasm = path.join(grammarsDir, 'tree-sitter-css.wasm')
+      this.cssLang = await Language.load(cssWasm)
+    } catch {
+      console.warn('tree-sitter-css.wasm not found; CSS support disabled')
+    }
+
+    try {
+      const scssWasm = path.join(grammarsDir, 'tree-sitter-scss.wasm')
+      this.scssLang = await Language.load(scssWasm)
+    } catch {
+      console.warn('tree-sitter-scss.wasm not found; SCSS support disabled')
+    }
+
+    // Note: tree-sitter-vue cannot be compiled to WASM due to its external scanner.
+    // Vue SFC parsing uses regex-based block extraction + sub-parsing with JS/TS/CSS/SCSS grammars.
+    // this.vueLang is not needed and remains null.
+
     this.ready = true
   }
 
@@ -118,12 +152,26 @@ export class AuraParser {
     if (PY_EXTENSIONS.has(ext)) {
       return this.pyLang
     }
+    if (HTML_EXTENSIONS.has(ext)) {
+      return this.htmlLang
+    }
+    if (CSS_EXTENSIONS.has(ext)) {
+      return this.cssLang
+    }
+    if (SCSS_EXTENSIONS.has(ext)) {
+      return this.scssLang
+    }
+    // Vue doesn't use tree-sitter-vue (it has an incompatible external scanner).
+    // parseVueFile uses regex-based block extraction + sub-parsing.
+    if (VUE_EXTENSIONS.has(ext)) {
+      return null // Vue blocks are parsed individually with their respective grammars
+    }
     return null
   }
 
   isParsable(filePath: string): boolean {
     const ext = path.extname(filePath)
-    return JS_EXTENSIONS.has(ext) || TS_EXTENSIONS.has(ext) || PY_EXTENSIONS.has(ext)
+    return PARSABLE_EXTENSIONS.has(ext)
   }
 
   shouldIgnore(dirName: string): boolean {
@@ -131,9 +179,22 @@ export class AuraParser {
   }
 
   async parseFile(filePath: string, source: string): Promise<ParseResult> {
-    // Route Python files to the Python parser
-    if (PY_EXTENSIONS.has(path.extname(filePath))) {
+    // Route to language-specific parsers
+    const ext = path.extname(filePath)
+    if (PY_EXTENSIONS.has(ext)) {
       return this.parsePythonFile(filePath, source)
+    }
+    if (CSS_EXTENSIONS.has(ext)) {
+      return this.parseCssFile(filePath, source)
+    }
+    if (SCSS_EXTENSIONS.has(ext)) {
+      return this.parseScssFile(filePath, source)
+    }
+    if (HTML_EXTENSIONS.has(ext)) {
+      return this.parseHtmlFile(filePath, source)
+    }
+    if (VUE_EXTENSIONS.has(ext)) {
+      return await this.parseVueFile(filePath, source)
     }
 
     const language = this.selectLanguage(filePath)
@@ -743,6 +804,1022 @@ export class AuraParser {
       }
     } finally {
       query?.delete()
+    }
+  }
+
+  // ── CSS parsing ────────────────────────────────────────────────────────────
+
+  private parseCssFile(filePath: string, source: string): ParseResult {
+    const language = this.selectLanguage(filePath)
+    if (!language || !this.parser) {
+      return { filePath, symbols: [], imports: [], calls: [], heritage: [], contains: [], dataFlow: [] }
+    }
+
+    this.parser.setLanguage(language)
+    const tree = this.parser.parse(source)
+    if (!tree) {
+      return { filePath, symbols: [], imports: [], calls: [], heritage: [], contains: [], dataFlow: [] }
+    }
+
+    try {
+      const symbols: AuraNode[] = []
+      const imports: AuraEdge[] = []
+      const contains: AuraEdge[] = []
+      const seenIds = new Set<string>()
+
+      this.extractCssImports(tree, filePath, imports)
+      this.extractCssSelectors(language, tree, filePath, symbols, contains, seenIds)
+      this.extractCssAtRules(language, tree, filePath, symbols, contains, seenIds)
+      this.extractCssCustomProperties(tree, filePath, symbols, contains, seenIds)
+
+      return { filePath, symbols, imports, calls: [], heritage: [], contains, dataFlow: [] }
+    } finally {
+      tree.delete()
+    }
+  }
+
+  private extractCssImports(
+    tree: Tree,
+    filePath: string,
+    imports: AuraEdge[],
+  ): void {
+    // @import url("...") or @import "..."
+    const walk = (node: SyntaxNode): void => {
+      if (node.type === 'import_statement') {
+        let importPath = ''
+        for (let i = 0; i < node.childCount; i++) {
+          const child = node.child(i)!
+          // @import "path" — tree-sitter-css uses string_value containing string_content
+          if (child.type === 'string_value' || child.type === 'string') {
+            importPath = this.extractStringContent(child)
+          } else if (child.type === 'call_expression') {
+            // @import url("path") — extract from url() arguments
+            for (let j = 0; j < child.childCount; j++) {
+              const arg = child.child(j)!
+              if (arg.type === 'arguments') {
+                for (let k = 0; k < arg.childCount; k++) {
+                  const param = arg.child(k)!
+                  if (param.type === 'string_value' || param.type === 'string') {
+                    importPath = this.extractStringContent(param)
+                  }
+                }
+              }
+            }
+          }
+        }
+        if (importPath) {
+          imports.push({
+            source: filePath,
+            target: importPath,
+            type: AuraEdgeType.IMPORTS,
+            confidence: 0.9,
+            metadata: { rawImportPath: importPath, importKind: 'css-import' },
+          })
+        }
+      }
+      for (let i = 0; i < node.childCount; i++) {
+        walk(node.child(i)!)
+      }
+    }
+    walk(tree.rootNode)
+  }
+
+  /**
+   * Extract text content from a string-like node.
+   * Handles both `string` nodes (strip surrounding quotes) and `string_value`
+   * nodes (which contain `string_content` children in tree-sitter-css/scss).
+   */
+  private extractStringContent(node: SyntaxNode): string {
+    // string_value nodes in tree-sitter-css/scss have string_content children
+    if (node.type === 'string_value') {
+      for (let i = 0; i < node.childCount; i++) {
+        const child = node.child(i)!
+        if (child.type === 'string_content') {
+          return child.text
+        }
+      }
+      // Fallback: if no string_content child, the node text might just be the content
+      // Strip surrounding quotes if present
+      const text = node.text
+      if ((text.startsWith('"') && text.endsWith('"')) || (text.startsWith("'") && text.endsWith("'"))) {
+        return text.slice(1, -1)
+      }
+      return text
+    }
+    // Plain string node: strip surrounding quotes
+    const text = node.text
+    if ((text.startsWith('"') && text.endsWith('"')) || (text.startsWith("'") && text.endsWith("'"))) {
+      return text.slice(1, -1)
+    }
+    return text
+  }
+
+  private extractCssSelectors(
+    language: Language,
+    tree: Tree,
+    filePath: string,
+    symbols: AuraNode[],
+    contains: AuraEdge[],
+    seenIds: Set<string>,
+  ): void {
+    // Extract selectors from rule sets
+    let query: Query | null = null
+    try {
+      query = new Query(language, '(rule_set (selectors) @selectors)')
+    } catch {
+      return
+    }
+
+    try {
+      const captures = query.captures(tree.rootNode)
+      for (const { name, node } of captures) {
+        if (name !== 'selectors') continue
+
+        // The selectors node text is the full selector string (e.g. ".my-class, #my-id")
+        const selectorText = node.text.trim()
+        // Split on comma for multiple selectors
+        const individualSelectors = selectorText.split(',').map(s => s.trim()).filter(Boolean)
+
+        for (const sel of individualSelectors) {
+          const symbolId = `${filePath}:${sel}`
+          if (seenIds.has(symbolId)) continue
+          seenIds.add(symbolId)
+
+          symbols.push({
+            id: symbolId,
+            kind: AuraNodeKind.Selector,
+            name: sel,
+            filePath,
+            range: {
+              startLine: node.startPosition.row + 1,
+              endLine: node.endPosition.row + 1,
+            },
+            exported: true, // CSS selectors are globally visible
+          })
+
+          contains.push({
+            source: filePath,
+            target: symbolId,
+            type: AuraEdgeType.CONTAINS,
+            confidence: 1.0,
+          })
+        }
+      }
+    } finally {
+      query.delete()
+    }
+  }
+
+  private extractCssAtRules(
+    language: Language,
+    tree: Tree,
+    filePath: string,
+    symbols: AuraNode[],
+    contains: AuraEdge[],
+    seenIds: Set<string>,
+  ): void {
+    // Extract at-rules using both tree-walk (for media_statement, keyframes_statement)
+    // and query (for generic at_rule like @font-face)
+    const walk = (node: SyntaxNode): void => {
+      if (node.type === 'media_statement' || node.type === 'keyframes_statement' || node.type === 'at_rule') {
+        const firstChild = node.child(0)
+        if (firstChild) {
+          const atKeyword = firstChild.text
+          // Skip @charset and @import (handled by extractCssImports)
+          if (atKeyword === '@charset' || atKeyword === '@import') {
+            // skip, but continue walking children
+          } else {
+            // Try to extract the name (e.g. @keyframes fadeIn, @media (max-width: 768px))
+            let atRuleName = atKeyword
+            for (let i = 1; i < node.childCount; i++) {
+              const child = node.child(i)!
+              if (child.type === 'identifier' || child.type === 'keyframes_name') {
+                atRuleName = `${atKeyword} ${child.text}`
+                break
+              }
+              // @media uses feature_query for the condition
+              if (child.type === 'feature_query' || child.type === 'parenthesized_query' || child.type === 'block') {
+                atRuleName = `${atKeyword} ${child.text}`
+                break
+              }
+            }
+
+            const symbolId = `${filePath}:${atRuleName}`
+            if (!seenIds.has(symbolId)) {
+              seenIds.add(symbolId)
+
+              symbols.push({
+                id: symbolId,
+                kind: AuraNodeKind.AtRule,
+                name: atRuleName,
+                filePath,
+                range: {
+                  startLine: node.startPosition.row + 1,
+                  endLine: node.endPosition.row + 1,
+                },
+                exported: false,
+              })
+
+              contains.push({
+                source: filePath,
+                target: symbolId,
+                type: AuraEdgeType.CONTAINS,
+                confidence: 1.0,
+              })
+            }
+          }
+        }
+      }
+      for (let i = 0; i < node.childCount; i++) {
+        walk(node.child(i)!)
+      }
+    }
+    walk(tree.rootNode)
+  }
+
+  private extractCssCustomProperties(
+    tree: Tree,
+    filePath: string,
+    symbols: AuraNode[],
+    contains: AuraEdge[],
+    seenIds: Set<string>,
+  ): void {
+    // --my-variable: value
+    const walk = (node: SyntaxNode): void => {
+      if (node.type === 'declaration') {
+        // First child is typically the property name
+        const propNode = node.child(0)
+        if (propNode && propNode.text.startsWith('--')) {
+          const propName = propNode.text
+          const symbolId = `${filePath}:${propName}`
+          if (seenIds.has(symbolId)) return
+          seenIds.add(symbolId)
+
+          symbols.push({
+            id: symbolId,
+            kind: AuraNodeKind.CustomProperty,
+            name: propName,
+            filePath,
+            range: {
+              startLine: node.startPosition.row + 1,
+              endLine: node.endPosition.row + 1,
+            },
+            exported: true,
+          })
+
+          contains.push({
+            source: filePath,
+            target: symbolId,
+            type: AuraEdgeType.CONTAINS,
+            confidence: 1.0,
+          })
+        }
+      }
+      for (let i = 0; i < node.childCount; i++) {
+        walk(node.child(i)!)
+      }
+    }
+    walk(tree.rootNode)
+  }
+
+  // ── SCSS parsing ────────────────────────────────────────────────────────────
+
+  private parseScssFile(filePath: string, source: string): ParseResult {
+    const language = this.selectLanguage(filePath)
+    if (!language || !this.parser) {
+      return { filePath, symbols: [], imports: [], calls: [], heritage: [], contains: [], dataFlow: [] }
+    }
+
+    this.parser.setLanguage(language)
+    const tree = this.parser.parse(source)
+    if (!tree) {
+      return { filePath, symbols: [], imports: [], calls: [], heritage: [], contains: [], dataFlow: [] }
+    }
+
+    try {
+      const symbols: AuraNode[] = []
+      const imports: AuraEdge[] = []
+      const calls: AuraEdge[] = []
+      const heritage: AuraEdge[] = []
+      const contains: AuraEdge[] = []
+      const seenIds = new Set<string>()
+
+      // CSS-base extractions (selectors, @import, at-rules, custom properties)
+      this.extractCssImports(tree, filePath, imports)
+      this.extractCssSelectors(language, tree, filePath, symbols, contains, seenIds)
+      this.extractCssAtRules(language, tree, filePath, symbols, contains, seenIds)
+      this.extractCssCustomProperties(tree, filePath, symbols, contains, seenIds)
+
+      // SCSS-specific extractions
+      this.extractScssUseForward(tree, filePath, imports)
+      this.extractScssMixins(language, tree, filePath, symbols, contains, seenIds)
+      this.extractScssFunctions(language, tree, filePath, symbols, contains, seenIds)
+      this.extractScssVariables(tree, filePath, symbols, contains, seenIds)
+      this.extractScssIncludes(tree, filePath, calls)
+      this.extractScssExtends(tree, filePath, heritage)
+
+      return { filePath, symbols, imports, calls, heritage, contains, dataFlow: [] }
+    } finally {
+      tree.delete()
+    }
+  }
+
+  private extractScssUseForward(
+    tree: Tree,
+    filePath: string,
+    imports: AuraEdge[],
+  ): void {
+    const walk = (node: SyntaxNode): void => {
+      // @use "path" and @forward "path"
+      if (node.type === 'use_statement' || node.type === 'forward_statement') {
+        let importPath = ''
+        for (let i = 0; i < node.childCount; i++) {
+          const child = node.child(i)!
+          if (child.type === 'string_value' || child.type === 'string') {
+            importPath = this.extractStringContent(child)
+          }
+        }
+        // Fallback: if no string_value child found, try extracting from node text
+        // This handles cases where tree-sitter-scss produces ERROR nodes (e.g. @use ... as)
+        if (!importPath) {
+          const textMatch = node.text.match(/@(?:use|forward)\s+['"]([^'"]+)['"]/)
+          if (textMatch) {
+            importPath = textMatch[1]
+          }
+        }
+        if (importPath) {
+          const kind = node.type === 'use_statement' ? 'use' : 'forward'
+          imports.push({
+            source: filePath,
+            target: importPath,
+            type: AuraEdgeType.IMPORTS,
+            confidence: 0.9,
+            metadata: { rawImportPath: importPath, importKind: kind },
+          })
+        }
+      }
+      for (let i = 0; i < node.childCount; i++) {
+        walk(node.child(i)!)
+      }
+    }
+    walk(tree.rootNode)
+  }
+
+  private extractScssMixins(
+    language: Language,
+    tree: Tree,
+    filePath: string,
+    symbols: AuraNode[],
+    contains: AuraEdge[],
+    seenIds: Set<string>,
+  ): void {
+    let query: Query | null = null
+    try {
+      query = new Query(language, '(mixin_statement (identifier) @name)')
+    } catch {
+      return
+    }
+
+    try {
+      const captures = query.captures(tree.rootNode)
+      for (const { name, node } of captures) {
+        if (name !== 'name') continue
+        const mixinName = node.text
+        const symbolId = `${filePath}:${mixinName}`
+        if (seenIds.has(symbolId)) continue
+        seenIds.add(symbolId)
+
+        symbols.push({
+          id: symbolId,
+          kind: AuraNodeKind.Mixin,
+          name: mixinName,
+          filePath,
+          range: {
+            startLine: (node.parent ?? node).startPosition.row + 1,
+            endLine: (node.parent ?? node).endPosition.row + 1,
+          },
+          exported: true,
+        })
+
+        contains.push({
+          source: filePath,
+          target: symbolId,
+          type: AuraEdgeType.CONTAINS,
+          confidence: 1.0,
+        })
+      }
+    } finally {
+      query.delete()
+    }
+  }
+
+  private extractScssFunctions(
+    language: Language,
+    tree: Tree,
+    filePath: string,
+    symbols: AuraNode[],
+    contains: AuraEdge[],
+    seenIds: Set<string>,
+  ): void {
+    let query: Query | null = null
+    try {
+      query = new Query(language, '(function_statement (identifier) @name)')
+    } catch {
+      return
+    }
+
+    try {
+      const captures = query.captures(tree.rootNode)
+      for (const { name, node } of captures) {
+        if (name !== 'name') continue
+        const funcName = node.text
+        const symbolId = `${filePath}:${funcName}`
+        if (seenIds.has(symbolId)) continue
+        seenIds.add(symbolId)
+
+        symbols.push({
+          id: symbolId,
+          kind: AuraNodeKind.ScssFunction,
+          name: funcName,
+          filePath,
+          range: {
+            startLine: (node.parent ?? node).startPosition.row + 1,
+            endLine: (node.parent ?? node).endPosition.row + 1,
+          },
+          exported: true,
+        })
+
+        contains.push({
+          source: filePath,
+          target: symbolId,
+          type: AuraEdgeType.CONTAINS,
+          confidence: 1.0,
+        })
+      }
+    } finally {
+      query.delete()
+    }
+  }
+
+  private extractScssVariables(
+    tree: Tree,
+    filePath: string,
+    symbols: AuraNode[],
+    contains: AuraEdge[],
+    seenIds: Set<string>,
+  ): void {
+    // In tree-sitter-scss, $variable declarations appear as `declaration` nodes
+    // where the property_name starts with $. E.g. "$font-stack: sans-serif;" →
+    // declaration { property_name: "$font-stack", ... }
+    const walk = (node: SyntaxNode, depth: number): void => {
+      if (node.type === 'declaration') {
+        const propNode = node.child(0)
+        if (propNode && propNode.type === 'property_name' && propNode.text.startsWith('$')) {
+          const varName = propNode.text
+          const symbolId = `${filePath}:${varName}`
+          if (!seenIds.has(symbolId)) {
+            seenIds.add(symbolId)
+
+            symbols.push({
+              id: symbolId,
+              kind: AuraNodeKind.ScssVariable,
+              name: varName,
+              filePath,
+              range: {
+                startLine: node.startPosition.row + 1,
+                endLine: node.endPosition.row + 1,
+              },
+              // Top-level variables (depth 1) are effectively "exported"
+              exported: depth <= 1 && !varName.startsWith('$_'),
+            })
+
+            contains.push({
+              source: filePath,
+              target: symbolId,
+              type: AuraEdgeType.CONTAINS,
+              confidence: 1.0,
+            })
+          }
+        }
+      }
+      for (let i = 0; i < node.childCount; i++) {
+        walk(node.child(i)!, depth + 1)
+      }
+    }
+    walk(tree.rootNode, 0)
+  }
+
+  private extractScssIncludes(
+    tree: Tree,
+    filePath: string,
+    calls: AuraEdge[],
+  ): void {
+    // @include mixinName or @include mixinName(args)
+    const walk = (node: SyntaxNode): void => {
+      if (node.type === 'include_statement') {
+        let mixinName = ''
+        for (let i = 0; i < node.childCount; i++) {
+          const child = node.child(i)!
+          if (child.type === 'identifier') {
+            mixinName = child.text
+            break
+          }
+        }
+        if (mixinName) {
+          calls.push({
+            source: filePath,
+            target: mixinName,
+            type: AuraEdgeType.CALLS,
+            confidence: 0.8,
+            metadata: { callName: mixinName, callTargetKind: 'mixin-include' },
+          })
+        }
+      }
+      for (let i = 0; i < node.childCount; i++) {
+        walk(node.child(i)!)
+      }
+    }
+    walk(tree.rootNode)
+  }
+
+  private extractScssExtends(
+    tree: Tree,
+    filePath: string,
+    heritage: AuraEdge[],
+  ): void {
+    // @extend .selector or %placeholder
+    const walk = (node: SyntaxNode): void => {
+      if (node.type === 'extend_statement') {
+        let targetName = ''
+        for (let i = 0; i < node.childCount; i++) {
+          const child = node.child(i)!
+          // The selector being extended (class, id, or placeholder)
+          if (child.type === 'selector' || child.type === 'class_selector' ||
+              child.type === 'id_selector' || child.type === 'placeholder_selector' ||
+              child.type === 'identifier') {
+            targetName = child.text
+            break
+          }
+        }
+        if (!targetName) {
+          // Fallback: use the text content after @extend
+          const text = node.text.replace('@extend', '').trim().replace(/;$/, '')
+          targetName = text
+        }
+        if (targetName) {
+          heritage.push({
+            source: filePath,
+            target: targetName,
+            type: AuraEdgeType.EXTENDS,
+            confidence: 0.8,
+            metadata: { rawTargetName: targetName, extendKind: 'scss-extend' },
+          })
+        }
+      }
+      for (let i = 0; i < node.childCount; i++) {
+        walk(node.child(i)!)
+      }
+    }
+    walk(tree.rootNode)
+  }
+
+  // ── HTML parsing ───────────────────────────────────────────────────────────
+
+  private parseHtmlFile(filePath: string, source: string): ParseResult {
+    const language = this.selectLanguage(filePath)
+    if (!language || !this.parser) {
+      return { filePath, symbols: [], imports: [], calls: [], heritage: [], contains: [], dataFlow: [] }
+    }
+
+    this.parser.setLanguage(language)
+    const tree = this.parser.parse(source)
+    if (!tree) {
+      return { filePath, symbols: [], imports: [], calls: [], heritage: [], contains: [], dataFlow: [] }
+    }
+
+    try {
+      const symbols: AuraNode[] = []
+      const imports: AuraEdge[] = []
+      const contains: AuraEdge[] = []
+      const seenIds = new Set<string>()
+
+      this.extractHtmlImports(tree, filePath, imports)
+      this.extractHtmlIds(tree, filePath, symbols, contains, seenIds)
+
+      return { filePath, symbols, imports, calls: [], heritage: [], contains, dataFlow: [] }
+    } finally {
+      tree.delete()
+    }
+  }
+
+  private extractHtmlImports(
+    tree: Tree,
+    filePath: string,
+    imports: AuraEdge[],
+  ): void {
+    // <script src="..."> and <link href="...">
+    const walk = (node: SyntaxNode): void => {
+      // <script src="..."> — in tree-sitter-html, attributes are inside start_tag
+      if (node.type === 'script_element') {
+        const srcAttr = this.findAttributeDeep(node, 'src')
+        if (srcAttr) {
+          imports.push({
+            source: filePath,
+            target: srcAttr,
+            type: AuraEdgeType.IMPORTS,
+            confidence: 0.9,
+            metadata: { rawImportPath: srcAttr, importKind: 'html-script' },
+          })
+        }
+      }
+
+      // <link href="..."> — can appear as self_closing_tag OR as element with start_tag
+      // tree-sitter-html renders <link> as either depending on HTML structure
+      const isLinkTag = (node.type === 'self_closing_tag' || node.type === 'element')
+        && this.getTagName(node) === 'link'
+      if (isLinkTag) {
+        const href = this.findAttributeDeep(node, 'href')
+        if (href) {
+          imports.push({
+            source: filePath,
+            target: href,
+            type: AuraEdgeType.IMPORTS,
+            confidence: 0.8,
+            metadata: { rawImportPath: href, importKind: 'html-link' },
+          })
+        }
+      }
+
+      for (let i = 0; i < node.childCount; i++) {
+        walk(node.child(i)!)
+      }
+    }
+    walk(tree.rootNode)
+  }
+
+  /** Get the tag name from an element, start_tag, or self_closing_tag node */
+  private getTagName(node: SyntaxNode): string | null {
+    // Check direct children first (for start_tag, self_closing_tag)
+    for (let i = 0; i < node.childCount; i++) {
+      const child = node.child(i)!
+      if (child.type === 'tag_name') {
+        return child.text
+      }
+      // For element nodes, the tag_name is inside the start_tag child
+      if (child.type === 'start_tag') {
+        const name = this.getTagName(child)
+        if (name) return name
+      }
+    }
+    return null
+  }
+
+  /** Search for an attribute recursively (attributes may be nested inside start_tag, etc.) */
+  private findAttributeDeep(node: SyntaxNode, attrName: string): string | null {
+    // First check direct children
+    for (let i = 0; i < node.childCount; i++) {
+      const child = node.child(i)!
+      if (child.type === 'attribute') {
+        const value = this.extractAttributeValue(child, attrName)
+        if (value !== null) return value
+      }
+    }
+    // Then recurse into child nodes (e.g., start_tag inside script_element)
+    for (let i = 0; i < node.childCount; i++) {
+      const child = node.child(i)!
+      if (child.type !== 'attribute') {
+        const result = this.findAttributeDeep(child, attrName)
+        if (result !== null) return result
+      }
+    }
+    return null
+  }
+
+  /** Extract attribute value from an attribute node, or null if name doesn't match */
+  private extractAttributeValue(attrNode: SyntaxNode, expectedName: string): string | null {
+    let nameMatch = false
+    for (let i = 0; i < attrNode.childCount; i++) {
+      const child = attrNode.child(i)!
+      if (child.type === 'attribute_name' && child.text === expectedName) {
+        nameMatch = true
+      }
+      if (nameMatch && (child.type === 'attribute_value' || child.type === 'quoted_attribute_value')) {
+        // attribute_value may be inside quoted_attribute_value
+        if (child.type === 'quoted_attribute_value') {
+          // Extract the inner attribute_value
+          for (let j = 0; j < child.childCount; j++) {
+            const inner = child.child(j)!
+            if (inner.type === 'attribute_value') {
+              return inner.text
+            }
+          }
+          // Fallback: strip quotes from the quoted_attribute_value text
+          return child.text.slice(1, -1)
+        }
+        return child.text
+      }
+    }
+    return null
+  }
+
+  private extractHtmlIds(
+    tree: Tree,
+    filePath: string,
+    symbols: AuraNode[],
+    contains: AuraEdge[],
+    seenIds: Set<string>,
+  ): void {
+    // Extract id="..." attributes as Selector symbols
+    const walk = (node: SyntaxNode): void => {
+      if (node.type === 'attribute') {
+        const idValue = this.extractAttributeValue(node, 'id')
+        if (idValue) {
+          const symbolId = `${filePath}:#${idValue}`
+          if (!seenIds.has(symbolId)) {
+            seenIds.add(symbolId)
+            symbols.push({
+              id: symbolId,
+              kind: AuraNodeKind.Selector,
+              name: `#${idValue}`,
+              filePath,
+              range: {
+                startLine: node.startPosition.row + 1,
+                endLine: node.endPosition.row + 1,
+              },
+              exported: true,
+            })
+            contains.push({
+              source: filePath,
+              target: symbolId,
+              type: AuraEdgeType.CONTAINS,
+              confidence: 1.0,
+            })
+          }
+        }
+      }
+      for (let i = 0; i < node.childCount; i++) {
+        walk(node.child(i)!)
+      }
+    }
+    walk(tree.rootNode)
+  }
+
+  // ── Vue parsing ─────────────────────────────────────────────────────────────
+
+  private async parseVueFile(filePath: string, source: string): Promise<ParseResult> {
+    const symbols: AuraNode[] = []
+    const imports: AuraEdge[] = []
+    const calls: AuraEdge[] = []
+    const heritage: AuraEdge[] = []
+    const contains: AuraEdge[] = []
+
+    // Create a Component symbol for the .vue file itself
+    const componentName = path.basename(filePath, '.vue')
+    const componentId = `${filePath}:${componentName}`
+    symbols.push({
+      id: componentId,
+      kind: AuraNodeKind.Component,
+      name: componentName,
+      filePath,
+      range: {
+        startLine: 1,
+        endLine: source.split('\n').length,
+      },
+      exported: true,
+    })
+    contains.push({
+      source: filePath,
+      target: componentId,
+      type: AuraEdgeType.CONTAINS,
+      confidence: 1.0,
+    })
+
+    // Extract SFC blocks using regex (tree-sitter-vue has no WASM build)
+    const blocks = this.extractVueBlocksRegex(source)
+
+    // Parse <script> block with JS/TS grammar
+    if (blocks.script) {
+      const scriptResult = await this.parseVueScriptBlock(filePath, blocks.script)
+      symbols.push(...scriptResult.symbols)
+      imports.push(...scriptResult.imports)
+      calls.push(...scriptResult.calls)
+      heritage.push(...scriptResult.heritage)
+      contains.push(...scriptResult.contains)
+      // Re-parent script symbols inside the component
+      for (const sym of scriptResult.symbols) {
+        contains.push({
+          source: componentId,
+          target: sym.id,
+          type: AuraEdgeType.CONTAINS,
+          confidence: 1.0,
+        })
+      }
+    }
+
+    // Parse <style> block with CSS/SCSS grammar
+    if (blocks.style) {
+      const styleResult = await this.parseVueStyleBlock(filePath, blocks.style)
+      symbols.push(...styleResult.symbols)
+      imports.push(...styleResult.imports)
+      contains.push(...styleResult.contains)
+      for (const sym of styleResult.symbols) {
+        contains.push({
+          source: componentId,
+          target: sym.id,
+          type: AuraEdgeType.CONTAINS,
+          confidence: 1.0,
+        })
+      }
+    }
+
+    // Extract component references from <template> block
+    if (blocks.template) {
+      this.extractVueTemplateRefs(blocks.template.content, filePath, calls, symbols, contains)
+    }
+
+    // Data flow for Vue comes from the script block (already analyzed)
+    const dataFlow: AuraEdge[] = []
+
+    return { filePath, symbols, imports, calls, heritage, contains, dataFlow }
+  }
+
+  /**
+   * Extract <template>, <script>, and <style> blocks from a Vue SFC using regex.
+   * This approach avoids tree-sitter-vue, which has an external scanner incompatible with WASM.
+   */
+  private extractVueBlocksRegex(source: string): {
+    script?: { content: string; lang: string; startLine: number }
+    style?: { content: string; lang: string; startLine: number }
+    template?: { content: string; startLine: number }
+  } {
+    const result: {
+      script?: { content: string; lang: string; startLine: number }
+      style?: { content: string; lang: string; startLine: number }
+      template?: { content: string; startLine: number }
+    } = {}
+
+    // Match <script>, <script setup>, <style>, and <template> blocks
+    // Handles optional lang attribute: <script lang="ts">, <style lang="scss">
+    const blockRegex = /<(script|template|style)(\s+setup)?(\s[^>]*)?>([\s\S]*?)<\/\1>/gi
+
+    let match: RegExpExecArray | null
+    while ((match = blockRegex.exec(source)) !== null) {
+      const tag = match[1].toLowerCase()
+      const isSetup = match[2]?.trim().toLowerCase() === ' setup'
+      const attrs = match[3] ?? ''
+      const content = match[4]
+      const startLine = source.slice(0, match.index).split('\n').length
+
+      // Extract lang attribute
+      const langMatch = attrs.match(/lang=["'](\w+)["']/i)
+      const lang = langMatch ? langMatch[1].toLowerCase() : undefined
+
+      if (tag === 'script') {
+        const resolvedLang = lang ?? 'js'
+        result.script = { content, lang: resolvedLang, startLine }
+      } else if (tag === 'style') {
+        const resolvedLang = lang ?? 'css'
+        result.style = { content, lang: resolvedLang, startLine }
+      } else if (tag === 'template') {
+        result.template = { content, startLine }
+      }
+    }
+
+    return result
+  }
+
+  private async parseVueScriptBlock(
+    filePath: string,
+    block: { content: string; lang: string; startLine: number },
+  ): Promise<ParseResult> {
+    // Determine the language for the script block
+    let syntheticPath: string
+    if (block.lang === 'ts' || block.lang === 'typescript') {
+      syntheticPath = filePath + '.ts'
+    } else {
+      syntheticPath = filePath + '.js'
+    }
+
+    // Parse with the appropriate JS/TS parser
+    const result = await this.parseFile(syntheticPath, block.content)
+
+    // Adjust line numbers — the block starts at `startLine` in the original file
+    const lineOffset = block.startLine - 1
+    const adjustedSymbols = result.symbols.map(sym => ({
+      ...sym,
+      filePath,
+      id: sym.id.replace(syntheticPath, filePath),
+      range: sym.range ? {
+        startLine: sym.range.startLine + lineOffset,
+        endLine: sym.range.endLine + lineOffset,
+      } : undefined,
+    }))
+
+    const adjustedImports = result.imports.map(edge => ({
+      ...edge,
+      source: edge.source.replace(syntheticPath, filePath),
+    }))
+
+    const adjustedCalls = result.calls.map(edge => ({
+      ...edge,
+      source: typeof edge.source === 'string' ? edge.source.replace(syntheticPath, filePath) : edge.source,
+    }))
+
+    const adjustedHeritage = result.heritage.map(edge => ({
+      ...edge,
+      source: edge.source.replace(syntheticPath, filePath),
+    }))
+
+    const adjustedContains = result.contains.map(edge => ({
+      ...edge,
+      source: edge.source.replace(syntheticPath, filePath),
+      target: edge.target.replace(syntheticPath, filePath),
+    }))
+
+    return {
+      filePath,
+      symbols: adjustedSymbols,
+      imports: adjustedImports,
+      calls: adjustedCalls,
+      heritage: adjustedHeritage,
+      contains: adjustedContains,
+      dataFlow: [],
+    }
+  }
+
+  private async parseVueStyleBlock(
+    filePath: string,
+    block: { content: string; lang: string; startLine: number },
+  ): Promise<ParseResult> {
+    // Determine language for the style block
+    const isScss = block.lang === 'scss' || block.lang === 'sass'
+    const syntheticPath = filePath + (isScss ? '.scss' : '.css')
+
+    // Parse with the appropriate parser
+    const result = isScss
+      ? this.parseScssFile(syntheticPath, block.content)
+      : this.parseCssFile(syntheticPath, block.content)
+
+    // Adjust line numbers and file paths
+    const lineOffset = block.startLine - 1
+    const adjustedSymbols = result.symbols.map(sym => ({
+      ...sym,
+      filePath,
+      id: sym.id.replace(syntheticPath, filePath),
+      range: sym.range ? {
+        startLine: sym.range.startLine + lineOffset,
+        endLine: sym.range.endLine + lineOffset,
+      } : undefined,
+    }))
+
+    const adjustedImports = result.imports.map(edge => ({
+      ...edge,
+      source: edge.source.replace(syntheticPath, filePath),
+    }))
+
+    const adjustedContains = result.contains.map(edge => ({
+      ...edge,
+      source: edge.source.replace(syntheticPath, filePath),
+      target: edge.target.replace(syntheticPath, filePath),
+    }))
+
+    return {
+      filePath,
+      symbols: adjustedSymbols,
+      imports: adjustedImports,
+      calls: [],
+      heritage: [],
+      contains: adjustedContains,
+      dataFlow: [],
+    }
+  }
+
+  private extractVueTemplateRefs(
+    templateContent: string,
+    filePath: string,
+    calls: AuraEdge[],
+    symbols: AuraNode[],
+    contains: AuraEdge[],
+  ): void {
+    // Extract PascalCase or kebab-case-multi-word component references from template
+    // Match: <ComponentName, <component-name (multi-word), <MyComponent
+    const componentRefRegex = /<([A-Z][a-zA-Z]*|[a-z]+-[a-z][\w-]*)/g
+    let match: RegExpExecArray | null
+
+    const seen = new Set<string>()
+    while ((match = componentRefRegex.exec(templateContent)) !== null) {
+      const componentName = match[1]
+      const dedupeKey = `${filePath}→${componentName}`
+      if (seen.has(dedupeKey)) continue
+      seen.add(dedupeKey)
+
+      calls.push({
+        source: filePath,
+        target: componentName,
+        type: AuraEdgeType.CALLS,
+        confidence: 0.7,
+        metadata: { callName: componentName, callTargetKind: 'vue-component-ref', callSource: 'vue-template' },
+      })
     }
   }
 

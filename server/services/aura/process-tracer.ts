@@ -2,10 +2,8 @@ import path from 'path'
 import { Parser, Language, type SyntaxNode } from 'web-tree-sitter'
 import { AuraNodeKind, AuraEdgeType } from './types.ts'
 import type { AuraNode, AuraEdge, GraphData } from './types.ts'
+import { JS_EXTENSIONS, TS_EXTENSIONS, PY_EXTENSIONS } from './extensions.ts'
 
-const JS_EXTENSIONS = new Set(['.js', '.jsx', '.mjs', '.cjs'])
-const TS_EXTENSIONS = new Set(['.ts', '.tsx'])
-const PY_EXTENSIONS = new Set(['.py'])
 const HTTP_METHODS = new Set(['get', 'post', 'put', 'delete', 'patch', 'all', 'use', 'head', 'options'])
 
 // Built-in method names that should not be resolved to project symbols

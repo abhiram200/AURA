@@ -1,6 +1,7 @@
 import { Query, type Language, type Tree } from 'web-tree-sitter'
 import { AuraEdgeType } from './types.ts'
 import type { AuraNode, AuraEdge } from './types.ts'
+import { CSS_EXTENSIONS, SCSS_EXTENSIONS, HTML_EXTENSIONS } from './extensions.ts'
 
 type SyntaxNode = {
   type: string
@@ -21,6 +22,12 @@ export class AuraDataFlow {
     symbols: AuraNode[],
     calls: AuraEdge[],
   ): AuraEdge[] {
+    // Skip data flow analysis for non-executable file types (CSS/SCSS/HTML)
+    const ext = filePath.substring(filePath.lastIndexOf('.'))
+    if (CSS_EXTENSIONS.has(ext) || SCSS_EXTENSIONS.has(ext) || HTML_EXTENSIONS.has(ext)) {
+      return []
+    }
+
     const edges: AuraEdge[] = []
     const seen = new Set<string>()
 

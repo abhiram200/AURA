@@ -15,6 +15,12 @@ const GRAMMAR_SOURCES = [
   { name: 'tree-sitter-typescript.wasm', pkg: 'tree-sitter-typescript' },
   { name: 'tree-sitter-tsx.wasm', pkg: 'tree-sitter-typescript' },
   { name: 'tree-sitter-python.wasm', pkg: 'tree-sitter-python' },
+  { name: 'tree-sitter-html.wasm', pkg: 'tree-sitter-html' },
+  { name: 'tree-sitter-css.wasm', pkg: 'tree-sitter-css' },
+  // tree-sitter-scss WASM must be built: npx tree-sitter build --wasm node_modules/tree-sitter-scss
+  { name: 'tree-sitter-scss.wasm', pkg: 'tree-sitter-scss', build: true },
+  // tree-sitter-vue has an external scanner incompatible with WASM — Vue SFC
+  // blocks are parsed using regex extraction + sub-parsing with JS/TS/CSS/SCSS grammars
 ]
 
 const REQUIRED_MODELS = ['glm-5.1:cloud', 'mxbai-embed-large']
@@ -103,7 +109,9 @@ function copyGrammars() {
   }
 
   log('Copying Tree-sitter grammars...')
-  for (const { name, pkg } of GRAMMAR_SOURCES) {
+  for (const entry of GRAMMAR_SOURCES) {
+    const { name, pkg } = entry
+    const build = entry.build ?? false
     const src = path.join(ROOT, 'node_modules', pkg, name)
     const dest = path.join(GRAMMARS_DIR, name)
 
@@ -112,6 +120,11 @@ function copyGrammars() {
     } else if (fs.existsSync(src)) {
       fs.copyFileSync(src, dest)
       log(`  Copied grammar: ${name}`)
+    } else if (build) {
+      // Grammar must be built with tree-sitter CLI (e.g., tree-sitter-scss has no pre-built WASM)
+      warn(`Grammar ${name} not found in package — build it manually:`)
+      warn(`  npx tree-sitter build --wasm node_modules/${pkg}`)
+      warn(`  Then move the resulting .wasm file to ${dest}`)
     } else {
       warn(`Grammar source not found: ${src}`)
       warn(`Make sure '${pkg}' is installed (npm install) and re-run setup`)

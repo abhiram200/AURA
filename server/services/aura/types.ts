@@ -10,6 +10,14 @@ export enum AuraNodeKind {
   Route = 'Route',
   ApiCall = 'ApiCall',
   Process = 'Process',
+  // Style & markup
+  Component = 'Component',       // Vue SFC component
+  Selector = 'Selector',         // CSS/SCSS/HTML selector
+  AtRule = 'AtRule',             // CSS/SCSS @-rules (@media, @keyframes, etc.)
+  CustomProperty = 'CustomProperty', // CSS custom properties (--var)
+  Mixin = 'Mixin',               // SCSS @mixin definition
+  ScssFunction = 'ScssFunction', // SCSS @function definition
+  ScssVariable = 'ScssVariable', // SCSS $variable
 }
 
 export enum AuraEdgeType {
