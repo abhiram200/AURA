@@ -21,7 +21,7 @@ import type {
   FileHashEntry,
 } from './types.ts'
 import { computeProgress } from './types.ts'
-import { PY_EXTENSIONS, CSS_EXTENSIONS, SCSS_EXTENSIONS, HTML_EXTENSIONS, VUE_EXTENSIONS, PHP_EXTENSIONS, JAVA_EXTENSIONS } from './extensions.ts'
+import { PY_EXTENSIONS, CSS_EXTENSIONS, SCSS_EXTENSIONS, HTML_EXTENSIONS, VUE_EXTENSIONS, PHP_EXTENSIONS, JAVA_EXTENSIONS, C_EXTENSIONS, CPP_EXTENSIONS } from './extensions.ts'
 import { getGitHead } from './git.ts'
 import { BM25SearchEngine } from './search/bm25.ts'
 import { EmbeddingService } from './search/embedding.ts'
@@ -472,7 +472,7 @@ export class AuraIndexer {
           const wildcard = match[1] || ''
           const resolved = replacement.replace(/\*/g, wildcard)
           // Try common extensions
-          const extensions = ['', '.ts', '.tsx', '.js', '.jsx', '.vue', '.php', '.phtml', '.java', '/index.ts', '/index.tsx', '/index.js', '/index.jsx', '/index.vue']
+          const extensions = ['', '.ts', '.tsx', '.js', '.jsx', '.vue', '.php', '.phtml', '.java', '.h', '.hpp', '.c', '.cpp', '/index.ts', '/index.tsx', '/index.js', '/index.jsx', '/index.vue']
           for (const ext of extensions) {
             const candidate = resolved + ext
             if (fileNodeMap.has(candidate)) return candidate
@@ -770,6 +770,117 @@ export class AuraIndexer {
 
         if (!matched) {
           edge.confidence = 0.3 // Likely a JDK or third-party library class
+        }
+        continue
+      }
+
+      // ── C/C++ import resolution ──
+      const isCImport = C_EXTENSIONS.has(sourceExt)
+      const isCppImport = CPP_EXTENSIONS.has(sourceExt)
+
+      if ((isCImport || isCppImport) && !isPythonImport && !isPhpImport && !isJavaImport) {
+        const importKind = edge.metadata?.importKind as string | undefined
+
+        if (importKind === 'c-system-include' || importKind === 'cpp-system-include') {
+          // System includes like <stdio.h>, <vector> — likely standard library
+          edge.confidence = 0.3
+          continue
+        }
+
+        if (importKind === 'c-local-include' || importKind === 'cpp-local-include') {
+          // Local includes like "utils.h", "../src/main.cpp"
+          if (rawImportPath.startsWith('.') || rawImportPath.startsWith('/')) {
+            // Relative path — resolve against source directory
+            const sourceDir = path.dirname(edge.source)
+            const resolvedPath = path.normalize(path.join(sourceDir, rawImportPath)).replace(/\\/g, '/')
+            const cppExtensions = isCppImport
+              ? ['.hpp', '.hxx', '.hh', '.h', '.cpp', '.cc', '.cxx', '/index.hpp', '/index.h']
+              : ['.h', '.c', '/index.h']
+            let matched = false
+            for (const ext of cppExtensions) {
+              const candidate = resolvedPath.endsWith(ext) ? resolvedPath : resolvedPath + ext
+              if (fileNodeMap.has(candidate)) {
+                edge.target = candidate
+                edge.confidence = 0.9
+                matched = true
+                break
+              }
+            }
+            if (!matched) {
+              // Try without extension (some includes omit .h)
+              if (fileNodeMap.has(resolvedPath)) {
+                edge.target = resolvedPath
+                edge.confidence = 0.9
+                matched = true
+              }
+            }
+            if (!matched) {
+              edge.confidence = 0.4
+            }
+          } else {
+            // Non-relative local include — try common include directories
+            const cppExtensions = isCppImport
+              ? ['.hpp', '.hxx', '.hh', '.h', '.cpp', '.cc', '.cxx']
+              : ['.h', '.c']
+            const prefixes = ['', 'include/', 'src/', 'lib/']
+            let matched = false
+            for (const prefix of prefixes) {
+              for (const ext of cppExtensions) {
+                const candidate = prefix + rawImportPath + ext
+                if (fileNodeMap.has(candidate)) {
+                  edge.target = candidate
+                  edge.confidence = 0.7
+                  matched = true
+                  break
+                }
+              }
+              if (matched) break
+            }
+            if (!matched) {
+              edge.confidence = 0.3
+            }
+          }
+        } else if (importKind === 'cpp-using') {
+          // using declarations — namespace-based like Java imports
+          // "namespace std" or "std::vector" or "std::cout"
+          const dottedPath = rawImportPath.replace(/\s+/g, '') // remove spaces
+          if (dottedPath.startsWith('namespace')) {
+            // using namespace std; — low confidence, broad
+            edge.confidence = 0.3
+          } else {
+            // using std::vector; — resolve like a qualified name
+            const slashPath = dottedPath.replace(/::/g, '/')
+            const cppExtensions = ['.hpp', '.hxx', '.hh', '.h', '.cpp', '.cc', '.cxx']
+            let matched = false
+            for (const ext of cppExtensions) {
+              const candidate = slashPath + ext
+              if (fileNodeMap.has(candidate)) {
+                edge.target = candidate
+                edge.confidence = 0.7
+                matched = true
+                break
+              }
+            }
+            if (!matched) {
+              // Try short-name matching
+              const lastSegment = dottedPath.split('::').pop()!
+              for (const [nodeId] of fileNodeMap) {
+                if (nodeId.endsWith(`/${lastSegment}.hpp`) || nodeId.endsWith(`/${lastSegment}.h`) ||
+                    nodeId.endsWith(`/${lastSegment}.cpp`) || nodeId.endsWith(`/${lastSegment}.cc`)) {
+                  edge.target = nodeId
+                  edge.confidence = 0.5
+                  matched = true
+                  break
+                }
+              }
+            }
+            if (!matched) {
+              edge.confidence = 0.3
+            }
+          }
+        } else {
+          // Unknown import kind — treat as local include with low confidence
+          edge.confidence = 0.3
         }
         continue
       }

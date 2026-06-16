@@ -20,7 +20,11 @@ export enum AuraNodeKind {
   ScssVariable = 'ScssVariable', // SCSS $variable
   // PHP / Java
   Trait = 'Trait',               // PHP trait
-  Enum = 'Enum',                 // PHP/Java enum
+  Enum = 'Enum',                 // PHP/Java/C/C++ enum
+  // C / C++
+  Struct = 'Struct',             // C/C++ struct
+  Namespace = 'Namespace',       // C++ namespace
+  Macro = 'Macro',               // #define preprocessor macro
 }
 
 export enum AuraEdgeType {

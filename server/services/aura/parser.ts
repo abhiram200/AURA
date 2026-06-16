@@ -20,6 +20,8 @@ import {
   VUE_EXTENSIONS,
   PHP_EXTENSIONS,
   JAVA_EXTENSIONS,
+  C_EXTENSIONS,
+  CPP_EXTENSIONS,
   PARSABLE_EXTENSIONS,
 } from './extensions.ts'
 
@@ -85,6 +87,8 @@ export class AuraParser {
   private scssLang: Language | null = null
   private phpLang: Language | null = null
   private javaLang: Language | null = null
+  private cLang: Language | null = null
+  private cppLang: Language | null = null
   private parser: Parser | null = null
   private dataFlowAnalyzer = new AuraDataFlow()
 
@@ -145,6 +149,20 @@ export class AuraParser {
       console.warn('tree-sitter-java.wasm not found; Java support disabled')
     }
 
+    try {
+      const cWasm = path.join(grammarsDir, 'tree-sitter-c.wasm')
+      this.cLang = await Language.load(cWasm)
+    } catch {
+      console.warn('tree-sitter-c.wasm not found; C support disabled')
+    }
+
+    try {
+      const cppWasm = path.join(grammarsDir, 'tree-sitter-cpp.wasm')
+      this.cppLang = await Language.load(cppWasm)
+    } catch {
+      console.warn('tree-sitter-cpp.wasm not found; C++ support disabled')
+    }
+
     // Note: tree-sitter-vue cannot be compiled to WASM due to its external scanner.
     // Vue SFC parsing uses regex-based block extraction + sub-parsing with JS/TS/CSS/SCSS grammars.
     // this.vueLang is not needed and remains null.
@@ -185,6 +203,12 @@ export class AuraParser {
     if (JAVA_EXTENSIONS.has(ext)) {
       return this.javaLang
     }
+    if (C_EXTENSIONS.has(ext)) {
+      return this.cLang
+    }
+    if (CPP_EXTENSIONS.has(ext)) {
+      return this.cppLang
+    }
     // Vue doesn't use tree-sitter-vue (it has an incompatible external scanner).
     // parseVueFile uses regex-based block extraction + sub-parsing.
     if (VUE_EXTENSIONS.has(ext)) {
@@ -222,6 +246,12 @@ export class AuraParser {
     }
     if (JAVA_EXTENSIONS.has(ext)) {
       return this.parseJavaFile(filePath, source)
+    }
+    if (C_EXTENSIONS.has(ext)) {
+      return this.parseCFile(filePath, source)
+    }
+    if (CPP_EXTENSIONS.has(ext)) {
+      return this.parseCppFile(filePath, source)
     }
     if (VUE_EXTENSIONS.has(ext)) {
       return await this.parseVueFile(filePath, source)
@@ -2581,7 +2611,1227 @@ export class AuraParser {
     walk(tree.rootNode)
   }
 
-  // ── HTML parsing ───────────────────────────────────────────────────────────
+  // ── C parsing ──────────────────────────────────────────────────────────────
+
+  private parseCFile(filePath: string, source: string): ParseResult {
+    const language = this.selectLanguage(filePath)
+    if (!language || !this.parser) {
+      return { filePath, symbols: [], imports: [], calls: [], heritage: [], contains: [], dataFlow: [] }
+    }
+
+    this.parser.setLanguage(language)
+    const tree = this.parser.parse(source)
+    if (!tree) {
+      return { filePath, symbols: [], imports: [], calls: [], heritage: [], contains: [], dataFlow: [] }
+    }
+
+    try {
+      const symbols: AuraNode[] = []
+      const imports: AuraEdge[] = []
+      const calls: AuraEdge[] = []
+      const heritage: AuraEdge[] = []
+      const contains: AuraEdge[] = []
+      const seenIds = new Set<string>()
+
+      this.extractCDeclarations(tree, filePath, symbols, contains, seenIds)
+      this.extractCImports(tree, filePath, imports)
+      this.extractCCalls(tree, filePath, calls, symbols)
+      // C has no inheritance — heritage is empty
+
+      return { filePath, symbols, imports, calls, heritage, contains, dataFlow: [] }
+    } finally {
+      tree.delete()
+    }
+  }
+
+  private extractCDeclarations(
+    tree: Tree,
+    filePath: string,
+    symbols: AuraNode[],
+    contains: AuraEdge[],
+    seenIds: Set<string>,
+  ): void {
+    const walk = (node: SyntaxNode): void => {
+      // Function definitions: int main() { ... }
+      if (node.type === 'function_definition') {
+        const name = this.extractCFunctionName(node)
+        if (name) {
+          const symbolId = `${filePath}:${name}`
+          if (!seenIds.has(symbolId)) {
+            seenIds.add(symbolId)
+            const isStatic = this.hasCStorageClass(node, 'static')
+            symbols.push({
+              id: symbolId,
+              kind: AuraNodeKind.Function,
+              name,
+              filePath,
+              range: { startLine: node.startPosition.row + 1, endLine: node.endPosition.row + 1 },
+              exported: !isStatic,
+              metadata: isStatic ? { modifiers: ['static'] } : undefined,
+            })
+            contains.push({ source: filePath, target: symbolId, type: AuraEdgeType.CONTAINS, confidence: 1.0 })
+          }
+        }
+      }
+
+      // Struct definitions: struct Point { int x; int y; };
+      if (node.type === 'struct_specifier') {
+        const nameNode = node.childForFieldName('name')
+        // Only create a symbol if the struct has a name and a body
+        if (nameNode && node.childForFieldName('body')) {
+          const name = nameNode.text
+          const symbolId = `${filePath}:${name}`
+          if (!seenIds.has(symbolId)) {
+            seenIds.add(symbolId)
+            symbols.push({
+              id: symbolId,
+              kind: AuraNodeKind.Struct,
+              name,
+              filePath,
+              range: { startLine: node.startPosition.row + 1, endLine: node.endPosition.row + 1 },
+              exported: true,
+            })
+            contains.push({ source: filePath, target: symbolId, type: AuraEdgeType.CONTAINS, confidence: 1.0 })
+          }
+        }
+      }
+
+      // Enum definitions: enum Color { RED, GREEN, BLUE };
+      if (node.type === 'enum_specifier') {
+        const nameNode = node.childForFieldName('name')
+        if (nameNode && node.childForFieldName('body')) {
+          const name = nameNode.text
+          const symbolId = `${filePath}:${name}`
+          if (!seenIds.has(symbolId)) {
+            seenIds.add(symbolId)
+            symbols.push({
+              id: symbolId,
+              kind: AuraNodeKind.Enum,
+              name,
+              filePath,
+              range: { startLine: node.startPosition.row + 1, endLine: node.endPosition.row + 1 },
+              exported: true,
+            })
+            contains.push({ source: filePath, target: symbolId, type: AuraEdgeType.CONTAINS, confidence: 1.0 })
+          }
+        }
+      }
+
+      // Typedef: typedef struct { ... } Point; typedef int (*Comparator)(...);
+      if (node.type === 'type_definition') {
+        // The name can be:
+        // 1. A direct type_identifier child (e.g., "typedef struct { int x; } Point;" → type_identifier "Point")
+        // 2. Inside a declarator (e.g., "typedef int (*Comparator)(...);" → function_declarator → type_identifier)
+        let name: string | null = null
+
+        // Try type_identifier child directly on the type_definition
+        for (let i = 0; i < node.childCount; i++) {
+          const child = node.child(i)!
+          if (child.type === 'type_identifier') {
+            name = child.text
+            break
+          }
+        }
+
+        // If no direct type_identifier, try the declarator
+        if (!name) {
+          const declaratorNode = node.childForFieldName('declarator')
+          if (declaratorNode) {
+            name = this.extractCDeclaratorName(declaratorNode)
+          }
+        }
+
+        if (name) {
+          // Check if this typedef wraps a struct/enum — if so, register it as Struct/Enum too
+          let innerKind: AuraNodeKind | null = null
+          for (let i = 0; i < node.childCount; i++) {
+            const child = node.child(i)!
+            if (child.type === 'struct_specifier') {
+              innerKind = AuraNodeKind.Struct
+              break
+            }
+            if (child.type === 'enum_specifier') {
+              innerKind = AuraNodeKind.Enum
+              break
+            }
+          }
+
+          const symbolId = `${filePath}:${name}`
+          if (!seenIds.has(symbolId)) {
+            seenIds.add(symbolId)
+            // If this is a typedef of a struct/enum, register it as that kind instead of TypeAlias
+            const kind = innerKind ?? AuraNodeKind.TypeAlias
+            symbols.push({
+              id: symbolId,
+              kind,
+              name,
+              filePath,
+              range: { startLine: node.startPosition.row + 1, endLine: node.endPosition.row + 1 },
+              exported: true,
+            })
+            contains.push({ source: filePath, target: symbolId, type: AuraEdgeType.CONTAINS, confidence: 1.0 })
+          }
+        }
+      }
+
+      // Preprocessor macros: #define NAME value
+      if (node.type === 'preproc_def') {
+        const nameNode = node.childForFieldName('name')
+        if (nameNode) {
+          const name = nameNode.text
+          // Skip trivial/common macro names
+          if (!this.isCBuiltinMacro(name)) {
+            const symbolId = `${filePath}:${name}`
+            if (!seenIds.has(symbolId)) {
+              seenIds.add(symbolId)
+              symbols.push({
+                id: symbolId,
+                kind: AuraNodeKind.Macro,
+                name,
+                filePath,
+                range: { startLine: node.startPosition.row + 1, endLine: node.endPosition.row + 1 },
+                exported: true,
+              })
+              contains.push({ source: filePath, target: symbolId, type: AuraEdgeType.CONTAINS, confidence: 1.0 })
+            }
+          }
+        }
+      }
+
+      // Top-level declarations (function prototypes or global variables)
+      // These can be at translation_unit level OR inside preproc_ifdef/preproc_if blocks
+      if (node.type === 'declaration') {
+        const parentType = node.parent?.type
+        const isTopLevel = parentType === 'translation_unit' ||
+          parentType === 'preproc_ifdef' || parentType === 'preproc_ifndef' ||
+          parentType === 'preproc_if' || parentType === 'preproc_else' ||
+          parentType === 'preproc_elif'
+        if (isTopLevel) {
+          // Check if this is a function declaration (prototype)
+          const funcDeclarator = this.findFunctionDeclaratorInDeclaration(node)
+          if (funcDeclarator) {
+            const name = this.extractCDeclaratorName(funcDeclarator)
+            if (name && !this.isCBuiltinFunction(name)) {
+              const symbolId = `${filePath}:${name}`
+              if (!seenIds.has(symbolId)) {
+                seenIds.add(symbolId)
+                const isStatic = this.hasCStorageClass(node, 'static')
+                symbols.push({
+                  id: symbolId,
+                  kind: AuraNodeKind.Function,
+                  name,
+                  filePath,
+                  range: { startLine: node.startPosition.row + 1, endLine: node.endPosition.row + 1 },
+                  exported: !isStatic,
+                  metadata: isStatic ? { modifiers: ['static'] } : undefined,
+                })
+                contains.push({ source: filePath, target: symbolId, type: AuraEdgeType.CONTAINS, confidence: 1.0 })
+              }
+            }
+          } else {
+            // Not a function — try as a global variable
+            this.extractCGlobalVariables(node, filePath, symbols, contains, seenIds)
+          }
+        }
+      }
+
+      for (let i = 0; i < node.childCount; i++) {
+        walk(node.child(i)!)
+      }
+    }
+    walk(tree.rootNode)
+  }
+
+  private extractCFunctionName(node: SyntaxNode): string | null {
+    // function_definition has: type + declarator (which may be function_declarator)
+    const declaratorNode = node.childForFieldName('declarator')
+    if (declaratorNode) {
+      return this.extractCDeclaratorName(declaratorNode)
+    }
+    // Fallback: look for function_declarator child
+    for (let i = 0; i < node.childCount; i++) {
+      const child = node.child(i)!
+      if (child.type === 'function_declarator' || child.type === 'pointer_declarator') {
+        return this.extractCDeclaratorName(child)
+      }
+    }
+    return null
+  }
+
+  /** Recursively extract the identifier name from a C declarator chain.
+   *  C declarators can be nested: pointer_declarator → function_declarator → identifier
+   */
+  private extractCDeclaratorName(node: SyntaxNode): string | null {
+    if (node.type === 'identifier' || node.type === 'field_identifier' || node.type === 'type_identifier') {
+      return node.text
+    }
+    // Walk children looking for the name
+    const nameField = node.childForFieldName('declarator')
+    if (nameField) {
+      return this.extractCDeclaratorName(nameField)
+    }
+    // For function_declarator, the declarator field holds the name
+    for (let i = 0; i < node.childCount; i++) {
+      const child = node.child(i)!
+      if (child.type === 'identifier' || child.type === 'field_identifier' || child.type === 'type_identifier') {
+        return child.text
+      }
+      if (child.type === 'function_declarator' || child.type === 'pointer_declarator' ||
+          child.type === 'parenthesized_declarator') {
+        const name = this.extractCDeclaratorName(child)
+        if (name) return name
+      }
+    }
+    return null
+  }
+
+  private hasCStorageClass(node: SyntaxNode, storageClass: string): boolean {
+    // Check siblings for storage_class_specifier
+    let current: SyntaxNode | null = node
+    for (let i = 0; i < current.childCount; i++) {
+      const child = current.child(i)!
+      if (child.type === 'storage_class_specifier' && child.text === storageClass) {
+        return true
+      }
+    }
+    // Also check the declaration parent for C
+    if (node.parent?.type === 'declaration') {
+      for (let i = 0; i < node.parent.childCount; i++) {
+        const child = node.parent.child(i)!
+        if (child.type === 'storage_class_specifier' && child.text === storageClass) {
+          return true
+        }
+      }
+    }
+    return false
+  }
+
+  private extractCGlobalVariables(
+    node: SyntaxNode,
+    filePath: string,
+    symbols: AuraNode[],
+    contains: AuraEdge[],
+    seenIds: Set<string>,
+  ): void {
+    // Top-level declarations like: int count; static const char *name;
+    const declaratorNode = node.childForFieldName('declarator')
+    if (declaratorNode) {
+      const name = this.extractCDeclaratorName(declaratorNode)
+      if (name) {
+        const isStatic = this.hasCStorageClass(node, 'static')
+        const symbolId = `${filePath}:${name}`
+        if (!seenIds.has(symbolId)) {
+          seenIds.add(symbolId)
+          symbols.push({
+            id: symbolId,
+            kind: AuraNodeKind.Variable,
+            name,
+            filePath,
+            range: { startLine: node.startPosition.row + 1, endLine: node.endPosition.row + 1 },
+            exported: !isStatic,
+            metadata: isStatic ? { modifiers: ['static'] } : undefined,
+          })
+          contains.push({ source: filePath, target: symbolId, type: AuraEdgeType.CONTAINS, confidence: 1.0 })
+        }
+      }
+    }
+  }
+
+  /** Find a function_declarator inside a declaration node (for function prototypes) */
+  private findFunctionDeclaratorInDeclaration(node: SyntaxNode): SyntaxNode | null {
+    const walk = (n: SyntaxNode): SyntaxNode | null => {
+      if (n.type === 'function_declarator') return n
+      for (let i = 0; i < n.childCount; i++) {
+        const found = walk(n.child(i)!)
+        if (found) return found
+      }
+      return null
+    }
+    // Only search the declarator field, not the whole declaration
+    const declarator = node.childForFieldName('declarator')
+    if (declarator) {
+      return walk(declarator)
+    }
+    return null
+  }
+
+  private extractCImports(
+    tree: Tree,
+    filePath: string,
+    imports: AuraEdge[],
+  ): void {
+    const walk = (node: SyntaxNode): void => {
+      // #include "path.h" or #include <path.h>
+      if (node.type === 'preproc_include') {
+        const pathNode = node.childForFieldName('path')
+        if (pathNode) {
+          if (pathNode.type === 'string_literal') {
+            // Local include: #include "path.h"
+            let importPath = ''
+            for (let i = 0; i < pathNode.childCount; i++) {
+              const child = pathNode.child(i)!
+              if (child.type === 'string_content') {
+                importPath = child.text
+              }
+            }
+            // Fallback: strip quotes
+            if (!importPath) {
+              importPath = pathNode.text.replace(/^"(.*)"$/, '$1')
+            }
+            if (importPath) {
+              imports.push({
+                source: filePath,
+                target: importPath,
+                type: AuraEdgeType.IMPORTS,
+                confidence: 0.9,
+                metadata: { rawImportPath: importPath, importKind: 'c-local-include' },
+              })
+            }
+          } else if (pathNode.type === 'system_lib_string') {
+            // System include: #include <stdio.h> — strip < >
+            const importPath = pathNode.text.replace(/^<(.*)>$/, '$1')
+            if (importPath) {
+              imports.push({
+                source: filePath,
+                target: importPath,
+                type: AuraEdgeType.IMPORTS,
+                confidence: 0.3,
+                metadata: { rawImportPath: importPath, importKind: 'c-system-include' },
+              })
+            }
+          } else {
+            // Macro include or other
+            const importPath = pathNode.text
+            if (importPath) {
+              imports.push({
+                source: filePath,
+                target: importPath,
+                type: AuraEdgeType.IMPORTS,
+                confidence: 0.2,
+                metadata: { rawImportPath: importPath, importKind: 'c-macro-include' },
+              })
+            }
+          }
+        }
+      }
+
+      for (let i = 0; i < node.childCount; i++) {
+        walk(node.child(i)!)
+      }
+    }
+    walk(tree.rootNode)
+  }
+
+  private extractCCalls(
+    tree: Tree,
+    filePath: string,
+    calls: AuraEdge[],
+    symbols: AuraNode[],
+  ): void {
+    const seenCalls = new Set<string>()
+
+    const walk = (node: SyntaxNode): void => {
+      // Function calls: function_name(args)
+      if (node.type === 'call_expression') {
+        const funcNode = node.childForFieldName('function')
+        const funcName = funcNode?.text ?? ''
+
+        // For simple function calls (identifier), extract the name
+        if (funcNode?.type === 'identifier') {
+          const callName = funcNode.text
+          if (callName && !this.isCBuiltinFunction(callName)) {
+            const enclosingSymbol = this.findEnclosingSymbolFromTree(node, symbols, filePath)
+            const source = enclosingSymbol ? enclosingSymbol.id : filePath
+            const dedupeKey = `${source}→${callName}`
+            if (!seenCalls.has(dedupeKey)) {
+              seenCalls.add(dedupeKey)
+              calls.push({
+                source,
+                target: callName,
+                type: AuraEdgeType.CALLS,
+                confidence: 0.7,
+                metadata: { callName, callTargetKind: 'direct' },
+              })
+            }
+          }
+        }
+      }
+
+      for (let i = 0; i < node.childCount; i++) {
+        walk(node.child(i)!)
+      }
+    }
+    walk(tree.rootNode)
+  }
+
+  private isCBuiltinFunction(name: string): boolean {
+    const builtins = new Set([
+      // stdio
+      'printf', 'fprintf', 'sprintf', 'snprintf', 'scanf', 'fscanf', 'sscanf',
+      'puts', 'fputs', 'gets', 'fgets', 'putchar', 'getchar', 'getchar_unlocked',
+      'fopen', 'fclose', 'fread', 'fwrite', 'fseek', 'ftell', 'rewind', 'fflush',
+      'feof', 'ferror', 'clearerr', 'remove', 'rename', 'tmpfile', 'tmpnam',
+      // stdlib
+      'malloc', 'calloc', 'realloc', 'free', 'abort', 'exit', 'atexit', 'quick_exit',
+      'atoi', 'atol', 'atof', 'strtol', 'strtoul', 'strtod', 'strtof', 'strtold',
+      'rand', 'srand', 'abs', 'labs', 'div', 'ldiv', 'qsort', 'bsearch',
+      'getenv', 'system', 'exec', 'atoi',
+      // string
+      'strlen', 'strcpy', 'strncpy', 'strcat', 'strncat', 'strcmp', 'strncmp',
+      'strchr', 'strrchr', 'strstr', 'strtok', 'strdup', 'strerror',
+      'memcpy', 'memmove', 'memset', 'memcmp', 'memchr',
+      // math
+      'abs', 'fabs', 'sqrt', 'pow', 'sin', 'cos', 'tan', 'asin', 'acos', 'atan',
+      'log', 'log10', 'exp', 'ceil', 'floor', 'round', 'fmod', 'modf',
+      // assert
+      'assert',
+      // signal
+      'signal', 'raise',
+      // setjmp
+      'setjmp', 'longjmp',
+      // common
+      'sizeof', 'offsetof', 'NULL',
+    ])
+    return builtins.has(name)
+  }
+
+  private isCBuiltinMacro(name: string): boolean {
+    const builtins = new Set([
+      'NULL', 'TRUE', 'FALSE', 'EOF', 'BUFSIZ', 'FILENAME_MAX', 'FOPEN_MAX',
+      'RAND_MAX', 'EXIT_SUCCESS', 'EXIT_FAILURE', 'INT_MIN', 'INT_MAX',
+      'LONG_MIN', 'LONG_MAX', 'UINT_MAX', 'ULONG_MAX', 'CHAR_MIN', 'CHAR_MAX',
+      'FLT_MIN', 'FLT_MAX', 'DBL_MIN', 'DBL_MAX', 'SIZE_MAX',
+      '__LINE__', '__FILE__', '__DATE__', '__TIME__', '__STDC__', '__func__',
+      'stdin', 'stdout', 'stderr', 'SEEK_SET', 'SEEK_CUR', 'SEEK_END',
+    ])
+    return builtins.has(name)
+  }
+
+  // ── C++ parsing ────────────────────────────────────────────────────────────
+
+  private parseCppFile(filePath: string, source: string): ParseResult {
+    const language = this.selectLanguage(filePath)
+    if (!language || !this.parser) {
+      return { filePath, symbols: [], imports: [], calls: [], heritage: [], contains: [], dataFlow: [] }
+    }
+
+    this.parser.setLanguage(language)
+    const tree = this.parser.parse(source)
+    if (!tree) {
+      return { filePath, symbols: [], imports: [], calls: [], heritage: [], contains: [], dataFlow: [] }
+    }
+
+    try {
+      const symbols: AuraNode[] = []
+      const imports: AuraEdge[] = []
+      const calls: AuraEdge[] = []
+      const heritage: AuraEdge[] = []
+      const contains: AuraEdge[] = []
+      const seenIds = new Set<string>()
+
+      this.extractCppDeclarations(tree, filePath, symbols, contains, seenIds)
+      this.extractCppImports(tree, filePath, imports)
+      this.extractCppCalls(tree, filePath, calls, symbols)
+      this.extractCppHeritage(tree, filePath, heritage)
+
+      return { filePath, symbols, imports, calls, heritage, contains, dataFlow: [] }
+    } finally {
+      tree.delete()
+    }
+  }
+
+  private extractCppDeclarations(
+    tree: Tree,
+    filePath: string,
+    symbols: AuraNode[],
+    contains: AuraEdge[],
+    seenIds: Set<string>,
+  ): void {
+    const walk = (node: SyntaxNode): void => {
+      // Class definitions: class Widget { ... };
+      if (node.type === 'class_specifier') {
+        const nameNode = node.childForFieldName('name')
+        if (nameNode) {
+          const name = nameNode.text
+          const symbolId = `${filePath}:${name}`
+          if (!seenIds.has(symbolId)) {
+            seenIds.add(symbolId)
+            const modifiers = this.extractCppAccessModifiers(node)
+            symbols.push({
+              id: symbolId,
+              kind: AuraNodeKind.Class,
+              name,
+              filePath,
+              range: { startLine: node.startPosition.row + 1, endLine: node.endPosition.row + 1 },
+              exported: true,
+              metadata: modifiers.length > 0 ? { modifiers } : undefined,
+            })
+            contains.push({ source: filePath, target: symbolId, type: AuraEdgeType.CONTAINS, confidence: 1.0 })
+          }
+        }
+      }
+
+      // Struct definitions: struct Point { int x; int y; };
+      if (node.type === 'struct_specifier') {
+        const nameNode = node.childForFieldName('name')
+        if (nameNode && node.childForFieldName('body')) {
+          const name = nameNode.text
+          const symbolId = `${filePath}:${name}`
+          if (!seenIds.has(symbolId)) {
+            seenIds.add(symbolId)
+            symbols.push({
+              id: symbolId,
+              kind: AuraNodeKind.Struct,
+              name,
+              filePath,
+              range: { startLine: node.startPosition.row + 1, endLine: node.endPosition.row + 1 },
+              exported: true,
+            })
+            contains.push({ source: filePath, target: symbolId, type: AuraEdgeType.CONTAINS, confidence: 1.0 })
+          }
+        }
+      }
+
+      // Enum definitions (C++ also has enum class)
+      if (node.type === 'enum_specifier') {
+        const nameNode = node.childForFieldName('name')
+        if (nameNode) {
+          const name = nameNode.text
+          const symbolId = `${filePath}:${name}`
+          if (!seenIds.has(symbolId)) {
+            seenIds.add(symbolId)
+            // Check if it's an enum class
+            const isEnumClass = this.hasCppKeyword(node, 'class') || this.hasCppKeyword(node, 'struct')
+            symbols.push({
+              id: symbolId,
+              kind: AuraNodeKind.Enum,
+              name,
+              filePath,
+              range: { startLine: node.startPosition.row + 1, endLine: node.endPosition.row + 1 },
+              exported: true,
+              metadata: isEnumClass ? { modifiers: ['enum_class'] } : undefined,
+            })
+            contains.push({ source: filePath, target: symbolId, type: AuraEdgeType.CONTAINS, confidence: 1.0 })
+          }
+        }
+      }
+
+      // Namespace definitions: namespace MyApp { ... }
+      if (node.type === 'namespace_definition') {
+        const nameNode = node.childForFieldName('name')
+        if (nameNode) {
+          const name = nameNode.text
+          const symbolId = `${filePath}:${name}`
+          if (!seenIds.has(symbolId)) {
+            seenIds.add(symbolId)
+            symbols.push({
+              id: symbolId,
+              kind: AuraNodeKind.Namespace,
+              name,
+              filePath,
+              range: { startLine: node.startPosition.row + 1, endLine: node.endPosition.row + 1 },
+              exported: true,
+            })
+            contains.push({ source: filePath, target: symbolId, type: AuraEdgeType.CONTAINS, confidence: 1.0 })
+          }
+        }
+      }
+
+      // Function definitions (including methods)
+      if (node.type === 'function_definition') {
+        const name = this.extractCppFunctionName(node)
+        if (name) {
+          // Determine if this is a method:
+          // 1. Inside a class/struct body, or
+          // 2. Qualified identifier like Widget::getName (defined outside the class)
+          const declaratorNode = node.childForFieldName('declarator')
+          const isQualifiedMethod = declaratorNode?.type === 'qualified_identifier' ||
+            (declaratorNode?.type === 'function_declarator' && this.hasQualifiedIdentifier(declaratorNode))
+          const isMethod = this.isCppInsideClass(node) || isQualifiedMethod
+          const kind = isMethod ? AuraNodeKind.Method : AuraNodeKind.Function
+          const symbolId = `${filePath}:${name}`
+          if (!seenIds.has(symbolId)) {
+            seenIds.add(symbolId)
+            const modifiers = this.extractCppMethodModifiers(node)
+            symbols.push({
+              id: symbolId,
+              kind,
+              name,
+              filePath,
+              range: { startLine: node.startPosition.row + 1, endLine: node.endPosition.row + 1 },
+              exported: !modifiers.includes('private') && !modifiers.includes('protected'),
+              metadata: modifiers.length > 0 ? { modifiers } : undefined,
+            })
+            contains.push({ source: filePath, target: symbolId, type: AuraEdgeType.CONTAINS, confidence: 1.0 })
+          }
+        }
+      }
+
+      // Method declarations inside class body (field_declaration with function_declarator)
+      // In C++, class method prototypes appear as: void getName() const;
+      // which is a field_declaration containing a function_declarator
+      if (node.type === 'field_declaration') {
+        const funcDecl = this.findFunctionDeclaratorInDeclaration(node)
+        if (funcDecl) {
+          // This is a method declaration, not a field
+          const name = this.extractCDeclaratorName(funcDecl)
+          if (name && !this.isCppBuiltinFunction(name)) {
+            const symbolId = `${filePath}:${name}`
+            if (!seenIds.has(symbolId)) {
+              seenIds.add(symbolId)
+              // Determine access modifier from context
+              const modifiers: string[] = []
+              let sibling = node.previousNamedSibling
+              while (sibling) {
+                if (sibling.type === 'access_specifier') {
+                  modifiers.push(sibling.text)
+                  break
+                }
+                sibling = sibling.previousNamedSibling
+              }
+              symbols.push({
+                id: symbolId,
+                kind: AuraNodeKind.Method,
+                name,
+                filePath,
+                range: { startLine: node.startPosition.row + 1, endLine: node.endPosition.row + 1 },
+                exported: !modifiers.includes('private') && !modifiers.includes('protected'),
+                metadata: modifiers.length > 0 ? { modifiers } : undefined,
+              })
+              contains.push({ source: filePath, target: symbolId, type: AuraEdgeType.CONTAINS, confidence: 1.0 })
+            }
+          }
+        } else {
+          // This is a field (data member) declaration
+          const declaratorNode = node.childForFieldName('declarator')
+          if (declaratorNode) {
+            const name = this.extractCDeclaratorName(declaratorNode)
+            if (name) {
+              const symbolId = `${filePath}:${name}`
+              if (!seenIds.has(symbolId)) {
+                seenIds.add(symbolId)
+                const modifiers: string[] = []
+                let sibling = node.previousNamedSibling
+                while (sibling) {
+                  if (sibling.type === 'access_specifier') {
+                    modifiers.push(sibling.text)
+                    break
+                  }
+                  sibling = sibling.previousNamedSibling
+                }
+                symbols.push({
+                  id: symbolId,
+                  kind: AuraNodeKind.Variable,
+                  name,
+                  filePath,
+                  range: { startLine: node.startPosition.row + 1, endLine: node.endPosition.row + 1 },
+                  exported: !modifiers.includes('private') && !modifiers.includes('protected'),
+                  metadata: modifiers.length > 0 ? { modifiers } : undefined,
+                })
+                contains.push({ source: filePath, target: symbolId, type: AuraEdgeType.CONTAINS, confidence: 1.0 })
+              }
+            }
+          }
+        }
+      }
+
+      // Function declarations (prototypes)
+      if (node.type === 'declaration' && node.parent?.type === 'translation_unit') {
+        // Check for function_declarator inside — this is a function declaration/prototype
+        const declaratorNode = node.childForFieldName('declarator')
+        if (declaratorNode) {
+          const funcDeclarator = this.findCppFunctionDeclarator(declaratorNode)
+          if (funcDeclarator && !node.children.some(c => c.type === 'compound_statement')) {
+            // This is a declaration, not a definition — still useful to track
+            const name = this.extractCDeclaratorName(funcDeclarator)
+            if (name && !this.isCppBuiltinFunction(name)) {
+              const symbolId = `${filePath}:${name}`
+              if (!seenIds.has(symbolId)) {
+                seenIds.add(symbolId)
+                const modifiers = this.extractCppMethodModifiers(node)
+                symbols.push({
+                  id: symbolId,
+                  kind: AuraNodeKind.Function,
+                  name,
+                  filePath,
+                  range: { startLine: node.startPosition.row + 1, endLine: node.endPosition.row + 1 },
+                  exported: !modifiers.includes('private') && !modifiers.includes('protected'),
+                  metadata: modifiers.length > 0 ? { modifiers } : undefined,
+                })
+                contains.push({ source: filePath, target: symbolId, type: AuraEdgeType.CONTAINS, confidence: 1.0 })
+              }
+            }
+          }
+        }
+        // Also check for global variable declarations
+        if (!funcDeclarator) {
+          this.extractCppGlobalVariables(node, filePath, symbols, contains, seenIds)
+        }
+      }
+
+      // Typedef / type alias: typedef int MyInt; using MyInt = int;
+      if (node.type === 'type_definition') {
+        const declaratorNode = node.childForFieldName('declarator')
+        if (declaratorNode) {
+          const name = this.extractCDeclaratorName(declaratorNode)
+          if (name) {
+            const symbolId = `${filePath}:${name}`
+            if (!seenIds.has(symbolId)) {
+              seenIds.add(symbolId)
+              symbols.push({
+                id: symbolId,
+                kind: AuraNodeKind.TypeAlias,
+                name,
+                filePath,
+                range: { startLine: node.startPosition.row + 1, endLine: node.endPosition.row + 1 },
+                exported: true,
+              })
+              contains.push({ source: filePath, target: symbolId, type: AuraEdgeType.CONTAINS, confidence: 1.0 })
+            }
+          }
+        }
+      }
+
+      // using alias: using MyInt = int;
+      if (node.type === 'alias_declaration') {
+        const nameNode = node.childForFieldName('name')
+        if (nameNode) {
+          const name = nameNode.text
+          const symbolId = `${filePath}:${name}`
+          if (!seenIds.has(symbolId)) {
+            seenIds.add(symbolId)
+            symbols.push({
+              id: symbolId,
+              kind: AuraNodeKind.TypeAlias,
+              name,
+              filePath,
+              range: { startLine: node.startPosition.row + 1, endLine: node.endPosition.row + 1 },
+              exported: true,
+            })
+            contains.push({ source: filePath, target: symbolId, type: AuraEdgeType.CONTAINS, confidence: 1.0 })
+          }
+        }
+      }
+
+      // Preprocessor macros: #define NAME value
+      if (node.type === 'preproc_def') {
+        const nameNode = node.childForFieldName('name')
+        if (nameNode && !this.isCBuiltinMacro(nameNode.text)) {
+          const name = nameNode.text
+          const symbolId = `${filePath}:${name}`
+          if (!seenIds.has(symbolId)) {
+            seenIds.add(symbolId)
+            symbols.push({
+              id: symbolId,
+              kind: AuraNodeKind.Macro,
+              name,
+              filePath,
+              range: { startLine: node.startPosition.row + 1, endLine: node.endPosition.row + 1 },
+              exported: true,
+            })
+            contains.push({ source: filePath, target: symbolId, type: AuraEdgeType.CONTAINS, confidence: 1.0 })
+          }
+        }
+      }
+
+      for (let i = 0; i < node.childCount; i++) {
+        walk(node.child(i)!)
+      }
+    }
+    walk(tree.rootNode)
+  }
+
+  private extractCppFunctionName(node: SyntaxNode): string | null {
+    // C++ function_definition has: type + declarator (which may be function_declarator or qualified)
+    const declaratorNode = node.childForFieldName('declarator')
+    if (declaratorNode) {
+      // Qualified identifiers like "MyClass::myMethod" — extract the method name part
+      if (declaratorNode.type === 'qualified_identifier') {
+        // Get the last identifier after ::
+        const parts = declaratorNode.text.split('::')
+        return parts[parts.length - 1] || null
+      }
+      return this.extractCDeclaratorName(declaratorNode)
+    }
+    // Fallback
+    for (let i = 0; i < node.childCount; i++) {
+      const child = node.child(i)!
+      if (child.type === 'function_declarator' || child.type === 'pointer_declarator') {
+        return this.extractCDeclaratorName(child)
+      }
+    }
+    return null
+  }
+
+  private isCppInsideClass(node: SyntaxNode): boolean {
+    let current = node.parent
+    while (current) {
+      if (current.type === 'class_specifier' || current.type === 'struct_specifier') {
+        return true
+      }
+      current = current.parent
+    }
+    return false
+  }
+
+  /** Check if a function_declarator contains a qualified_identifier (e.g., Widget::getName) */
+  private hasQualifiedIdentifier(node: SyntaxNode): boolean {
+    for (let i = 0; i < node.childCount; i++) {
+      const child = node.child(i)!
+      if (child.type === 'qualified_identifier') return true
+      if (this.hasQualifiedIdentifier(child)) return true
+    }
+    return false
+  }
+
+  private extractCppMethodModifiers(node: SyntaxNode): string[] {
+    const modifiers: string[] = []
+    // Walk up to the declaration to find access specifiers
+    let current: SyntaxNode | null = node
+    // Check access_specifier siblings in parent
+    if (current.parent?.type === 'field_declaration_list' || current.parent?.type === 'declaration_list') {
+      const body = current.parent
+      for (let i = 0; i < body.childCount; i++) {
+        const sibling = body.child(i)!
+        if (sibling.type === 'access_specifier') {
+          // This is an access specifier in the class body
+        }
+      }
+    }
+    // Check for static, virtual, inline, etc. in declaration specifiers
+    for (let i = 0; i < node.childCount; i++) {
+      const child = node.child(i)!
+      if (child.type === 'storage_class_specifier' || child.type === 'virtual' ||
+          child.type === 'inline' || child.type === 'const' || child.type === 'volatile') {
+        modifiers.push(child.text)
+      }
+    }
+    // Check parent declaration for access specifiers
+    if (node.parent) {
+      // Look for access_specifier before this node in the class body
+      const classBody = node.parent
+      for (let i = 0; i < classBody.childCount; i++) {
+        const child = classBody.child(i)!
+        if (child.type === 'access_specifier') {
+          modifiers.push(child.text) // "public", "private", "protected"
+        }
+      }
+    }
+    return modifiers
+  }
+
+  private extractCppAccessModifiers(node: SyntaxNode): string[] {
+    const modifiers: string[] = []
+    for (let i = 0; i < node.childCount; i++) {
+      const child = node.child(i)!
+      if (child.type === 'final' || child.type === 'abstract') {
+        modifiers.push(child.text)
+      }
+    }
+    return modifiers
+  }
+
+  private hasCppKeyword(node: SyntaxNode, keyword: string): boolean {
+    for (let i = 0; i < node.childCount; i++) {
+      const child = node.child(i)!
+      if (child.text === keyword) return true
+    }
+    return false
+  }
+
+  private findCppFunctionDeclarator(node: SyntaxNode): SyntaxNode | null {
+    if (node.type === 'function_declarator') return node
+    for (let i = 0; i < node.childCount; i++) {
+      const child = node.child(i)!
+      const found = this.findCppFunctionDeclarator(child)
+      if (found) return found
+    }
+    return null
+  }
+
+  private extractCppGlobalVariables(
+    node: SyntaxNode,
+    filePath: string,
+    symbols: AuraNode[],
+    contains: AuraEdge[],
+    seenIds: Set<string>,
+  ): void {
+    const declaratorNode = node.childForFieldName('declarator')
+    if (declaratorNode) {
+      const name = this.extractCDeclaratorName(declaratorNode)
+      if (name && !this.isCppBuiltinFunction(name)) {
+        // Only track if it has a function_declarator (it's a declaration, not a variable)
+        // Otherwise it's a variable
+        const funcDecl = this.findCppFunctionDeclarator(declaratorNode)
+        if (!funcDecl) {
+          const isStatic = this.hasCStorageClass(node, 'static')
+          const symbolId = `${filePath}:${name}`
+          if (!seenIds.has(symbolId)) {
+            seenIds.add(symbolId)
+            symbols.push({
+              id: symbolId,
+              kind: AuraNodeKind.Variable,
+              name,
+              filePath,
+              range: { startLine: node.startPosition.row + 1, endLine: node.endPosition.row + 1 },
+              exported: !isStatic,
+              metadata: isStatic ? { modifiers: ['static'] } : undefined,
+            })
+            contains.push({ source: filePath, target: symbolId, type: AuraEdgeType.CONTAINS, confidence: 1.0 })
+          }
+        }
+      }
+    }
+  }
+
+  private extractCppImports(
+    tree: Tree,
+    filePath: string,
+    imports: AuraEdge[],
+  ): void {
+    // C++ uses the same #include as C, plus using declarations
+    const walk = (node: SyntaxNode): void => {
+      // #include — same as C
+      if (node.type === 'preproc_include') {
+        const pathNode = node.childForFieldName('path')
+        if (pathNode) {
+          if (pathNode.type === 'string_literal') {
+            let importPath = ''
+            for (let i = 0; i < pathNode.childCount; i++) {
+              const child = pathNode.child(i)!
+              if (child.type === 'string_content') {
+                importPath = child.text
+              }
+            }
+            if (!importPath) {
+              importPath = pathNode.text.replace(/^"(.*)"$/, '$1')
+            }
+            if (importPath) {
+              imports.push({
+                source: filePath,
+                target: importPath,
+                type: AuraEdgeType.IMPORTS,
+                confidence: 0.9,
+                metadata: { rawImportPath: importPath, importKind: 'cpp-local-include' },
+              })
+            }
+          } else if (pathNode.type === 'system_lib_string') {
+            const importPath = pathNode.text.replace(/^<(.*)>$/, '$1')
+            if (importPath) {
+              imports.push({
+                source: filePath,
+                target: importPath,
+                type: AuraEdgeType.IMPORTS,
+                confidence: 0.3,
+                metadata: { rawImportPath: importPath, importKind: 'cpp-system-include' },
+              })
+            }
+          }
+        }
+      }
+
+      // using namespace std; using std::vector; using std::cout;
+      if (node.type === 'using_declaration') {
+        // The using declaration text is like "using namespace std" or "using std::vector"
+        const usingText = node.text
+          .replace(/^using\s+/, '')
+          .replace(/;$/, '')
+          .trim()
+        if (usingText) {
+          imports.push({
+            source: filePath,
+            target: usingText,
+            type: AuraEdgeType.IMPORTS,
+            confidence: usingText.startsWith('namespace') ? 0.5 : 0.7,
+            metadata: { rawImportPath: usingText, importKind: 'cpp-using' },
+          })
+        }
+      }
+
+      for (let i = 0; i < node.childCount; i++) {
+        walk(node.child(i)!)
+      }
+    }
+    walk(tree.rootNode)
+  }
+
+  private extractCppCalls(
+    tree: Tree,
+    filePath: string,
+    calls: AuraEdge[],
+    symbols: AuraNode[],
+  ): void {
+    const seenCalls = new Set<string>()
+
+    const walk = (node: SyntaxNode): void => {
+      // Function calls: func(args), obj.method(args), Namespace::func(args)
+      if (node.type === 'call_expression') {
+        const funcNode = node.childForFieldName('function')
+        if (funcNode) {
+          // Simple function call: identifier
+          if (funcNode.type === 'identifier') {
+            const callName = funcNode.text
+            if (callName && !this.isCppBuiltinFunction(callName)) {
+              const enclosingSymbol = this.findEnclosingSymbolFromTree(node, symbols, filePath)
+              const source = enclosingSymbol ? enclosingSymbol.id : filePath
+              const dedupeKey = `${source}→${callName}`
+              if (!seenCalls.has(dedupeKey)) {
+                seenCalls.add(dedupeKey)
+                calls.push({
+                  source,
+                  target: callName,
+                  type: AuraEdgeType.CALLS,
+                  confidence: 0.7,
+                  metadata: { callName, callTargetKind: 'direct' },
+                })
+              }
+            }
+          }
+          // Qualified call: std::cout, Namespace::func
+          else if (funcNode.type === 'qualified_identifier' || funcNode.type === 'field_expression') {
+            const callName = funcNode.text
+            if (callName && !this.isCppBuiltinFunction(callName)) {
+              const enclosingSymbol = this.findEnclosingSymbolFromTree(node, symbols, filePath)
+              const source = enclosingSymbol ? enclosingSymbol.id : filePath
+              const dedupeKey = `${source}→${callName}`
+              if (!seenCalls.has(dedupeKey)) {
+                seenCalls.add(dedupeKey)
+                calls.push({
+                  source,
+                  target: callName,
+                  type: AuraEdgeType.CALLS,
+                  confidence: 0.5,
+                  metadata: { callName, callTargetKind: 'member' },
+                })
+              }
+            }
+          }
+        }
+      }
+
+      // Object creation: new ClassName(args)
+      if (node.type === 'new_expression') {
+        const typeNode = node.childForFieldName('type')
+        if (typeNode) {
+          const className = typeNode.text
+          if (className && !this.isCppBuiltinFunction(className)) {
+            const enclosingSymbol = this.findEnclosingSymbolFromTree(node, symbols, filePath)
+            const source = enclosingSymbol ? enclosingSymbol.id : filePath
+            const dedupeKey = `${source}→new:${className}`
+            if (!seenCalls.has(dedupeKey)) {
+              seenCalls.add(dedupeKey)
+              calls.push({
+                source,
+                target: className,
+                type: AuraEdgeType.CALLS,
+                confidence: 0.8,
+                metadata: { callName: `new ${className}`, callTargetKind: 'constructor' },
+              })
+            }
+          }
+        }
+      }
+
+      for (let i = 0; i < node.childCount; i++) {
+        walk(node.child(i)!)
+      }
+    }
+    walk(tree.rootNode)
+  }
+
+  private extractCppHeritage(
+    tree: Tree,
+    filePath: string,
+    heritage: AuraEdge[],
+  ): void {
+    const walk = (node: SyntaxNode): void => {
+      // C++ class inheritance: class Derived : public Base { ... };
+      if (node.type === 'class_specifier') {
+        const nameNode = node.childForFieldName('name')
+        const className = nameNode?.text ?? ''
+        const source = className ? `${filePath}:${className}` : filePath
+
+        // Look for base_class_clause
+        for (let i = 0; i < node.childCount; i++) {
+          const child = node.child(i)!
+          if (child.type === 'base_class_clause') {
+            // base_class_clause contains access_specifiers and type_identifiers
+            for (let j = 0; j < child.childCount; j++) {
+              const baseChild = child.child(j)!
+              if (baseChild.type === 'type_identifier' || baseChild.type === 'qualified_identifier' ||
+                  baseChild.type === 'template_type') {
+                heritage.push({
+                  source,
+                  target: baseChild.text,
+                  type: AuraEdgeType.EXTENDS,
+                  confidence: 0.9,
+                  metadata: { rawTargetName: baseChild.text, heritageKind: 'class-extends' },
+                })
+              }
+            }
+          }
+        }
+      }
+
+      for (let i = 0; i < node.childCount; i++) {
+        walk(node.child(i)!)
+      }
+    }
+    walk(tree.rootNode)
+  }
+
+  private isCppBuiltinFunction(name: string): boolean {
+    // Combine C builtins with C++ additions
+    if (this.isCBuiltinFunction(name)) return true
+    const cppBuiltins = new Set([
+      // iostream
+      'cout', 'cin', 'cerr', 'clog', 'endl', 'flush', 'setw', 'setfill', 'setprecision',
+      'ostream', 'istream', 'iostream', 'stringstream', 'istringstream', 'ostringstream',
+      // STL algorithms
+      'sort', 'stable_sort', 'partial_sort', 'nth_element',
+      'find', 'find_if', 'find_if_not', 'find_end', 'find_first_of',
+      'count', 'count_if', 'mismatch', 'equal',
+      'search', 'search_n', 'copy', 'copy_n', 'copy_if', 'copy_backward',
+      'move', 'move_backward', 'swap', 'swap_ranges', 'iter_swap',
+      'transform', 'replace', 'replace_if', 'replace_copy', 'replace_copy_if',
+      'fill', 'fill_n', 'generate', 'generate_n',
+      'remove', 'remove_if', 'remove_copy', 'remove_copy_if',
+      'unique', 'unique_copy', 'reverse', 'reverse_copy', 'rotate', 'rotate_copy',
+      'partition', 'stable_partition', 'partition_point', 'partition_copy',
+      'merge', 'inplace_merge',
+      'accumulate', 'inner_product', 'adjacent_difference', 'partial_sum',
+      'for_each', 'any_of', 'all_of', 'none_of',
+      'min', 'max', 'minmax', 'min_element', 'max_element', 'minmax_element', 'clamp',
+      'lexicographical_compare', 'next_permutation', 'prev_permutation',
+      // STL containers
+      'vector', 'list', 'deque', 'map', 'set', 'unordered_map', 'unordered_set',
+      'stack', 'queue', 'priority_queue', 'array', 'pair', 'tuple',
+      'make_pair', 'make_tuple', 'get', 'tie',
+      // STL utilities
+      'make_shared', 'make_unique', 'shared_ptr', 'unique_ptr', 'weak_ptr',
+      'dynamic_pointer_cast', 'static_pointer_cast', 'const_pointer_cast',
+      'make_optional', 'optional', 'nullopt',
+      'variant', 'visit', 'holds_alternative', 'get_if',
+      'make_exception_ptr', 'current_exception', 'rethrow_exception',
+      // Memory
+      'new', 'delete', 'malloc', 'calloc', 'realloc', 'free',
+      'operator_new', 'operator_delete',
+      // String
+      'string', 'wstring', 'u16string', 'u32string', 'to_string', 'stoi', 'stol',
+      'stoul', 'stoll', 'stoull', 'stof', 'stod', 'stold',
+      // Thread
+      'thread', 'mutex', 'lock_guard', 'unique_lock', 'condition_variable',
+      'async', 'future', 'promise', 'packaged_task',
+      // Other common
+      'size', 'empty', 'data', 'begin', 'end', 'rbegin', 'rend',
+      'front', 'back', 'push_back', 'push_front', 'pop_back', 'pop_front',
+      'emplace_back', 'emplace_front', 'emplace', 'insert', 'erase',
+      'clear', 'resize', 'reserve', 'capacity', 'shrink_to_fit',
+      'at', 'substr', 'append', 'compare', 'c_str',
+      'abs', 'fabs', 'sqrt', 'pow', 'sin', 'cos', 'tan', 'log', 'exp',
+    ])
+    return cppBuiltins.has(name)
+  }
 
   private parseHtmlFile(filePath: string, source: string): ParseResult {
     const language = this.selectLanguage(filePath)
