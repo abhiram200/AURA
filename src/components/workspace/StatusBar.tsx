@@ -11,6 +11,7 @@ interface StatusBarProps {
   onAutoSaveChange: (enabled: boolean) => void
   onThemeChange: (theme: string) => void
   onOpenGitTree?: () => void
+  gitBranch?: string | null
 }
 
 function getLanguageLabel(path: string | null): string {
@@ -41,17 +42,9 @@ function getLanguageLabel(path: string | null): string {
   return 'Plain Text'
 }
 
-export function StatusBar({ projectId, activeFile, workspacePath, editorTheme, autoSave, onAutoSaveChange, onThemeChange, onOpenGitTree }: StatusBarProps) {
-  const [gitBranch, setGitBranch] = useState<string | null>(null)
+export function StatusBar({ projectId, activeFile, workspacePath, editorTheme, autoSave, onAutoSaveChange, onThemeChange, onOpenGitTree, gitBranch }: StatusBarProps) {
   const [themeMenuOpen, setThemeMenuOpen] = useState(false)
   const menuRef = useRef<HTMLDivElement>(null)
-
-  useEffect(() => {
-    fetch(`/api/workspace/${projectId}/git-branch`)
-      .then((r) => r.json())
-      .then((data) => setGitBranch(data.branch))
-      .catch(() => {})
-  }, [projectId])
 
   useEffect(() => {
     if (!themeMenuOpen) return

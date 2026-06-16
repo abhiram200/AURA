@@ -63,6 +63,7 @@ export function useWorkspace(projectId: string) {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [gitStatusMap, setGitStatusMap] = useState<Record<string, string>>({})
+  const [gitBranch, setGitBranch] = useState<string | null>(null)
   const nextTerminalId = useRef(1)
   const openFilesRef = useRef(openFiles)
   openFilesRef.current = openFiles
@@ -108,9 +109,20 @@ export function useWorkspace(projectId: string) {
     } catch { /* non-critical */ }
   }, [projectId])
 
+  const fetchGitBranch = useCallback(async () => {
+    try {
+      const res = await fetch(`/api/workspace/${projectId}/git-branch`)
+      if (res.ok) {
+        const json = await res.json()
+        setGitBranch(json.branch)
+      }
+    } catch { /* non-critical */ }
+  }, [projectId])
+
   useEffect(() => {
     fetchGitStatus()
-  }, [fetchGitStatus])
+    fetchGitBranch()
+  }, [fetchGitStatus, fetchGitBranch])
 
   const toggleDir = useCallback(async (dirPath: string) => {
     setExpandedDirs((prev) => {
@@ -510,6 +522,7 @@ export function useWorkspace(projectId: string) {
           }
         } else if (msg.type === 'git-status-change') {
           fetchGitStatus()
+          fetchGitBranch()
         }
       } catch {}
     }
@@ -518,7 +531,7 @@ export function useWorkspace(projectId: string) {
       ws.close()
       if (refreshTimer) clearTimeout(refreshTimer)
     }
-  }, [projectId, fetchDirectory, fetchGitStatus])
+  }, [projectId, fetchDirectory, fetchGitStatus, fetchGitBranch])
 
   return {
     fileTree,
@@ -547,6 +560,8 @@ export function useWorkspace(projectId: string) {
     searchFiles,
     gitStatusMap,
     fetchGitStatus,
+    gitBranch,
+    fetchGitBranch,
     createTerminal,
     closeTerminal,
     setActiveFilePath,

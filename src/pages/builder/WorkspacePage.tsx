@@ -196,6 +196,7 @@ export function WorkspacePage({ projectId, projectName, workspacePath, pendingFi
         onAutoSaveChange={(enabled) => updateSettings({ autoSave: enabled })}
         onThemeChange={(theme) => updateSettings({ codeEditorTheme: theme })}
         onOpenGitTree={onOpenGitTree}
+        gitBranch={ws.gitBranch}
       />
 
       {showQuickOpen && (
