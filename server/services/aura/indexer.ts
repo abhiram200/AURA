@@ -21,7 +21,7 @@ import type {
   FileHashEntry,
 } from './types.ts'
 import { computeProgress } from './types.ts'
-import { CSS_EXTENSIONS, SCSS_EXTENSIONS, HTML_EXTENSIONS, VUE_EXTENSIONS, PHP_EXTENSIONS, JAVA_EXTENSIONS } from './extensions.ts'
+import { PY_EXTENSIONS, CSS_EXTENSIONS, SCSS_EXTENSIONS, HTML_EXTENSIONS, VUE_EXTENSIONS, PHP_EXTENSIONS, JAVA_EXTENSIONS } from './extensions.ts'
 import { getGitHead } from './git.ts'
 import { BM25SearchEngine } from './search/bm25.ts'
 import { EmbeddingService } from './search/embedding.ts'
