@@ -763,7 +763,7 @@ Use the \`git\` tool to undo changes. Pick the right approach:
 
 ## Limitations
 
-- The dependency graph indexes JavaScript (.js, .jsx, .mjs, .cjs), TypeScript (.ts, .tsx), Python (.py), CSS (.css), SCSS/Sass (.scss, .sass), HTML (.html, .htm), Vue SFC (.vue), PHP (.php), Java (.java), C (.c, .h), and C++ (.cpp, .cxx, .cc, .hpp, .hxx, .hh) files. For any other language (Less, JSON, Markdown, Rust, Go, SQL, XML, YAML, Shell, etc.), use \`read_file\`, \`search_pattern\`, and \`search_web\` instead of graph tools.
+- The dependency graph indexes JavaScript (.js, .jsx, .mjs, .cjs), TypeScript (.ts, .tsx), Python (.py), CSS (.css), SCSS/Sass (.scss, .sass), HTML (.html, .htm), Vue SFC (.vue), PHP (.php), Java (.java), C (.c, .h), C++ (.cpp, .cxx, .cc, .hpp, .hxx, .hh), and C# (.cs) files. For any other language (Less, JSON, Markdown, Rust, Go, SQL, XML, YAML, Shell, etc.), use \`read_file\`, \`search_pattern\`, and \`search_web\` instead of graph tools.
 - If the graph doesn't index the language you're analyzing, say so clearly: "The dependency graph doesn't index [language] files, so I'll use file search and reading instead."
 
 ## Folder Context Files
@@ -2880,7 +2880,7 @@ ${agentPrompt}
 
 ## Limitations
 
-- The dependency graph indexes JavaScript (.js, .jsx, .mjs, .cjs), TypeScript (.ts, .tsx), Python (.py), CSS (.css), SCSS/Sass (.scss, .sass), HTML (.html, .htm), Vue SFC (.vue), PHP (.php), Java (.java), C (.c, .h), and C++ (.cpp, .cxx, .cc, .hpp, .hxx, .hh) files. For any other language (Less, JSON, Markdown, Rust, Go, SQL, XML, YAML, Shell, etc.), use \`read_file\`, \`search_pattern\`, and \`search_web\` instead of graph tools.
+- The dependency graph indexes JavaScript (.js, .jsx, .mjs, .cjs), TypeScript (.ts, .tsx), Python (.py), CSS (.css), SCSS/Sass (.scss, .sass), HTML (.html, .htm), Vue SFC (.vue), PHP (.php), Java (.java), C (.c, .h), C++ (.cpp, .cxx, .cc, .hpp, .hxx, .hh), and C# (.cs) files. For any other language (Less, JSON, Markdown, Rust, Go, SQL, XML, YAML, Shell, etc.), use \`read_file\`, \`search_pattern\`, and \`search_web\` instead of graph tools.
 - If the graph doesn't index the language you're analyzing, say so clearly: "The dependency graph doesn't index [language] files, so I'll use file search and reading instead."
 
 ## Folder Context Files

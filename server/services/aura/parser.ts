@@ -22,6 +22,7 @@ import {
   JAVA_EXTENSIONS,
   C_EXTENSIONS,
   CPP_EXTENSIONS,
+  CSHARP_EXTENSIONS,
   PARSABLE_EXTENSIONS,
 } from './extensions.ts'
 
@@ -89,6 +90,7 @@ export class AuraParser {
   private javaLang: Language | null = null
   private cLang: Language | null = null
   private cppLang: Language | null = null
+  private csharpLang: Language | null = null
   private parser: Parser | null = null
   private dataFlowAnalyzer = new AuraDataFlow()
 
@@ -163,6 +165,13 @@ export class AuraParser {
       console.warn('tree-sitter-cpp.wasm not found; C++ support disabled')
     }
 
+    try {
+      const csharpWasm = path.join(grammarsDir, 'tree-sitter-c_sharp.wasm')
+      this.csharpLang = await Language.load(csharpWasm)
+    } catch {
+      console.warn('tree-sitter-c_sharp.wasm not found; C# support disabled')
+    }
+
     // Note: tree-sitter-vue cannot be compiled to WASM due to its external scanner.
     // Vue SFC parsing uses regex-based block extraction + sub-parsing with JS/TS/CSS/SCSS grammars.
     // this.vueLang is not needed and remains null.
@@ -209,6 +218,9 @@ export class AuraParser {
     if (CPP_EXTENSIONS.has(ext)) {
       return this.cppLang
     }
+    if (CSHARP_EXTENSIONS.has(ext)) {
+      return this.csharpLang
+    }
     // Vue doesn't use tree-sitter-vue (it has an incompatible external scanner).
     // parseVueFile uses regex-based block extraction + sub-parsing.
     if (VUE_EXTENSIONS.has(ext)) {
@@ -252,6 +264,9 @@ export class AuraParser {
     }
     if (CPP_EXTENSIONS.has(ext)) {
       return this.parseCppFile(filePath, source)
+    }
+    if (CSHARP_EXTENSIONS.has(ext)) {
+      return this.parseCSharpFile(filePath, source)
     }
     if (VUE_EXTENSIONS.has(ext)) {
       return await this.parseVueFile(filePath, source)
@@ -3831,6 +3846,481 @@ export class AuraParser {
       'abs', 'fabs', 'sqrt', 'pow', 'sin', 'cos', 'tan', 'log', 'exp',
     ])
     return cppBuiltins.has(name)
+  }
+
+  // ── C# parsing ──────────────────────────────────────────────────────────────
+
+  private parseCSharpFile(filePath: string, source: string): ParseResult {
+    const language = this.selectLanguage(filePath)
+    if (!language || !this.parser) {
+      return { filePath, symbols: [], imports: [], calls: [], heritage: [], contains: [], dataFlow: [] }
+    }
+
+    this.parser.setLanguage(language)
+    const tree = this.parser.parse(source)
+    if (!tree) {
+      return { filePath, symbols: [], imports: [], calls: [], heritage: [], contains: [], dataFlow: [] }
+    }
+
+    try {
+      const symbols: AuraNode[] = []
+      const imports: AuraEdge[] = []
+      const calls: AuraEdge[] = []
+      const heritage: AuraEdge[] = []
+      const contains: AuraEdge[] = []
+      const seenIds = new Set<string>()
+
+      this.extractCSharpDeclarations(tree, filePath, symbols, contains, seenIds)
+      this.extractCSharpImports(tree, filePath, imports)
+      this.extractCSharpCalls(tree, filePath, calls, symbols)
+      this.extractCSharpHeritage(tree, filePath, heritage)
+
+      return { filePath, symbols, imports, calls, heritage, contains, dataFlow: [] }
+    } finally {
+      tree.delete()
+    }
+  }
+
+  private extractCSharpDeclarations(
+    tree: Tree,
+    filePath: string,
+    symbols: AuraNode[],
+    contains: AuraEdge[],
+    seenIds: Set<string>,
+  ): void {
+    const walk = (node: SyntaxNode): void => {
+      // Class declarations
+      if (node.type === 'class_declaration') {
+        const nameNode = node.childForFieldName('name')
+        if (nameNode) {
+          const name = nameNode.text
+          const symbolId = `${filePath}:${name}`
+          if (!seenIds.has(symbolId)) {
+            seenIds.add(symbolId)
+            const modifiers = this.extractCSharpModifiers(node)
+            symbols.push({
+              id: symbolId,
+              kind: AuraNodeKind.Class,
+              name,
+              filePath,
+              range: { startLine: node.startPosition.row + 1, endLine: node.endPosition.row + 1 },
+              exported: modifiers.includes('public'),
+              metadata: modifiers.length > 0 ? { modifiers } : undefined,
+            })
+            contains.push({ source: filePath, target: symbolId, type: AuraEdgeType.CONTAINS, confidence: 1.0 })
+          }
+        }
+      }
+
+      // Interface declarations
+      if (node.type === 'interface_declaration') {
+        const nameNode = node.childForFieldName('name')
+        if (nameNode) {
+          const name = nameNode.text
+          const symbolId = `${filePath}:${name}`
+          if (!seenIds.has(symbolId)) {
+            seenIds.add(symbolId)
+            const modifiers = this.extractCSharpModifiers(node)
+            symbols.push({
+              id: symbolId,
+              kind: AuraNodeKind.Interface,
+              name,
+              filePath,
+              range: { startLine: node.startPosition.row + 1, endLine: node.endPosition.row + 1 },
+              exported: modifiers.includes('public'),
+              metadata: modifiers.length > 0 ? { modifiers } : undefined,
+            })
+            contains.push({ source: filePath, target: symbolId, type: AuraEdgeType.CONTAINS, confidence: 1.0 })
+          }
+        }
+      }
+
+      // Struct declarations
+      if (node.type === 'struct_declaration') {
+        const nameNode = node.childForFieldName('name')
+        if (nameNode) {
+          const name = nameNode.text
+          const symbolId = `${filePath}:${name}`
+          if (!seenIds.has(symbolId)) {
+            seenIds.add(symbolId)
+            const modifiers = this.extractCSharpModifiers(node)
+            symbols.push({
+              id: symbolId,
+              kind: AuraNodeKind.Struct,
+              name,
+              filePath,
+              range: { startLine: node.startPosition.row + 1, endLine: node.endPosition.row + 1 },
+              exported: modifiers.includes('public'),
+              metadata: modifiers.length > 0 ? { modifiers } : undefined,
+            })
+            contains.push({ source: filePath, target: symbolId, type: AuraEdgeType.CONTAINS, confidence: 1.0 })
+          }
+        }
+      }
+
+      // Enum declarations
+      if (node.type === 'enum_declaration') {
+        const nameNode = node.childForFieldName('name')
+        if (nameNode) {
+          const name = nameNode.text
+          const symbolId = `${filePath}:${name}`
+          if (!seenIds.has(symbolId)) {
+            seenIds.add(symbolId)
+            const modifiers = this.extractCSharpModifiers(node)
+            symbols.push({
+              id: symbolId,
+              kind: AuraNodeKind.Enum,
+              name,
+              filePath,
+              range: { startLine: node.startPosition.row + 1, endLine: node.endPosition.row + 1 },
+              exported: modifiers.includes('public'),
+              metadata: modifiers.length > 0 ? { modifiers } : undefined,
+            })
+            contains.push({ source: filePath, target: symbolId, type: AuraEdgeType.CONTAINS, confidence: 1.0 })
+          }
+        }
+      }
+
+      // Delegate declarations
+      if (node.type === 'delegate_declaration') {
+        const nameNode = node.childForFieldName('name')
+        if (nameNode) {
+          const name = nameNode.text
+          const symbolId = `${filePath}:${name}`
+          if (!seenIds.has(symbolId)) {
+            seenIds.add(symbolId)
+            const modifiers = this.extractCSharpModifiers(node)
+            symbols.push({
+              id: symbolId,
+              kind: AuraNodeKind.Delegate,
+              name,
+              filePath,
+              range: { startLine: node.startPosition.row + 1, endLine: node.endPosition.row + 1 },
+              exported: modifiers.includes('public'),
+              metadata: modifiers.length > 0 ? { modifiers } : undefined,
+            })
+            contains.push({ source: filePath, target: symbolId, type: AuraEdgeType.CONTAINS, confidence: 1.0 })
+          }
+        }
+      }
+
+      // Namespace declarations
+      if (node.type === 'namespace_declaration') {
+        const nameNode = node.childForFieldName('name')
+        if (nameNode) {
+          const name = nameNode.text
+          const symbolId = `${filePath}:${name}`
+          if (!seenIds.has(symbolId)) {
+            seenIds.add(symbolId)
+            symbols.push({
+              id: symbolId,
+              kind: AuraNodeKind.Namespace,
+              name,
+              filePath,
+              range: { startLine: node.startPosition.row + 1, endLine: node.endPosition.row + 1 },
+              exported: true,
+            })
+            contains.push({ source: filePath, target: symbolId, type: AuraEdgeType.CONTAINS, confidence: 1.0 })
+          }
+        }
+      }
+
+      // Method declarations
+      if (node.type === 'method_declaration') {
+        const nameNode = node.childForFieldName('name')
+        if (nameNode) {
+          const name = nameNode.text
+          const symbolId = `${filePath}:${name}`
+          if (!seenIds.has(symbolId)) {
+            seenIds.add(symbolId)
+            const modifiers = this.extractCSharpModifiers(node)
+            symbols.push({
+              id: symbolId,
+              kind: AuraNodeKind.Method,
+              name,
+              filePath,
+              range: { startLine: node.startPosition.row + 1, endLine: node.endPosition.row + 1 },
+              exported: modifiers.includes('public'),
+              metadata: modifiers.length > 0 ? { modifiers } : undefined,
+            })
+            contains.push({ source: filePath, target: symbolId, type: AuraEdgeType.CONTAINS, confidence: 1.0 })
+          }
+        }
+      }
+
+      // Constructor declarations (use .ctor suffix to avoid colliding with class name)
+      if (node.type === 'constructor_declaration') {
+        const nameNode = node.childForFieldName('name')
+        if (nameNode) {
+          const name = nameNode.text
+          const symbolId = `${filePath}:${name}.ctor`
+          if (!seenIds.has(symbolId)) {
+            seenIds.add(symbolId)
+            const modifiers = this.extractCSharpModifiers(node)
+            symbols.push({
+              id: symbolId,
+              kind: AuraNodeKind.Method,
+              name: `${name}()`,  // Show as "User()" to distinguish from the class
+              filePath,
+              range: { startLine: node.startPosition.row + 1, endLine: node.endPosition.row + 1 },
+              exported: modifiers.includes('public'),
+              metadata: modifiers.length > 0 ? { modifiers: [...modifiers, 'constructor'] } : { modifiers: ['constructor'] },
+            })
+            contains.push({ source: filePath, target: symbolId, type: AuraEdgeType.CONTAINS, confidence: 1.0 })
+          }
+        }
+      }
+
+      // Property declarations
+      if (node.type === 'property_declaration') {
+        const nameNode = node.childForFieldName('name')
+        if (nameNode) {
+          const name = nameNode.text
+          const symbolId = `${filePath}:${name}`
+          if (!seenIds.has(symbolId)) {
+            seenIds.add(symbolId)
+            const modifiers = this.extractCSharpModifiers(node)
+            symbols.push({
+              id: symbolId,
+              kind: AuraNodeKind.Variable,
+              name,
+              filePath,
+              range: { startLine: node.startPosition.row + 1, endLine: node.endPosition.row + 1 },
+              exported: modifiers.includes('public'),
+              metadata: modifiers.length > 0 ? { modifiers } : undefined,
+            })
+            contains.push({ source: filePath, target: symbolId, type: AuraEdgeType.CONTAINS, confidence: 1.0 })
+          }
+        }
+      }
+
+      for (let i = 0; i < node.childCount; i++) {
+        walk(node.child(i)!)
+      }
+    }
+    walk(tree.rootNode)
+  }
+
+  private extractCSharpModifiers(node: SyntaxNode): string[] {
+    const modifiers: string[] = []
+    for (let i = 0; i < node.childCount; i++) {
+      const child = node.child(i)!
+      if (child.type === 'modifier') {
+        modifiers.push(child.text)
+      }
+      if (child.type === 'public' || child.type === 'private' || child.type === 'protected' ||
+          child.type === 'internal' || child.type === 'static' || child.type === 'abstract' ||
+          child.type === 'sealed' || child.type === 'virtual' || child.type === 'override' ||
+          child.type === 'readonly' || child.type === 'async' || child.type === 'partial') {
+        modifiers.push(child.text)
+      }
+    }
+    return modifiers
+  }
+
+  private extractCSharpImports(
+    tree: Tree,
+    filePath: string,
+    imports: AuraEdge[],
+  ): void {
+    const walk = (node: SyntaxNode): void => {
+      // using directives: using System; using MyApp.Services; using static Math; using X = Y;
+      if (node.type === 'using_directive') {
+        let importPath = ''
+        let importKind = 'using'
+
+        for (let i = 0; i < node.childCount; i++) {
+          const child = node.child(i)!
+          if (child.type === 'identifier' || child.type === 'qualified_name') {
+            importPath = child.text
+          }
+          if (child.type === 'static') {
+            importKind = 'using-static'
+          }
+          // Check for alias: using X = Y; — the alias target is after '='
+          if (child.type === 'name_equals') {
+            // This is an alias — the target is what we want
+            for (let j = 0; j < child.childCount; j++) {
+              const eqChild = child.child(j)!
+              if (eqChild.type === 'identifier' || eqChild.type === 'qualified_name') {
+                importPath = eqChild.text
+                importKind = 'using-alias'
+              }
+            }
+          }
+        }
+
+        if (importPath) {
+          imports.push({
+            source: filePath,
+            target: importPath,
+            type: AuraEdgeType.IMPORTS,
+            confidence: 0.9,
+            metadata: { rawImportPath: importPath, importKind },
+          })
+        }
+      }
+
+      for (let i = 0; i < node.childCount; i++) {
+        walk(node.child(i)!)
+      }
+    }
+    walk(tree.rootNode)
+  }
+
+  private extractCSharpCalls(
+    tree: Tree,
+    filePath: string,
+    calls: AuraEdge[],
+    symbols: AuraNode[],
+  ): void {
+    const seenCalls = new Set<string>()
+
+    const walk = (node: SyntaxNode): void => {
+      // Method invocations: obj.Method(args)
+      if (node.type === 'invocation_expression') {
+        const funcNode = node.childForFieldName('function')
+        if (funcNode) {
+          const callName = funcNode.text
+          if (callName && !this.isCSharpBuiltin(callName)) {
+            const enclosingSymbol = this.findEnclosingSymbolFromTree(node, symbols, filePath)
+            const source = enclosingSymbol ? enclosingSymbol.id : filePath
+            const dedupeKey = `${source}→${callName}`
+            if (!seenCalls.has(dedupeKey)) {
+              seenCalls.add(dedupeKey)
+              calls.push({
+                source,
+                target: callName,
+                type: AuraEdgeType.CALLS,
+                confidence: funcNode.type === 'member_access_expression' ? 0.5 : 0.7,
+                metadata: { callName, callTargetKind: funcNode.type === 'member_access_expression' ? 'member' : 'direct' },
+              })
+            }
+          }
+        }
+      }
+
+      // Object creation: new ClassName(args)
+      if (node.type === 'object_creation_expression') {
+        const typeNode = node.childForFieldName('type')
+        const className = typeNode?.text ?? ''
+        if (className && !this.isCSharpBuiltin(className)) {
+          const enclosingSymbol = this.findEnclosingSymbolFromTree(node, symbols, filePath)
+          const source = enclosingSymbol ? enclosingSymbol.id : filePath
+          const dedupeKey = `${source}→new:${className}`
+          if (!seenCalls.has(dedupeKey)) {
+            seenCalls.add(dedupeKey)
+            calls.push({
+              source,
+              target: className,
+              type: AuraEdgeType.CALLS,
+              confidence: 0.8,
+              metadata: { callName: `new ${className}`, callTargetKind: 'constructor' },
+            })
+          }
+        }
+      }
+
+      for (let i = 0; i < node.childCount; i++) {
+        walk(node.child(i)!)
+      }
+    }
+    walk(tree.rootNode)
+  }
+
+  private extractCSharpHeritage(
+    tree: Tree,
+    filePath: string,
+    heritage: AuraEdge[],
+  ): void {
+    const walk = (node: SyntaxNode): void => {
+      // Class inheritance: class Derived : Base, IInterface { }
+      if (node.type === 'class_declaration' || node.type === 'struct_declaration') {
+        const nameNode = node.childForFieldName('name')
+        const name = nameNode?.text ?? ''
+        const source = name ? `${filePath}:${name}` : filePath
+
+        // base_list contains the inheritance info
+        for (let i = 0; i < node.childCount; i++) {
+          const child = node.child(i)!
+          if (child.type === 'base_list') {
+            for (let j = 0; j < child.childCount; j++) {
+              const baseChild = child.child(j)!
+              if (baseChild.type === 'identifier' || baseChild.type === 'qualified_name' ||
+                  baseChild.type === 'type_identifier' || baseChild.type === 'predefined_type') {
+                heritage.push({
+                  source,
+                  target: baseChild.text,
+                  // C# doesn't distinguish extends vs implements in base_list — first is extends, rest are implements
+                  type: j === 1 ? AuraEdgeType.EXTENDS : AuraEdgeType.IMPLEMENTS,
+                  confidence: 0.9,
+                  metadata: { rawTargetName: baseChild.text, heritageKind: j === 1 ? 'extends' : 'implements' },
+                })
+              }
+            }
+          }
+        }
+      }
+
+      // Interface inheritance
+      if (node.type === 'interface_declaration') {
+        const nameNode = node.childForFieldName('name')
+        const name = nameNode?.text ?? ''
+        const source = name ? `${filePath}:${name}` : filePath
+
+        for (let i = 0; i < node.childCount; i++) {
+          const child = node.child(i)!
+          if (child.type === 'base_list') {
+            for (let j = 0; j < child.childCount; j++) {
+              const baseChild = child.child(j)!
+              if (baseChild.type === 'identifier' || baseChild.type === 'qualified_name' ||
+                  baseChild.type === 'type_identifier' || baseChild.type === 'predefined_type') {
+                heritage.push({
+                  source,
+                  target: baseChild.text,
+                  type: AuraEdgeType.EXTENDS,
+                  confidence: 0.9,
+                  metadata: { rawTargetName: baseChild.text, heritageKind: 'interface-extends' },
+                })
+              }
+            }
+          }
+        }
+      }
+
+      for (let i = 0; i < node.childCount; i++) {
+        walk(node.child(i)!)
+      }
+    }
+    walk(tree.rootNode)
+  }
+
+  private isCSharpBuiltin(name: string): boolean {
+    const builtins = new Set([
+      // Types
+      'Console', 'String', 'Object', 'Int32', 'Int64', 'Double', 'Single',
+      'Boolean', 'Byte', 'Char', 'Decimal', 'Guid', 'DateTime', 'TimeSpan',
+      'Math', 'Environment', 'Task', 'Thread', 'Monitor', 'GC',
+      // LINQ
+      'Select', 'Where', 'OrderBy', 'OrderByDescending', 'GroupBy', 'SelectMany',
+      'FirstOrDefault', 'LastOrDefault', 'SingleOrDefault', 'First', 'Last', 'Single',
+      'Any', 'All', 'Count', 'Sum', 'Min', 'Max', 'Average', 'ToList', 'ToArray',
+      'ToDictionary', 'ToLookup', 'Distinct', 'Union', 'Intersect', 'Except',
+      'Skip', 'Take', 'SkipWhile', 'TakeWhile', 'Reverse', 'Concat', 'Zip',
+      // String methods
+      'ToString', 'Equals', 'GetHashCode', 'GetType', 'CompareTo',
+      'Length', 'Substring', 'IndexOf', 'LastIndexOf', 'Contains', 'StartsWith', 'EndsWith',
+      'Replace', 'Split', 'Trim', 'ToUpper', 'ToLower', 'PadLeft', 'PadRight',
+      'Format', 'Join', 'IsNullOrEmpty', 'IsNullOrWhiteSpace',
+      // Collections
+      'Add', 'Remove', 'Clear', 'ContainsKey', 'TryGetValue', 'Count',
+      'GetEnumerator', 'MoveNext', 'Current', 'Key', 'Value',
+      // Common
+      'Dispose', 'Finalize', 'MemberwiseClone', 'ReferenceEquals',
+      'nameof', 'typeof', 'sizeof', 'checked', 'unchecked',
+      'get', 'set', 'value',
+    ])
+    return builtins.has(name)
   }
 
   private parseHtmlFile(filePath: string, source: string): ParseResult {

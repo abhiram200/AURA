@@ -25,6 +25,8 @@ export enum AuraNodeKind {
   Struct = 'Struct',             // C/C++ struct
   Namespace = 'Namespace',       // C++ namespace
   Macro = 'Macro',               // #define preprocessor macro
+  // C#
+  Delegate = 'Delegate',         // C# delegate
 }
 
 export enum AuraEdgeType {

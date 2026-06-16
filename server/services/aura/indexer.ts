@@ -21,7 +21,7 @@ import type {
   FileHashEntry,
 } from './types.ts'
 import { computeProgress } from './types.ts'
-import { PY_EXTENSIONS, CSS_EXTENSIONS, SCSS_EXTENSIONS, HTML_EXTENSIONS, VUE_EXTENSIONS, PHP_EXTENSIONS, JAVA_EXTENSIONS, C_EXTENSIONS, CPP_EXTENSIONS } from './extensions.ts'
+import { PY_EXTENSIONS, CSS_EXTENSIONS, SCSS_EXTENSIONS, HTML_EXTENSIONS, VUE_EXTENSIONS, PHP_EXTENSIONS, JAVA_EXTENSIONS, C_EXTENSIONS, CPP_EXTENSIONS, CSHARP_EXTENSIONS } from './extensions.ts'
 import { getGitHead } from './git.ts'
 import { BM25SearchEngine } from './search/bm25.ts'
 import { EmbeddingService } from './search/embedding.ts'
@@ -885,8 +885,96 @@ export class AuraIndexer {
         continue
       }
 
+      // ── C# import resolution ──
+      const isCSharpImport = CSHARP_EXTENSIONS.has(sourceExt)
+
+      if (isCSharpImport) {
+        const importKind = edge.metadata?.importKind as string | undefined
+
+        // C# using directives resolve to namespace paths
+        // "using System;" / "using MyApp.Services;" / "using static Math;" / "using X = Y;"
+        const dottedPath = rawImportPath.replace(/\s+/g, '')
+        const slashPath = dottedPath.replace(/\./g, '/')
+
+        if (importKind === 'using-static' || importKind === 'using-alias') {
+          // using static or using alias — try resolving the target path
+          const csExtensions = ['.cs', '/index.cs']
+          let matched = false
+          for (const ext of csExtensions) {
+            const candidate = slashPath + ext
+            if (fileNodeMap.has(candidate)) {
+              edge.target = candidate
+              edge.confidence = 0.7
+              matched = true
+              break
+            }
+          }
+          if (!matched) {
+            // Try short-name matching
+            const lastSegment = dottedPath.split('.').pop()!
+            for (const [nodeId] of fileNodeMap) {
+              if (nodeId.endsWith(`/${lastSegment}.cs`)) {
+                edge.target = nodeId
+                edge.confidence = 0.5
+                matched = true
+                break
+              }
+            }
+          }
+          if (!matched) {
+            edge.confidence = 0.3
+          }
+        } else {
+          // Regular using directive: "using System", "using MyApp.Services"
+          // First check if it's a well-known .NET namespace
+          const dotnetNamespaces = new Set([
+            'System', 'System.Collections', 'System.Collections.Generic',
+            'System.IO', 'System.Net', 'System.Net.Http', 'System.Threading',
+            'System.Threading.Tasks', 'System.Linq', 'System.Text',
+            'System.Text.RegularExpressions', 'System.Globalization',
+            'System.Reflection', 'System.Diagnostics', 'System.Runtime',
+            'System.Runtime.CompilerServices', 'System.Runtime.InteropServices',
+            'System.Runtime.Serialization', 'System.Security', 'System.Security.Cryptography',
+            'System.Data', 'System.Data.Common', 'System.Xml', 'System.Xml.Linq',
+          ])
+          if (dotnetNamespaces.has(rawImportPath)) {
+            edge.confidence = 0.2
+            continue
+          }
+
+          // Try resolving as namespace → file path
+          const csExtensions = ['.cs', '/index.cs']
+          let matched = false
+          for (const ext of csExtensions) {
+            const candidate = slashPath + ext
+            if (fileNodeMap.has(candidate)) {
+              edge.target = candidate
+              edge.confidence = 0.7
+              matched = true
+              break
+            }
+          }
+          if (!matched) {
+            // Try short-name matching: "MyApp.Services" → find files like Services.cs
+            const lastSegment = dottedPath.split('.').pop()!
+            for (const [nodeId] of fileNodeMap) {
+              if (nodeId.endsWith(`/${lastSegment}.cs`)) {
+                edge.target = nodeId
+                edge.confidence = 0.5
+                matched = true
+                break
+              }
+            }
+          }
+          if (!matched) {
+            edge.confidence = 0.3
+          }
+        }
+        continue
+      }
+
       // ── JS/TS/Vue import resolution ──
-      // Only reach here for JS/TS/Vue imports (Python, CSS/SCSS, HTML, PHP, Java are handled above)
+      // Only reach here for JS/TS/Vue imports (Python, CSS/SCSS, HTML, PHP, Java, C/C++, C# are handled above)
       if (!rawImportPath.startsWith('.')) {
         // Non-relative import — try tsconfig path aliases (e.g. "@/types" -> "./src/types")
         const aliasResolved = this.resolveAlias(rawImportPath, fileNodeMap)

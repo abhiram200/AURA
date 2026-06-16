@@ -1,0 +1,23 @@
+<?php
+/**
+ * PHTML layout template — PHP embedded in HTML (.phtml extension).
+ * Same PHP syntax as .php, used for view templates.
+ */
+
+use App\Models\User;
+use App\Services\Renderer;
+
+$user = $this->getUser();
+$renderer = new Renderer();
+?>
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <title><?php echo $user->getName(); ?></title>
+</head>
+<body>
+    <div class="profile">
+        <?php echo $renderer->render($user); ?>
+    </div>
+</body>
+</html>
