@@ -19,6 +19,8 @@ const GRAMMAR_SOURCES = [
   { name: 'tree-sitter-css.wasm', pkg: 'tree-sitter-css' },
   // tree-sitter-scss WASM must be built: npx tree-sitter build --wasm node_modules/tree-sitter-scss
   { name: 'tree-sitter-scss.wasm', pkg: 'tree-sitter-scss', build: true },
+  { name: 'tree-sitter-php.wasm', pkg: 'tree-sitter-php' },
+  { name: 'tree-sitter-java.wasm', pkg: 'tree-sitter-java' },
   // tree-sitter-vue has an external scanner incompatible with WASM — Vue SFC
   // blocks are parsed using regex extraction + sub-parsing with JS/TS/CSS/SCSS grammars
 ]

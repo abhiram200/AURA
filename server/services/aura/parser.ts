@@ -18,6 +18,8 @@ import {
   SCSS_EXTENSIONS,
   HTML_EXTENSIONS,
   VUE_EXTENSIONS,
+  PHP_EXTENSIONS,
+  JAVA_EXTENSIONS,
   PARSABLE_EXTENSIONS,
 } from './extensions.ts'
 
@@ -81,6 +83,8 @@ export class AuraParser {
   private htmlLang: Language | null = null
   private cssLang: Language | null = null
   private scssLang: Language | null = null
+  private phpLang: Language | null = null
+  private javaLang: Language | null = null
   private parser: Parser | null = null
   private dataFlowAnalyzer = new AuraDataFlow()
 
@@ -127,6 +131,20 @@ export class AuraParser {
       console.warn('tree-sitter-scss.wasm not found; SCSS support disabled')
     }
 
+    try {
+      const phpWasm = path.join(grammarsDir, 'tree-sitter-php.wasm')
+      this.phpLang = await Language.load(phpWasm)
+    } catch {
+      console.warn('tree-sitter-php.wasm not found; PHP support disabled')
+    }
+
+    try {
+      const javaWasm = path.join(grammarsDir, 'tree-sitter-java.wasm')
+      this.javaLang = await Language.load(javaWasm)
+    } catch {
+      console.warn('tree-sitter-java.wasm not found; Java support disabled')
+    }
+
     // Note: tree-sitter-vue cannot be compiled to WASM due to its external scanner.
     // Vue SFC parsing uses regex-based block extraction + sub-parsing with JS/TS/CSS/SCSS grammars.
     // this.vueLang is not needed and remains null.
@@ -161,6 +179,12 @@ export class AuraParser {
     if (SCSS_EXTENSIONS.has(ext)) {
       return this.scssLang
     }
+    if (PHP_EXTENSIONS.has(ext)) {
+      return this.phpLang
+    }
+    if (JAVA_EXTENSIONS.has(ext)) {
+      return this.javaLang
+    }
     // Vue doesn't use tree-sitter-vue (it has an incompatible external scanner).
     // parseVueFile uses regex-based block extraction + sub-parsing.
     if (VUE_EXTENSIONS.has(ext)) {
@@ -192,6 +216,12 @@ export class AuraParser {
     }
     if (HTML_EXTENSIONS.has(ext)) {
       return this.parseHtmlFile(filePath, source)
+    }
+    if (PHP_EXTENSIONS.has(ext)) {
+      return this.parsePhpFile(filePath, source)
+    }
+    if (JAVA_EXTENSIONS.has(ext)) {
+      return this.parseJavaFile(filePath, source)
     }
     if (VUE_EXTENSIONS.has(ext)) {
       return await this.parseVueFile(filePath, source)
@@ -1376,6 +1406,1171 @@ export class AuraParser {
           })
         }
       }
+      for (let i = 0; i < node.childCount; i++) {
+        walk(node.child(i)!)
+      }
+    }
+    walk(tree.rootNode)
+  }
+
+  // ── PHP parsing ─────────────────────────────────────────────────────────────
+
+  private parsePhpFile(filePath: string, source: string): ParseResult {
+    const language = this.selectLanguage(filePath)
+    if (!language || !this.parser) {
+      return { filePath, symbols: [], imports: [], calls: [], heritage: [], contains: [], dataFlow: [] }
+    }
+
+    this.parser.setLanguage(language)
+    const tree = this.parser.parse(source)
+    if (!tree) {
+      return { filePath, symbols: [], imports: [], calls: [], heritage: [], contains: [], dataFlow: [] }
+    }
+
+    try {
+      const symbols: AuraNode[] = []
+      const imports: AuraEdge[] = []
+      const calls: AuraEdge[] = []
+      const heritage: AuraEdge[] = []
+      const contains: AuraEdge[] = []
+      const seenIds = new Set<string>()
+
+      this.extractPhpDeclarations(tree, filePath, symbols, contains, seenIds)
+      this.extractPhpImports(tree, filePath, imports)
+      this.extractPhpCalls(tree, filePath, calls, symbols)
+      this.extractPhpHeritage(tree, filePath, heritage)
+
+      // Data flow for PHP
+      const dataFlowEdges = this.dataFlowAnalyzer.analyze(language, tree, filePath, symbols, calls)
+
+      return { filePath, symbols, imports, calls, heritage, contains, dataFlow: dataFlowEdges }
+    } finally {
+      tree.delete()
+    }
+  }
+
+  private extractPhpDeclarations(
+    tree: Tree,
+    filePath: string,
+    symbols: AuraNode[],
+    contains: AuraEdge[],
+    seenIds: Set<string>,
+  ): void {
+    const walk = (node: SyntaxNode): void => {
+      // Class declarations
+      if (node.type === 'class_declaration') {
+        const nameNode = node.childForFieldName('name')
+        if (nameNode) {
+          const name = nameNode.text
+          const symbolId = `${filePath}:${name}`
+          if (!seenIds.has(symbolId)) {
+            seenIds.add(symbolId)
+            symbols.push({
+              id: symbolId,
+              kind: AuraNodeKind.Class,
+              name,
+              filePath,
+              range: { startLine: node.startPosition.row + 1, endLine: node.endPosition.row + 1 },
+              exported: true,
+            })
+            contains.push({ source: filePath, target: symbolId, type: AuraEdgeType.CONTAINS, confidence: 1.0 })
+          }
+        }
+      }
+
+      // Interface declarations
+      if (node.type === 'interface_declaration') {
+        const nameNode = node.childForFieldName('name')
+        if (nameNode) {
+          const name = nameNode.text
+          const symbolId = `${filePath}:${name}`
+          if (!seenIds.has(symbolId)) {
+            seenIds.add(symbolId)
+            symbols.push({
+              id: symbolId,
+              kind: AuraNodeKind.Interface,
+              name,
+              filePath,
+              range: { startLine: node.startPosition.row + 1, endLine: node.endPosition.row + 1 },
+              exported: true,
+            })
+            contains.push({ source: filePath, target: symbolId, type: AuraEdgeType.CONTAINS, confidence: 1.0 })
+          }
+        }
+      }
+
+      // Trait declarations
+      if (node.type === 'trait_declaration') {
+        const nameNode = node.childForFieldName('name')
+        if (nameNode) {
+          const name = nameNode.text
+          const symbolId = `${filePath}:${name}`
+          if (!seenIds.has(symbolId)) {
+            seenIds.add(symbolId)
+            symbols.push({
+              id: symbolId,
+              kind: AuraNodeKind.Trait,
+              name,
+              filePath,
+              range: { startLine: node.startPosition.row + 1, endLine: node.endPosition.row + 1 },
+              exported: true,
+            })
+            contains.push({ source: filePath, target: symbolId, type: AuraEdgeType.CONTAINS, confidence: 1.0 })
+          }
+        }
+      }
+
+      // Enum declarations
+      if (node.type === 'enum_declaration') {
+        const nameNode = node.childForFieldName('name')
+        if (nameNode) {
+          const name = nameNode.text
+          const symbolId = `${filePath}:${name}`
+          if (!seenIds.has(symbolId)) {
+            seenIds.add(symbolId)
+            symbols.push({
+              id: symbolId,
+              kind: AuraNodeKind.Enum,
+              name,
+              filePath,
+              range: { startLine: node.startPosition.row + 1, endLine: node.endPosition.row + 1 },
+              exported: true,
+            })
+            contains.push({ source: filePath, target: symbolId, type: AuraEdgeType.CONTAINS, confidence: 1.0 })
+          }
+        }
+      }
+
+      // Function definitions (not inside classes — those are methods)
+      if (node.type === 'function_definition') {
+        const nameNode = node.childForFieldName('name')
+        if (nameNode) {
+          const name = nameNode.text
+          const isMethod = this.isPhpInsideClass(node)
+          const kind = isMethod ? AuraNodeKind.Method : AuraNodeKind.Function
+          const symbolId = `${filePath}:${name}`
+          if (!seenIds.has(symbolId)) {
+            seenIds.add(symbolId)
+
+            const modifiers = this.extractPhpModifiers(node)
+
+            symbols.push({
+              id: symbolId,
+              kind,
+              name,
+              filePath,
+              range: { startLine: node.startPosition.row + 1, endLine: node.endPosition.row + 1 },
+              exported: !name.startsWith('_'),
+              metadata: modifiers.length > 0 ? { modifiers } : undefined,
+            })
+            contains.push({ source: filePath, target: symbolId, type: AuraEdgeType.CONTAINS, confidence: 1.0 })
+          }
+        }
+      }
+
+      // Method declarations (explicit "function" keyword inside class body)
+      if (node.type === 'method_declaration') {
+        const nameNode = node.childForFieldName('name')
+        if (nameNode) {
+          const name = nameNode.text
+          const symbolId = `${filePath}:${name}`
+          if (!seenIds.has(symbolId)) {
+            seenIds.add(symbolId)
+
+            const modifiers = this.extractPhpModifiers(node)
+
+            symbols.push({
+              id: symbolId,
+              kind: AuraNodeKind.Method,
+              name,
+              filePath,
+              range: { startLine: node.startPosition.row + 1, endLine: node.endPosition.row + 1 },
+              exported: !name.startsWith('_'),
+              metadata: modifiers.length > 0 ? { modifiers } : undefined,
+            })
+            contains.push({ source: filePath, target: symbolId, type: AuraEdgeType.CONTAINS, confidence: 1.0 })
+          }
+        }
+      }
+
+      for (let i = 0; i < node.childCount; i++) {
+        walk(node.child(i)!)
+      }
+    }
+    walk(tree.rootNode)
+  }
+
+  private extractPhpModifiers(node: SyntaxNode): string[] {
+    const modifiers: string[] = []
+    for (let i = 0; i < node.childCount; i++) {
+      const child = node.child(i)!
+      if (child.type === 'visibility_modifier' || child.type === 'static_modifier' ||
+          child.type === 'abstract_modifier' || child.type === 'final_modifier') {
+        modifiers.push(child.text)
+      }
+    }
+    return modifiers
+  }
+
+  private isPhpInsideClass(node: SyntaxNode): boolean {
+    let current = node.parent
+    while (current) {
+      if (current.type === 'class_declaration' || current.type === 'interface_declaration' ||
+          current.type === 'trait_declaration' || current.type === 'enum_declaration') {
+        return true
+      }
+      current = current.parent
+    }
+    return false
+  }
+
+  private extractPhpImports(
+    tree: Tree,
+    filePath: string,
+    imports: AuraEdge[],
+  ): void {
+    const walk = (node: SyntaxNode): void => {
+      // use statements: use Some\Namespace\Class; use Some\Namespace\Class as Alias;
+      // In tree-sitter-php, these are 'namespace_use_declaration' nodes containing
+      // 'namespace_use_clause' with a 'qualified_name' child.
+      if (node.type === 'use_declaration' || node.type === 'namespace_use_declaration') {
+        let importPath = ''
+        let importKind = 'use'
+
+        // Look for namespace_use_clause → qualified_name (full path)
+        for (let i = 0; i < node.childCount; i++) {
+          const child = node.child(i)!
+          if (child.type === 'namespace_use_clause') {
+            // The qualified_name child has the full path like "App\Interfaces\RenderableInterface"
+            for (let j = 0; j < child.childCount; j++) {
+              const clauseChild = child.child(j)!
+              if (clauseChild.type === 'qualified_name') {
+                importPath = clauseChild.text.replace(/\\/g, '/')
+              }
+              // Also check for 'name' (simple class name like "Timestampable")
+              if (!importPath && clauseChild.type === 'name') {
+                importPath = clauseChild.text
+              }
+            }
+          }
+          // Check for 'function' or 'const' keyword in use declarations
+          if (child.type === 'function' || child.type === 'const') {
+            importKind = child.type === 'function' ? 'use-function' : 'use-const'
+          }
+          // For simple use declarations (trait use inside classes), 'name' child
+          if (!importPath && (child.type === 'name' || child.type === 'namespace_name')) {
+            importPath = child.text.replace(/\\/g, '/')
+          }
+          // qualified_name directly on the use_declaration node
+          if (!importPath && child.type === 'qualified_name') {
+            importPath = child.text.replace(/\\/g, '/')
+          }
+        }
+
+        // Fallback: extract from node text using regex
+        if (!importPath) {
+          const textMatch = node.text.match(/^use\s+([^;]+);?$/)
+          if (textMatch) {
+            importPath = textMatch[1].replace(/\s+as\s+\w+$/, '').trim().replace(/\\/g, '/')
+          }
+        }
+
+        if (importPath) {
+          // Check for 'as' alias
+          let alias = ''
+          for (let i = 0; i < node.childCount; i++) {
+            const child = node.child(i)!
+            if (child.type === 'alias') {
+              alias = child.text
+            }
+          }
+          if (!alias) {
+            for (let i = 0; i < node.childCount - 1; i++) {
+              if (node.child(i)!.text === 'as' && node.child(i + 1)) {
+                alias = node.child(i + 1)!.text
+              }
+            }
+          }
+
+          imports.push({
+            source: filePath,
+            target: importPath,
+            type: AuraEdgeType.IMPORTS,
+            confidence: 0.9,
+            metadata: {
+              rawImportPath: importPath,
+              importKind,
+              ...(alias && { alias }),
+            },
+          })
+        }
+      }
+
+      // require/include statements: require_once 'file.php'; include 'path/to/file.php';
+      // In tree-sitter-php, these are require_expression, require_once_expression, etc.
+      if (node.type === 'require_expression' || node.type === 'include_expression' ||
+          node.type === 'require_once_expression' || node.type === 'include_once_expression') {
+        let importPath = ''
+
+        // Extract path from direct string child: require_once '/path/file.php';
+        for (let i = 0; i < node.childCount; i++) {
+          const child = node.child(i)!
+          if (child.type === 'string') {
+            importPath = this.extractPhpStringContent(child)
+          }
+        }
+
+        // Handle concatenation expressions: require_once __DIR__ . '/file.php';
+        // These appear as binary_expression nodes
+        if (!importPath) {
+          for (let i = 0; i < node.childCount; i++) {
+            const child = node.child(i)!
+            if (child.type === 'binary_expression') {
+              // Find the string literal in the binary expression (the right-hand side)
+              for (let j = 0; j < child.childCount; j++) {
+                const operand = child.child(j)!
+                if (operand.type === 'string') {
+                  const extracted = this.extractPhpStringContent(operand)
+                  if (extracted) {
+                    importPath = extracted
+                    break
+                  }
+                }
+              }
+            }
+          }
+        }
+
+        // Handle parenthesized expressions: require_once("file.php")
+        if (!importPath) {
+          for (let i = 0; i < node.childCount; i++) {
+            const child = node.child(i)!
+            if (child.type === 'parenthesized_expression') {
+              for (let j = 0; j < child.childCount; j++) {
+                const inner = child.child(j)!
+                if (inner.type === 'string') {
+                  importPath = this.extractPhpStringContent(inner)
+                } else if (inner.type === 'binary_expression') {
+                  for (let k = 0; k < inner.childCount; k++) {
+                    const operand = inner.child(k)!
+                    if (operand.type === 'string') {
+                      importPath = this.extractPhpStringContent(operand)
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+
+        if (importPath) {
+          const kind = node.type.startsWith('require') ? 'require' : 'include'
+          imports.push({
+            source: filePath,
+            target: importPath,
+            type: AuraEdgeType.IMPORTS,
+            confidence: 0.9,
+            metadata: { rawImportPath: importPath, importKind: kind },
+          })
+        }
+      }
+
+      for (let i = 0; i < node.childCount; i++) {
+        walk(node.child(i)!)
+      }
+    }
+    walk(tree.rootNode)
+  }
+
+  /** Extract string content from PHP string nodes (which have string_content children) */
+  private extractPhpStringContent(node: SyntaxNode): string {
+    // PHP strings have structure: string → ' / " + string_content + ' / "
+    for (let i = 0; i < node.childCount; i++) {
+      const child = node.child(i)!
+      if (child.type === 'string_content') {
+        return child.text
+      }
+    }
+    // Fallback: strip quotes from node text
+    const text = node.text
+    if ((text.startsWith("'") && text.endsWith("'")) || (text.startsWith('"') && text.endsWith('"'))) {
+      return text.slice(1, -1)
+    }
+    return text
+  }
+
+  private extractPhpCalls(
+    tree: Tree,
+    filePath: string,
+    calls: AuraEdge[],
+    symbols: AuraNode[],
+  ): void {
+    const seenCalls = new Set<string>()
+
+    const walk = (node: SyntaxNode): void => {
+      // Function calls: function_name(args)
+      if (node.type === 'function_call_expression') {
+        const funcNameNode = node.childForFieldName('function')
+        let callName = funcNameNode?.text ?? ''
+        if (!callName) {
+          const firstChild = node.child(0)
+          if (firstChild && firstChild.type !== '(' && firstChild.type !== 'argument_list') {
+            callName = firstChild.text
+          }
+        }
+
+        if (callName && !this.isPhpBuiltin(callName)) {
+          const enclosingSymbol = this.findEnclosingSymbolFromTree(node, symbols, filePath)
+          const source = enclosingSymbol ? enclosingSymbol.id : filePath
+          const dedupeKey = `${source}→${callName}`
+          if (!seenCalls.has(dedupeKey)) {
+            seenCalls.add(dedupeKey)
+            calls.push({
+              source,
+              target: callName,
+              type: AuraEdgeType.CALLS,
+              confidence: 0.7,
+              metadata: { callName, callTargetKind: 'direct' },
+            })
+          }
+        }
+      }
+
+      // Method calls: $obj->method(args) or ClassName::method(args)
+      if (node.type === 'method_call_expression' || node.type === 'scoped_call_expression') {
+        let callName = ''
+        let objName = ''
+
+        if (node.type === 'method_call_expression') {
+          const methodNode = node.childForFieldName('method')
+          const objectNode = node.childForFieldName('object')
+          callName = methodNode?.text ?? ''
+          objName = objectNode?.text ?? ''
+        } else {
+          const nameNode = node.childForFieldName('name')
+          const scopeNode = node.childForFieldName('scope')
+          callName = nameNode?.text ?? ''
+          objName = scopeNode?.text ?? ''
+        }
+
+        if (callName && !this.isPhpBuiltin(callName)) {
+          const fullCall = objName ? `${objName}->${callName}` : callName
+          const enclosingSymbol = this.findEnclosingSymbolFromTree(node, symbols, filePath)
+          const source = enclosingSymbol ? enclosingSymbol.id : filePath
+          const dedupeKey = `${source}→${fullCall}`
+          if (!seenCalls.has(dedupeKey)) {
+            seenCalls.add(dedupeKey)
+            calls.push({
+              source,
+              target: fullCall,
+              type: AuraEdgeType.CALLS,
+              confidence: 0.5,
+              metadata: { callName: fullCall, callTargetKind: 'member', methodName: callName },
+            })
+          }
+        }
+      }
+
+      // Object creation: new ClassName()
+      if (node.type === 'object_creation_expression') {
+        let className = ''
+        // In tree-sitter-php, the class name can be a 'name' or 'qualified_name' child
+        for (let i = 0; i < node.childCount; i++) {
+          const child = node.child(i)!
+          if (child.type === 'name' || child.type === 'qualified_name' || child.type === 'namespace_name') {
+            className = child.text.replace(/\\/g, '/')
+            break
+          }
+        }
+        // Also try field name
+        if (!className) {
+          const classNode = node.childForFieldName('class')
+          if (classNode) className = classNode.text.replace(/\\/g, '/')
+        }
+
+        if (className && !this.isPhpBuiltin(className)) {
+          const enclosingSymbol = this.findEnclosingSymbolFromTree(node, symbols, filePath)
+          const source = enclosingSymbol ? enclosingSymbol.id : filePath
+          const dedupeKey = `${source}→new:${className}`
+          if (!seenCalls.has(dedupeKey)) {
+            seenCalls.add(dedupeKey)
+            calls.push({
+              source,
+              target: className,
+              type: AuraEdgeType.CALLS,
+              confidence: 0.8,
+              metadata: { callName: `new ${className}`, callTargetKind: 'constructor' },
+            })
+          }
+        }
+      }
+
+      for (let i = 0; i < node.childCount; i++) {
+        walk(node.child(i)!)
+      }
+    }
+    walk(tree.rootNode)
+  }
+
+  private isPhpBuiltin(name: string): boolean {
+    const builtins = new Set([
+      'echo', 'print', 'isset', 'unset', 'empty', 'die', 'exit',
+      'var_dump', 'print_r', 'array', 'list', 'compact', 'extract',
+      'count', 'sizeof', 'strlen', 'substr', 'strpos', 'str_replace',
+      'strtolower', 'strtoupper', 'trim', 'rtrim', 'ltrim',
+      'implode', 'explode', 'split', 'preg_match', 'preg_replace',
+      'json_encode', 'json_decode', 'serialize', 'unserialize',
+      'intval', 'floatval', 'strval', 'boolval', 'settype', 'gettype',
+      'is_array', 'is_string', 'is_int', 'is_float', 'is_bool', 'is_null', 'is_object',
+      'array_push', 'array_pop', 'array_shift', 'array_unshift', 'array_merge',
+      'array_map', 'array_filter', 'array_keys', 'array_values', 'array_flip',
+      'in_array', 'array_key_exists', 'array_search',
+      'sort', 'usort', 'asort', 'ksort',
+      'header', 'http_response_code', 'setcookie',
+      'file_get_contents', 'file_put_contents', 'fopen', 'fclose', 'fread', 'fwrite',
+      'file_exists', 'is_file', 'is_dir', 'mkdir', 'rmdir', 'unlink',
+      'basename', 'dirname', 'pathinfo', 'realpath',
+      'sprintf', 'printf', 'fprintf', 'vprintf',
+      'abs', 'ceil', 'floor', 'round', 'max', 'min', 'rand', 'mt_rand',
+      'date', 'time', 'strtotime', 'mktime', 'date_create',
+      'curl_init', 'curl_exec', 'curl_close',
+      'mysqli_connect', 'mysqli_query', 'PDO', 'pdo',
+      'parent', 'self', 'static', 'true', 'false', 'null',
+      'array_values', 'array_slice', 'array_splice', 'array_reverse',
+      'call_user_func', 'call_user_func_array', 'func_get_args',
+      'trigger_error', 'set_error_handler', 'error_reporting',
+      'ob_start', 'ob_end_clean', 'ob_get_clean', 'ob_get_contents',
+      'session_start', 'session_destroy', 'session_id',
+      'htmlspecialchars', 'htmlentities', 'strip_tags', 'urlencode', 'urldecode',
+      // Common PHP framework functions
+      'app', 'env', 'config', 'route', 'middleware', 'dispatch',
+      'response', 'request', 'redirect', 'view', 'validate',
+    ])
+    return builtins.has(name) || name.startsWith('\\')
+  }
+
+  private extractPhpHeritage(
+    tree: Tree,
+    filePath: string,
+    heritage: AuraEdge[],
+  ): void {
+    const walk = (node: SyntaxNode): void => {
+      if (node.type === 'class_declaration' || node.type === 'enum_declaration') {
+        const classNameNode = node.childForFieldName('name')
+        const className = classNameNode?.text ?? ''
+        const source = className ? `${filePath}:${className}` : filePath
+
+        // extends ClassName — in tree-sitter-php, this is a 'base_clause' node
+        // containing 'extends' keyword + 'name' child
+        for (let i = 0; i < node.childCount; i++) {
+          const child = node.child(i)!
+          if (child.type === 'base_clause') {
+            for (let j = 0; j < child.childCount; j++) {
+              const baseChild = child.child(j)!
+              if (baseChild.type === 'name' || baseChild.type === 'qualified_name' || baseChild.type === 'namespace_name') {
+                heritage.push({
+                  source,
+                  target: baseChild.text.replace(/\\/g, '/'),
+                  type: AuraEdgeType.EXTENDS,
+                  confidence: 0.9,
+                  metadata: { rawTargetName: baseChild.text, heritageKind: 'extends' },
+                })
+              }
+            }
+          }
+        }
+
+        // implements Interface1, Interface2 — class_interface_clause node
+        for (let i = 0; i < node.childCount; i++) {
+          const child = node.child(i)!
+          if (child.type === 'class_interface_clause') {
+            for (let j = 0; j < child.childCount; j++) {
+              const ifaceChild = child.child(j)!
+              if (ifaceChild.type === 'name' || ifaceChild.type === 'qualified_name' || ifaceChild.type === 'namespace_name') {
+                heritage.push({
+                  source,
+                  target: ifaceChild.text.replace(/\\/g, '/'),
+                  type: AuraEdgeType.IMPLEMENTS,
+                  confidence: 0.9,
+                  metadata: { rawTargetName: ifaceChild.text, heritageKind: 'implements' },
+                })
+              }
+            }
+          }
+        }
+      }
+
+      // Interface extends other interfaces — also uses 'base_clause' in tree-sitter-php
+      if (node.type === 'interface_declaration') {
+        const interfaceNameNode = node.childForFieldName('name')
+        const interfaceName = interfaceNameNode?.text ?? ''
+        const source = interfaceName ? `${filePath}:${interfaceName}` : filePath
+
+        for (let i = 0; i < node.childCount; i++) {
+          const child = node.child(i)!
+          // In tree-sitter-php, interface extends uses 'base_clause' (same as class extends)
+          if (child.type === 'base_clause') {
+            for (let j = 0; j < child.childCount; j++) {
+              const baseChild = child.child(j)!
+              if (baseChild.type === 'name' || baseChild.type === 'qualified_name' || baseChild.type === 'namespace_name') {
+                heritage.push({
+                  source,
+                  target: baseChild.text.replace(/\\/g, '/'),
+                  type: AuraEdgeType.EXTENDS,
+                  confidence: 0.9,
+                  metadata: { rawTargetName: baseChild.text, heritageKind: 'interface-extends' },
+                })
+              }
+            }
+          }
+        }
+      }
+
+      // use Trait — inside class body (trait use, not namespace use)
+      // In tree-sitter-php, trait use inside a class is 'use_declaration' with parent 'declaration_list'
+      if (node.type === 'use_declaration') {
+        // Only process trait use inside class-like declarations, not namespace use declarations
+        const parentType = node.parent?.type
+        if (parentType === 'declaration_list') {
+          // Walk up to find the class/interface/trait/enum declaration
+          let classNode: SyntaxNode | null = node.parent?.parent ?? null
+          let className = ''
+          while (classNode) {
+            if (classNode.type === 'class_declaration' || classNode.type === 'trait_declaration' ||
+                classNode.type === 'enum_declaration' || classNode.type === 'interface_declaration') {
+              const nameNode = classNode.childForFieldName('name')
+              if (nameNode) className = nameNode.text
+              break
+            }
+            classNode = classNode.parent
+          }
+
+          const source = className ? `${filePath}:${className}` : filePath
+
+          for (let i = 0; i < node.childCount; i++) {
+            const child = node.child(i)!
+            if (child.type === 'name' || child.type === 'qualified_name' || child.type === 'namespace_name') {
+              heritage.push({
+                source,
+                target: child.text.replace(/\\/g, '/'),
+                type: AuraEdgeType.IMPLEMENTS,
+                confidence: 0.8,
+                metadata: { rawTargetName: child.text, heritageKind: 'use-trait' },
+              })
+            }
+          }
+        }
+      }
+
+      // Also handle 'trait_use_clause' (tree-sitter-php alternative node for trait use)
+      if (node.type === 'trait_use_clause') {
+        let className = ''
+        let classNode: SyntaxNode | null = node.parent
+        while (classNode) {
+          if (classNode.type === 'class_declaration' || classNode.type === 'trait_declaration' ||
+              classNode.type === 'enum_declaration' || classNode.type === 'interface_declaration') {
+            const nameNode = classNode.childForFieldName('name')
+            if (nameNode) className = nameNode.text
+            break
+          }
+          classNode = classNode.parent
+        }
+
+        const source = className ? `${filePath}:${className}` : filePath
+
+        for (let i = 0; i < node.childCount; i++) {
+          const child = node.child(i)!
+          if (child.type === 'name' || child.type === 'qualified_name' || child.type === 'namespace_name') {
+            heritage.push({
+              source,
+              target: child.text.replace(/\\/g, '/'),
+              type: AuraEdgeType.IMPLEMENTS,
+              confidence: 0.8,
+              metadata: { rawTargetName: child.text, heritageKind: 'use-trait' },
+            })
+          }
+        }
+      }
+
+      for (let i = 0; i < node.childCount; i++) {
+        walk(node.child(i)!)
+      }
+    }
+    walk(tree.rootNode)
+  }
+
+  private findEnclosingSymbolFromTree(
+    node: SyntaxNode,
+    symbols: AuraNode[],
+    filePath: string,
+  ): AuraNode | null {
+    let current: SyntaxNode | null = node
+    while (current) {
+      if (current.type === 'function_definition' || current.type === 'method_declaration' ||
+          current.type === 'class_declaration' || current.type === 'interface_declaration' ||
+          current.type === 'trait_declaration' || current.type === 'enum_declaration') {
+        const nameNode = current.childForFieldName('name')
+        if (nameNode) {
+          const match = symbols.find(s => s.name === nameNode.text && s.filePath === filePath)
+          if (match) return match
+        }
+      }
+      current = current.parent
+    }
+    return null
+  }
+
+  // ── Java parsing ────────────────────────────────────────────────────────────
+
+  private parseJavaFile(filePath: string, source: string): ParseResult {
+    const language = this.selectLanguage(filePath)
+    if (!language || !this.parser) {
+      return { filePath, symbols: [], imports: [], calls: [], heritage: [], contains: [], dataFlow: [] }
+    }
+
+    this.parser.setLanguage(language)
+    const tree = this.parser.parse(source)
+    if (!tree) {
+      return { filePath, symbols: [], imports: [], calls: [], heritage: [], contains: [], dataFlow: [] }
+    }
+
+    try {
+      const symbols: AuraNode[] = []
+      const imports: AuraEdge[] = []
+      const calls: AuraEdge[] = []
+      const heritage: AuraEdge[] = []
+      const contains: AuraEdge[] = []
+      const seenIds = new Set<string>()
+
+      this.extractJavaDeclarations(tree, filePath, symbols, contains, seenIds)
+      this.extractJavaImports(tree, filePath, imports)
+      this.extractJavaCalls(tree, filePath, calls, symbols)
+      this.extractJavaHeritage(tree, filePath, heritage)
+
+      // Data flow for Java
+      const dataFlowEdges = this.dataFlowAnalyzer.analyze(language, tree, filePath, symbols, calls)
+
+      return { filePath, symbols, imports, calls, heritage, contains, dataFlow: dataFlowEdges }
+    } finally {
+      tree.delete()
+    }
+  }
+
+  private extractJavaDeclarations(
+    tree: Tree,
+    filePath: string,
+    symbols: AuraNode[],
+    contains: AuraEdge[],
+    seenIds: Set<string>,
+  ): void {
+    const walk = (node: SyntaxNode): void => {
+      // Class declarations — tree-sitter-java uses 'identifier' for the name field
+      if (node.type === 'class_declaration') {
+        const nameNode = node.childForFieldName('name')
+        // Fallback: tree-sitter-java uses 'identifier' for names
+        const name = nameNode?.text ?? this.findChildByText(node, 'identifier')
+        if (name) {
+          const symbolId = `${filePath}:${name}`
+          if (!seenIds.has(symbolId)) {
+            seenIds.add(symbolId)
+            const modifiers = this.extractJavaModifiers(node)
+            symbols.push({
+              id: symbolId,
+              kind: AuraNodeKind.Class,
+              name,
+              filePath,
+              range: { startLine: node.startPosition.row + 1, endLine: node.endPosition.row + 1 },
+              exported: modifiers.includes('public'),
+              metadata: modifiers.length > 0 ? { modifiers } : undefined,
+            })
+            contains.push({ source: filePath, target: symbolId, type: AuraEdgeType.CONTAINS, confidence: 1.0 })
+          }
+        }
+      }
+
+      // Interface declarations
+      if (node.type === 'interface_declaration') {
+        const nameNode = node.childForFieldName('name')
+        const name = nameNode?.text ?? this.findChildByText(node, 'identifier')
+        if (name) {
+          const symbolId = `${filePath}:${name}`
+          if (!seenIds.has(symbolId)) {
+            seenIds.add(symbolId)
+            const modifiers = this.extractJavaModifiers(node)
+            symbols.push({
+              id: symbolId,
+              kind: AuraNodeKind.Interface,
+              name,
+              filePath,
+              range: { startLine: node.startPosition.row + 1, endLine: node.endPosition.row + 1 },
+              exported: modifiers.includes('public'),
+              metadata: modifiers.length > 0 ? { modifiers } : undefined,
+            })
+            contains.push({ source: filePath, target: symbolId, type: AuraEdgeType.CONTAINS, confidence: 1.0 })
+          }
+        }
+      }
+
+      // Enum declarations
+      if (node.type === 'enum_declaration') {
+        const nameNode = node.childForFieldName('name')
+        const name = nameNode?.text ?? this.findChildByText(node, 'identifier')
+        if (name) {
+          const symbolId = `${filePath}:${name}`
+          if (!seenIds.has(symbolId)) {
+            seenIds.add(symbolId)
+            const modifiers = this.extractJavaModifiers(node)
+            symbols.push({
+              id: symbolId,
+              kind: AuraNodeKind.Enum,
+              name,
+              filePath,
+              range: { startLine: node.startPosition.row + 1, endLine: node.endPosition.row + 1 },
+              exported: modifiers.includes('public'),
+              metadata: modifiers.length > 0 ? { modifiers } : undefined,
+            })
+            contains.push({ source: filePath, target: symbolId, type: AuraEdgeType.CONTAINS, confidence: 1.0 })
+          }
+        }
+      }
+
+      // Method declarations — tree-sitter-java uses 'identifier' for the name
+      if (node.type === 'method_declaration') {
+        const nameNode = node.childForFieldName('name')
+        const name = nameNode?.text ?? this.findChildByText(node, 'identifier')
+        if (name) {
+          const symbolId = `${filePath}:${name}`
+          if (!seenIds.has(symbolId)) {
+            seenIds.add(symbolId)
+            const modifiers = this.extractJavaModifiers(node)
+            symbols.push({
+              id: symbolId,
+              kind: AuraNodeKind.Method,
+              name,
+              filePath,
+              range: { startLine: node.startPosition.row + 1, endLine: node.endPosition.row + 1 },
+              exported: modifiers.includes('public'),
+              metadata: modifiers.length > 0 ? { modifiers } : undefined,
+            })
+            contains.push({ source: filePath, target: symbolId, type: AuraEdgeType.CONTAINS, confidence: 1.0 })
+          }
+        }
+      }
+
+      // Field declarations (class-level variables)
+      if (node.type === 'field_declaration') {
+        const declaratorNode = node.childForFieldName('declarator')
+        if (declaratorNode) {
+          const varNameNode = declaratorNode.childForFieldName('name')
+          const name = varNameNode?.text ?? this.findChildByText(declaratorNode, 'identifier')
+          if (name) {
+            const symbolId = `${filePath}:${name}`
+            if (!seenIds.has(symbolId)) {
+              seenIds.add(symbolId)
+              const modifiers = this.extractJavaModifiers(node)
+              symbols.push({
+                id: symbolId,
+                kind: AuraNodeKind.Variable,
+                name,
+                filePath,
+                range: { startLine: node.startPosition.row + 1, endLine: node.endPosition.row + 1 },
+                exported: modifiers.includes('public'),
+                metadata: modifiers.length > 0 ? { modifiers } : undefined,
+              })
+              contains.push({ source: filePath, target: symbolId, type: AuraEdgeType.CONTAINS, confidence: 1.0 })
+            }
+          }
+        }
+      }
+
+      for (let i = 0; i < node.childCount; i++) {
+        walk(node.child(i)!)
+      }
+    }
+    walk(tree.rootNode)
+  }
+
+  /** Find the first child node of a given type and return its text */
+  private findChildByText(node: SyntaxNode, type: string): string | null {
+    for (let i = 0; i < node.childCount; i++) {
+      const child = node.child(i)!
+      if (child.type === type) {
+        return child.text
+      }
+    }
+    return null
+  }
+
+  private extractJavaModifiers(node: SyntaxNode): string[] {
+    const modifiers: string[] = []
+    for (let i = 0; i < node.childCount; i++) {
+      const child = node.child(i)!
+      if (child.type === 'public' || child.type === 'private' || child.type === 'protected' ||
+          child.type === 'static' || child.type === 'abstract' || child.type === 'final' ||
+          child.type === 'synchronized' || child.type === 'volatile' || child.type === 'transient' ||
+          child.type === 'native' || child.type === 'strictfp') {
+        modifiers.push(child.type)
+      }
+      // Modifiers can also be grouped in a 'modifiers' node
+      if (child.type === 'modifiers') {
+        for (let j = 0; j < child.childCount; j++) {
+          modifiers.push(child.child(j)!.text)
+        }
+      }
+    }
+    return modifiers
+  }
+
+  private extractJavaImports(
+    tree: Tree,
+    filePath: string,
+    imports: AuraEdge[],
+  ): void {
+    const walk = (node: SyntaxNode): void => {
+      // import package.Class; or import package.*;
+      if (node.type === 'import_declaration') {
+        let importPath = ''
+        let isWildcard = false
+
+        for (let i = 0; i < node.childCount; i++) {
+          const child = node.child(i)!
+          // tree-sitter-java uses 'scoped_identifier' for the full import path
+          if (child.type === 'scoped_identifier') {
+            importPath = child.text
+          } else if (child.type === 'identifier' && !importPath) {
+            // Simple identifier (rare for imports but handle it)
+            importPath = child.text
+          } else if (child.type === 'asterisk') {
+            isWildcard = true
+          }
+        }
+
+        if (importPath) {
+          imports.push({
+            source: filePath,
+            target: importPath,
+            type: AuraEdgeType.IMPORTS,
+            confidence: 0.9,
+            metadata: {
+              rawImportPath: importPath,
+              importKind: isWildcard ? 'java-wildcard-import' : 'java-import',
+            },
+          })
+        }
+      }
+
+      for (let i = 0; i < node.childCount; i++) {
+        walk(node.child(i)!)
+      }
+    }
+    walk(tree.rootNode)
+  }
+
+  private extractJavaCalls(
+    tree: Tree,
+    filePath: string,
+    calls: AuraEdge[],
+    symbols: AuraNode[],
+  ): void {
+    const seenCalls = new Set<string>()
+
+    const walk = (node: SyntaxNode): void => {
+      // Method invocations: object.method(args) or method(args)
+      if (node.type === 'method_invocation') {
+        const nameNode = node.childForFieldName('name')
+        const objectNode = node.childForFieldName('object')
+
+        const methodName = nameNode?.text ?? ''
+        const objectName = objectNode?.text ?? ''
+        const fullCall = objectName ? `${objectName}.${methodName}` : methodName
+
+        if (methodName && !this.isJavaBuiltin(methodName)) {
+          const enclosingSymbol = this.findEnclosingSymbolFromTree(node, symbols, filePath)
+          const source = enclosingSymbol ? enclosingSymbol.id : filePath
+          const dedupeKey = `${source}→${fullCall}`
+          if (!seenCalls.has(dedupeKey)) {
+            seenCalls.add(dedupeKey)
+            calls.push({
+              source,
+              target: fullCall,
+              type: AuraEdgeType.CALLS,
+              confidence: objectName ? 0.5 : 0.7,
+              metadata: { callName: fullCall, callTargetKind: objectName ? 'member' : 'direct', methodName },
+            })
+          }
+        }
+      }
+
+      // Object creation: new ClassName(args)
+      if (node.type === 'object_creation_expression') {
+        const typeNode = node.childForFieldName('type')
+        let className = typeNode?.text ?? ''
+        // Fallback: look for type_identifier or scoped_identifier child
+        if (!className) {
+          for (let i = 0; i < node.childCount; i++) {
+            const child = node.child(i)!
+            if (child.type === 'type_identifier' || child.type === 'scoped_identifier' ||
+                child.type === 'class_identifier' || child.type === 'identifier') {
+              if (child.text !== 'new') {
+                className = child.text
+                break
+              }
+            }
+          }
+        }
+
+        if (className && !this.isJavaBuiltin(className)) {
+          const enclosingSymbol = this.findEnclosingSymbolFromTree(node, symbols, filePath)
+          const source = enclosingSymbol ? enclosingSymbol.id : filePath
+          const dedupeKey = `${source}→new:${className}`
+          if (!seenCalls.has(dedupeKey)) {
+            seenCalls.add(dedupeKey)
+            calls.push({
+              source,
+              target: className,
+              type: AuraEdgeType.CALLS,
+              confidence: 0.8,
+              metadata: { callName: `new ${className}`, callTargetKind: 'constructor' },
+            })
+          }
+        }
+      }
+
+      for (let i = 0; i < node.childCount; i++) {
+        walk(node.child(i)!)
+      }
+    }
+    walk(tree.rootNode)
+  }
+
+  private isJavaBuiltin(name: string): boolean {
+    const builtins = new Set([
+      'println', 'print', 'printf', 'format', 'toString', 'equals', 'hashCode',
+      'getClass', 'notify', 'notifyAll', 'wait',
+      'length', 'charAt', 'substring', 'indexOf', 'lastIndexOf', 'contains',
+      'startsWith', 'endsWith', 'toLowerCase', 'toUpperCase', 'trim',
+      'replace', 'replaceAll', 'split', 'matches', 'compareTo',
+      'valueOf', 'parseInt', 'parseDouble', 'parseFloat', 'parseLong',
+      'get', 'set', 'add', 'remove', 'size', 'clear',
+      'isEmpty', 'iterator', 'hasNext', 'next', 'keySet', 'values', 'entrySet',
+      'put', 'putAll', 'getKey', 'getValue',
+      'append', 'insert', 'delete', 'reverse',
+      'close', 'read', 'readLine', 'write', 'flush',
+      'nextInt', 'nextLine', 'nextBoolean', 'nextDouble',
+      'exit', 'currentTimeMillis', 'arraycopy', 'gc',
+      'array', 'stream', 'collect', 'map', 'filter', 'reduce', 'forEach',
+      'orElse', 'isPresent', 'get', 'of', 'empty',
+      'abs', 'max', 'min', 'ceil', 'floor', 'round', 'random', 'sqrt', 'pow',
+      'run', 'start', 'interrupt', 'join', 'sleep', 'yield',
+      'getMessage', 'printStackTrace', 'fillInStackTrace',
+      'clone', 'finalize',
+    ])
+    return builtins.has(name)
+  }
+
+  private extractJavaHeritage(
+    tree: Tree,
+    filePath: string,
+    heritage: AuraEdge[],
+  ): void {
+    const walk = (node: SyntaxNode): void => {
+      // Class extends/implements — tree-sitter-java uses specific field names
+      if (node.type === 'class_declaration') {
+        // Find class name — tree-sitter-java uses 'identifier' for names
+        const className = this.findChildByText(node, 'identifier') ?? ''
+        const source = className ? `${filePath}:${className}` : filePath
+
+        // extends — in tree-sitter-java, this is in a 'superclass' node
+        for (let i = 0; i < node.childCount; i++) {
+          const child = node.child(i)!
+          if (child.type === 'superclass') {
+            // The superclass node contains: extends <type_identifier>
+            for (let j = 0; j < child.childCount; j++) {
+              const superChild = child.child(j)!
+              if (superChild.type === 'type_identifier' || superChild.type === 'scoped_identifier') {
+                heritage.push({
+                  source,
+                  target: superChild.text,
+                  type: AuraEdgeType.EXTENDS,
+                  confidence: 0.9,
+                  metadata: { rawTargetName: superChild.text, heritageKind: 'extends' },
+                })
+              }
+            }
+          }
+          // implements — in tree-sitter-java, this is in a 'super_interfaces' node
+          if (child.type === 'super_interfaces') {
+            for (let j = 0; j < child.childCount; j++) {
+              const ifaceChild = child.child(j)!
+              // type_list contains type_identifiers
+              if (ifaceChild.type === 'type_list') {
+                for (let k = 0; k < ifaceChild.childCount; k++) {
+                  const typeChild = ifaceChild.child(k)!
+                  if (typeChild.type === 'type_identifier' || typeChild.type === 'scoped_identifier') {
+                    heritage.push({
+                      source,
+                      target: typeChild.text,
+                      type: AuraEdgeType.IMPLEMENTS,
+                      confidence: 0.9,
+                      metadata: { rawTargetName: typeChild.text, heritageKind: 'implements' },
+                    })
+                  }
+                }
+              }
+              // Direct type_identifier in super_interfaces (single interface)
+              if (ifaceChild.type === 'type_identifier' || ifaceChild.type === 'scoped_identifier') {
+                heritage.push({
+                  source,
+                  target: ifaceChild.text,
+                  type: AuraEdgeType.IMPLEMENTS,
+                  confidence: 0.9,
+                  metadata: { rawTargetName: ifaceChild.text, heritageKind: 'implements' },
+                })
+              }
+            }
+          }
+        }
+      }
+
+      // Interface extends other interfaces
+      if (node.type === 'interface_declaration') {
+        const interfaceName = this.findChildByText(node, 'identifier') ?? ''
+        const source = interfaceName ? `${filePath}:${interfaceName}` : filePath
+
+        for (let i = 0; i < node.childCount; i++) {
+          const child = node.child(i)!
+          // In tree-sitter-java, interface extends uses 'extends_interfaces'
+          if (child.type === 'extends_interfaces') {
+            for (let j = 0; j < child.childCount; j++) {
+              const extendsChild = child.child(j)!
+              if (extendsChild.type === 'type_list') {
+                for (let k = 0; k < extendsChild.childCount; k++) {
+                  const typeChild = extendsChild.child(k)!
+                  if (typeChild.type === 'type_identifier' || typeChild.type === 'scoped_identifier') {
+                    heritage.push({
+                      source,
+                      target: typeChild.text,
+                      type: AuraEdgeType.EXTENDS,
+                      confidence: 0.9,
+                      metadata: { rawTargetName: typeChild.text, heritageKind: 'interface-extends' },
+                    })
+                  }
+                }
+              }
+              if (extendsChild.type === 'type_identifier' || extendsChild.type === 'scoped_identifier') {
+                heritage.push({
+                  source,
+                  target: extendsChild.text,
+                  type: AuraEdgeType.EXTENDS,
+                  confidence: 0.9,
+                  metadata: { rawTargetName: extendsChild.text, heritageKind: 'interface-extends' },
+                })
+              }
+            }
+          }
+        }
+      }
+
       for (let i = 0; i < node.childCount; i++) {
         walk(node.child(i)!)
       }

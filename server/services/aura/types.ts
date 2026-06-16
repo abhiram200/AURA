@@ -18,6 +18,9 @@ export enum AuraNodeKind {
   Mixin = 'Mixin',               // SCSS @mixin definition
   ScssFunction = 'ScssFunction', // SCSS @function definition
   ScssVariable = 'ScssVariable', // SCSS $variable
+  // PHP / Java
+  Trait = 'Trait',               // PHP trait
+  Enum = 'Enum',                 // PHP/Java enum
 }
 
 export enum AuraEdgeType {

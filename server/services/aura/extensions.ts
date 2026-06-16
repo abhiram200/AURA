@@ -5,6 +5,8 @@ export const CSS_EXTENSIONS = new Set(['.css'])
 export const SCSS_EXTENSIONS = new Set(['.scss', '.sass'])
 export const HTML_EXTENSIONS = new Set(['.html', '.htm'])
 export const VUE_EXTENSIONS = new Set(['.vue'])
+export const PHP_EXTENSIONS = new Set(['.php'])
+export const JAVA_EXTENSIONS = new Set(['.java'])
 
 export const PARSABLE_EXTENSIONS = new Set([
   ...JS_EXTENSIONS,
@@ -14,4 +16,6 @@ export const PARSABLE_EXTENSIONS = new Set([
   ...SCSS_EXTENSIONS,
   ...HTML_EXTENSIONS,
   ...VUE_EXTENSIONS,
+  ...PHP_EXTENSIONS,
+  ...JAVA_EXTENSIONS,
 ])

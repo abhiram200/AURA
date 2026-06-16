@@ -21,7 +21,7 @@ import type {
   FileHashEntry,
 } from './types.ts'
 import { computeProgress } from './types.ts'
-import { CSS_EXTENSIONS, SCSS_EXTENSIONS, HTML_EXTENSIONS, VUE_EXTENSIONS } from './extensions.ts'
+import { CSS_EXTENSIONS, SCSS_EXTENSIONS, HTML_EXTENSIONS, VUE_EXTENSIONS, PHP_EXTENSIONS, JAVA_EXTENSIONS } from './extensions.ts'
 import { getGitHead } from './git.ts'
 import { BM25SearchEngine } from './search/bm25.ts'
 import { EmbeddingService } from './search/embedding.ts'
@@ -472,7 +472,7 @@ export class AuraIndexer {
           const wildcard = match[1] || ''
           const resolved = replacement.replace(/\*/g, wildcard)
           // Try common extensions
-          const extensions = ['', '.ts', '.tsx', '.js', '.jsx', '.vue', '/index.ts', '/index.tsx', '/index.js', '/index.jsx', '/index.vue']
+          const extensions = ['', '.ts', '.tsx', '.js', '.jsx', '.vue', '.php', '.java', '/index.ts', '/index.tsx', '/index.js', '/index.jsx', '/index.vue']
           for (const ext of extensions) {
             const candidate = resolved + ext
             if (fileNodeMap.has(candidate)) return candidate
@@ -646,8 +646,136 @@ export class AuraIndexer {
         continue
       }
 
+      // ── PHP import resolution ──
+      const isPhpImport = PHP_EXTENSIONS.has(sourceExt) ||
+        (VUE_EXTENSIONS.has(sourceExt) && edge.metadata?.importKind === 'use')
+
+      if (isPhpImport && !isPythonImport) {
+        // PHP use statements have namespace paths like "App\\Models\\User" (converted to "App/Models/User" by parser)
+        // require/include statements have relative file paths like "./helpers.php"
+        const isRequireInclude = edge.metadata?.importKind === 'require' || edge.metadata?.importKind === 'include'
+
+        if (isRequireInclude) {
+          // resolve relative to source directory
+          if (!rawImportPath.startsWith('.') && !rawImportPath.startsWith('/')) {
+            edge.confidence = 0.3
+            continue
+          }
+          const sourceDir = path.dirname(edge.source)
+          const resolvedPath = path.normalize(path.join(sourceDir, rawImportPath)).replace(/\\/g, '/')
+          const phpExtensions = ['.php', '/index.php']
+          let matched = false
+          for (const ext of phpExtensions) {
+            const candidate = resolvedPath + ext
+            if (fileNodeMap.has(candidate)) {
+              edge.target = candidate
+              edge.confidence = 0.9
+              matched = true
+              break
+            }
+          }
+          if (!matched && fileNodeMap.has(resolvedPath)) {
+            edge.target = resolvedPath
+            edge.confidence = 0.9
+          } else if (!matched) {
+            edge.confidence = 0.5
+          }
+        } else {
+          // use/namespace imports — these are typically framework autoloaded (e.g., "App/Models/User")
+          // Convert namespace separators and try to match to file paths
+          const namespacePath = rawImportPath.replace(/\\/g, '/')
+          // Try mapping namespace to PSR-4 style paths
+          // Common patterns: App/Models/User → app/Models/User.php, app/Models/User/index.php
+          const phpExtensions = ['.php', '/index.php']
+          let matched = false
+          // Try lowercase namespace mapping: App → app
+          const lowerPath = namespacePath.charAt(0).toLowerCase() + namespacePath.slice(1)
+          for (const prefix of ['', 'src/', 'app/', 'lib/']) {
+            for (const ext of phpExtensions) {
+              const candidate = prefix + lowerPath + ext
+              if (fileNodeMap.has(candidate)) {
+                edge.target = candidate
+                edge.confidence = 0.7
+                matched = true
+                break
+              }
+            }
+            if (matched) break
+          }
+          // Also try the exact namespace path as-is
+          if (!matched) {
+            for (const ext of phpExtensions) {
+              const candidate = namespacePath + ext
+              if (fileNodeMap.has(candidate)) {
+                edge.target = candidate
+                edge.confidence = 0.7
+                matched = true
+                break
+              }
+            }
+          }
+          if (!matched) {
+            edge.confidence = 0.3 // Likely an autoloaded framework class
+          }
+        }
+        continue
+      }
+
+      // ── Java import resolution ──
+      const isJavaImport = JAVA_EXTENSIONS.has(sourceExt)
+
+      if (isJavaImport && !isPythonImport && !isPhpImport) {
+        // Java imports are dotted package paths like "java.util.List" or "com.example.MyClass"
+        // Convert to file paths: "com/example/MyClass.java"
+        const dottedPath = rawImportPath
+        const slashPath = dottedPath.replace(/\./g, '/')
+
+        // For wildcard imports (com.example.*) — can't resolve specific class
+        if (rawImportPath.endsWith('.*') || edge.metadata?.importKind === 'java-wildcard-import') {
+          edge.confidence = 0.3
+          continue
+        }
+
+        // Try resolving the last segment as a class name
+        const lastSegment = dottedPath.split('.').pop()!
+        const javaExtensions = ['.java', '/package-info.java']
+        let matched = false
+
+        // Try: src/main/java/com/example/MyClass.java (Maven/Gradle convention)
+        // Try: com/example/MyClass.java (direct match)
+        for (const prefix of ['', 'src/main/java/', 'src/']) {
+          for (const ext of javaExtensions) {
+            const candidate = prefix + slashPath + ext
+            if (fileNodeMap.has(candidate)) {
+              edge.target = candidate
+              edge.confidence = 0.9
+              matched = true
+              break
+            }
+          }
+          if (matched) break
+        }
+
+        // Also try matching by class name (short name resolution)
+        if (!matched) {
+          for (const [nodeId] of fileNodeMap) {
+            if (nodeId.endsWith(`/${lastSegment}.java`) || nodeId === `${lastSegment}.java`) {
+              edge.target = nodeId
+              edge.confidence = 0.7
+              matched = true
+              break
+            }
+          }
+        }
+
+        if (!matched) {
+          edge.confidence = 0.3 // Likely a JDK or third-party library class
+        }
+        continue
+      }
+
       // ── JS/TS/Vue import resolution ──
-      // Only reach here for JS/TS/Vue imports (Python, CSS/SCSS, HTML are handled above)
+      // Only reach here for JS/TS/Vue imports (Python, CSS/SCSS, HTML, PHP, Java are handled above)
       if (!rawImportPath.startsWith('.')) {
         // Non-relative import — try tsconfig path aliases (e.g. "@/types" -> "./src/types")
         const aliasResolved = this.resolveAlias(rawImportPath, fileNodeMap)
