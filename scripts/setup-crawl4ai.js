@@ -27,6 +27,8 @@ const GRAMMAR_SOURCES = [
   { name: 'tree-sitter-go.wasm', pkg: 'tree-sitter-go' },
   { name: 'tree-sitter-rust.wasm', pkg: 'tree-sitter-rust' },
   { name: 'tree-sitter-bash.wasm', pkg: 'tree-sitter-bash' },
+  { name: 'tree-sitter-dart.wasm', pkg: 'tree-sitter-dart' },
+  { name: 'tree-sitter-kotlin.wasm', pkg: 'tree-sitter-kotlin', build: true },
   // tree-sitter-less is not on npm; Less files use the SCSS grammar (node types are compatible)
   // tree-sitter-vue has an external scanner incompatible with WASM — Vue SFC
   // blocks are parsed using regex extraction + sub-parsing with JS/TS/CSS/SCSS grammars

@@ -14,6 +14,8 @@ export const GO_EXTENSIONS = new Set(['.go'])
 export const RUST_EXTENSIONS = new Set(['.rs'])
 export const LESS_EXTENSIONS = new Set(['.less'])
 export const SHELL_EXTENSIONS = new Set(['.sh', '.bash', '.zsh'])
+export const DART_EXTENSIONS = new Set(['.dart'])
+export const KOTLIN_EXTENSIONS = new Set(['.kt', '.kts'])
 
 export const PARSABLE_EXTENSIONS = new Set([
   ...JS_EXTENSIONS,
@@ -32,4 +34,6 @@ export const PARSABLE_EXTENSIONS = new Set([
   ...RUST_EXTENSIONS,
   ...LESS_EXTENSIONS,
   ...SHELL_EXTENSIONS,
+  ...DART_EXTENSIONS,
+  ...KOTLIN_EXTENSIONS,
 ])

@@ -21,7 +21,7 @@ import type {
   FileHashEntry,
 } from './types.ts'
 import { computeProgress } from './types.ts'
-import { PY_EXTENSIONS, CSS_EXTENSIONS, SCSS_EXTENSIONS, HTML_EXTENSIONS, VUE_EXTENSIONS, PHP_EXTENSIONS, JAVA_EXTENSIONS, C_EXTENSIONS, CPP_EXTENSIONS, CSHARP_EXTENSIONS, GO_EXTENSIONS, RUST_EXTENSIONS, LESS_EXTENSIONS, SHELL_EXTENSIONS } from './extensions.ts'
+import { PY_EXTENSIONS, CSS_EXTENSIONS, SCSS_EXTENSIONS, HTML_EXTENSIONS, VUE_EXTENSIONS, PHP_EXTENSIONS, JAVA_EXTENSIONS, C_EXTENSIONS, CPP_EXTENSIONS, CSHARP_EXTENSIONS, GO_EXTENSIONS, RUST_EXTENSIONS, LESS_EXTENSIONS, SHELL_EXTENSIONS, DART_EXTENSIONS, KOTLIN_EXTENSIONS } from './extensions.ts'
 import { getGitHead } from './git.ts'
 import { BM25SearchEngine } from './search/bm25.ts'
 import { EmbeddingService } from './search/embedding.ts'
@@ -472,7 +472,7 @@ export class AuraIndexer {
           const wildcard = match[1] || ''
           const resolved = replacement.replace(/\*/g, wildcard)
           // Try common extensions
-          const extensions = ['', '.ts', '.tsx', '.js', '.jsx', '.vue', '.php', '.phtml', '.java', '.h', '.hpp', '.c', '.cpp', '.go', '.rs', '.less', '.sh', '.bash', '.zsh', '/index.ts', '/index.tsx', '/index.js', '/index.jsx', '/index.vue']
+          const extensions = ['', '.ts', '.tsx', '.js', '.jsx', '.vue', '.php', '.phtml', '.java', '.h', '.hpp', '.c', '.cpp', '.go', '.rs', '.less', '.sh', '.bash', '.zsh', '.dart', '.kt', '/index.ts', '/index.tsx', '/index.js', '/index.jsx', '/index.vue', '/index.dart', '/index.kt']
           for (const ext of extensions) {
             const candidate = resolved + ext
             if (fileNodeMap.has(candidate)) return candidate
@@ -1159,6 +1159,128 @@ export class AuraIndexer {
             edge.confidence = 0.3
           }
         } else {
+          edge.confidence = 0.3
+        }
+        continue
+      }
+
+      // ── Dart import resolution ──
+      const isDartImport = DART_EXTENSIONS.has(sourceExt)
+
+      if (isDartImport) {
+        // Dart has three import styles:
+        // 1. dart:core — SDK imports (low confidence, can't resolve)
+        // 2. package:my_app/models/user.dart — package imports
+        // 3. relative imports like 'src/helpers.dart'
+        if (rawImportPath.startsWith('dart:')) {
+          // SDK import — can't resolve
+          edge.confidence = 0.2
+          continue
+        }
+
+        if (rawImportPath.startsWith('package:')) {
+          // Package import — strip 'package:' prefix and try to match
+          const packagePath = rawImportPath.replace(/^package:/, '')
+          // Try direct match and with common prefixes
+          let matched = false
+          for (const candidate of [packagePath, `lib/${packagePath}`, `lib/src/${packagePath}`]) {
+            if (fileNodeMap.has(candidate)) {
+              edge.target = candidate
+              edge.confidence = 0.7
+              matched = true
+              break
+            }
+          }
+          if (!matched) {
+            // Try matching just the file name
+            const fileName = packagePath.split('/').pop()!
+            for (const [filePath] of fileNodeMap) {
+              if (filePath.endsWith(`/${fileName}`)) {
+                edge.target = filePath
+                edge.confidence = 0.4
+                matched = true
+                break
+              }
+            }
+          }
+          if (!matched) {
+            edge.confidence = 0.3
+          }
+          continue
+        }
+
+        // Relative import
+        if (!rawImportPath.startsWith('.')) {
+          edge.confidence = 0.3
+          continue
+        }
+        const sourceDir = path.dirname(edge.source)
+        const resolvedPath = path.normalize(path.join(sourceDir, rawImportPath)).replace(/\\/g, '/')
+        const dartExtensions = ['.dart', '/index.dart']
+        let matched = false
+        for (const ext of dartExtensions) {
+          const candidate = resolvedPath + ext
+          if (fileNodeMap.has(candidate)) {
+            edge.target = candidate
+            edge.confidence = 0.9
+            matched = true
+            break
+          }
+        }
+        if (!matched && fileNodeMap.has(resolvedPath)) {
+          edge.target = resolvedPath
+          edge.confidence = 0.9
+        } else if (!matched) {
+          edge.confidence = 0.5
+        }
+        continue
+      }
+
+      // ── Kotlin import resolution ──
+      const isKotlinImport = KOTLIN_EXTENSIONS.has(sourceExt)
+
+      if (isKotlinImport) {
+        // Kotlin imports are dotted paths like "com.example.models.User"
+        const dottedPath = rawImportPath
+        const slashPath = dottedPath.replace(/\./g, '/')
+
+        if (dottedPath.endsWith('.*') || edge.metadata?.importKind === 'kotlin-import' && (edge.metadata as any)?.isWildcard) {
+          // Wildcard import — can't resolve specific class
+          edge.confidence = 0.3
+          continue
+        }
+
+        // Convert dotted path to file path
+        const lastSegment = dottedPath.split('.').pop()!
+        const kotlinExtensions = ['.kt', '.kts', '/index.kt']
+        let matched = false
+
+        // Try Maven/Gradle convention: src/main/kotlin/com/example/Class.kt
+        for (const prefix of ['', 'src/main/kotlin/', 'src/main/java/', 'src/']) {
+          for (const ext of kotlinExtensions) {
+            const candidate = prefix + slashPath + ext
+            if (fileNodeMap.has(candidate)) {
+              edge.target = candidate
+              edge.confidence = prefix ? 0.9 : 0.7
+              matched = true
+              break
+            }
+          }
+          if (matched) break
+        }
+
+        // Try short-name matching
+        if (!matched) {
+          for (const [filePath] of fileNodeMap) {
+            if (filePath.endsWith(`/${lastSegment}.kt`) || filePath.endsWith(`/${lastSegment}.kts`)) {
+              edge.target = filePath
+              edge.confidence = 0.5
+              matched = true
+              break
+            }
+          }
+        }
+        if (!matched) {
           edge.confidence = 0.3
         }
         continue

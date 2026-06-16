@@ -27,6 +27,8 @@ import {
   RUST_EXTENSIONS,
   LESS_EXTENSIONS,
   SHELL_EXTENSIONS,
+  DART_EXTENSIONS,
+  KOTLIN_EXTENSIONS,
   PARSABLE_EXTENSIONS,
 } from './extensions.ts'
 
@@ -98,6 +100,8 @@ export class AuraParser {
   private goLang: Language | null = null
   private rustLang: Language | null = null
   private bashLang: Language | null = null
+  private dartLang: Language | null = null
+  private kotlinLang: Language | null = null
   private parser: Parser | null = null
   private dataFlowAnalyzer = new AuraDataFlow()
 
@@ -200,6 +204,20 @@ export class AuraParser {
       console.warn('tree-sitter-bash.wasm not found; Shell/Bash support disabled')
     }
 
+    try {
+      const dartWasm = path.join(grammarsDir, 'tree-sitter-dart.wasm')
+      this.dartLang = await Language.load(dartWasm)
+    } catch {
+      console.warn('tree-sitter-dart.wasm not found; Dart support disabled')
+    }
+
+    try {
+      const kotlinWasm = path.join(grammarsDir, 'tree-sitter-kotlin.wasm')
+      this.kotlinLang = await Language.load(kotlinWasm)
+    } catch {
+      console.warn('tree-sitter-kotlin.wasm not found; Kotlin support disabled')
+    }
+
     // Note: tree-sitter-vue cannot be compiled to WASM due to its external scanner.
     // Vue SFC parsing uses regex-based block extraction + sub-parsing with JS/TS/CSS/SCSS grammars.
     // this.vueLang is not needed and remains null.
@@ -261,6 +279,12 @@ export class AuraParser {
     if (SHELL_EXTENSIONS.has(ext)) {
       return this.bashLang
     }
+    if (DART_EXTENSIONS.has(ext)) {
+      return this.dartLang
+    }
+    if (KOTLIN_EXTENSIONS.has(ext)) {
+      return this.kotlinLang
+    }
     // Vue doesn't use tree-sitter-vue (it has an incompatible external scanner).
     // parseVueFile uses regex-based block extraction + sub-parsing.
     if (VUE_EXTENSIONS.has(ext)) {
@@ -319,6 +343,12 @@ export class AuraParser {
     }
     if (SHELL_EXTENSIONS.has(ext)) {
       return this.parseShellFile(filePath, source)
+    }
+    if (DART_EXTENSIONS.has(ext)) {
+      return this.parseDartFile(filePath, source)
+    }
+    if (KOTLIN_EXTENSIONS.has(ext)) {
+      return this.parseKotlinFile(filePath, source)
     }
     if (VUE_EXTENSIONS.has(ext)) {
       return await this.parseVueFile(filePath, source)
@@ -5956,6 +5986,730 @@ export class AuraParser {
       'case', 'esac', 'in', 'function', 'select', 'time', 'coproc',
     ])
     return builtins.has(name)
+  }
+
+  // ── Dart parsing ──────────────────────────────────────────────────────────────
+
+  private parseDartFile(filePath: string, source: string): ParseResult {
+    const language = this.selectLanguage(filePath)
+    if (!language || !this.parser) {
+      return { filePath, symbols: [], imports: [], calls: [], heritage: [], contains: [], dataFlow: [] }
+    }
+
+    this.parser.setLanguage(language)
+    const tree = this.parser.parse(source)
+    if (!tree) {
+      return { filePath, symbols: [], imports: [], calls: [], heritage: [], contains: [], dataFlow: [] }
+    }
+
+    try {
+      const symbols: AuraNode[] = []
+      const imports: AuraEdge[] = []
+      const calls: AuraEdge[] = []
+      const heritage: AuraEdge[] = []
+      const contains: AuraEdge[] = []
+      const seenIds = new Set<string>()
+
+      this.extractDartDeclarations(tree, filePath, symbols, contains, seenIds)
+      this.extractDartImports(tree, filePath, imports)
+      this.extractDartCalls(tree, filePath, calls, symbols)
+      this.extractDartHeritage(tree, filePath, heritage)
+
+      return { filePath, symbols, imports, calls, heritage, contains, dataFlow: [] }
+    } finally {
+      tree.delete()
+    }
+  }
+
+  private extractDartDeclarations(
+    tree: Tree,
+    filePath: string,
+    symbols: AuraNode[],
+    contains: AuraEdge[],
+    seenIds: Set<string>,
+  ): void {
+    const walk = (node: SyntaxNode): void => {
+      const addSymbol = (kind: AuraNodeKind, name: string, id: string, node: SyntaxNode, exported = true, metadata?: Record<string, unknown>) => {
+        if (seenIds.has(id)) return
+        seenIds.add(id)
+        symbols.push({
+          id,
+          kind,
+          name,
+          filePath,
+          range: { startLine: node.startPosition.row + 1, endLine: node.endPosition.row + 1 },
+          exported,
+          ...(metadata ? { metadata } : {}),
+        })
+        contains.push({ source: filePath, target: id, type: AuraEdgeType.CONTAINS, confidence: 1.0 })
+      }
+
+      if (node.type === 'class_definition') {
+        // tree-sitter-dart: name may be a named field 'name' or a child 'identifier'
+        const nameNode = node.childForFieldName('name') || this.findFirstChildOfType(node, 'identifier')
+        if (nameNode) {
+          addSymbol(AuraNodeKind.Class, nameNode.text, `${filePath}:${nameNode.text}`, node)
+        }
+      } else if (node.type === 'mixin_declaration') {
+        // tree-sitter-dart: mixin name is first 'identifier' child, NOT a named field
+        const nameNode = this.findFirstChildOfType(node, 'identifier')
+        if (nameNode) {
+          addSymbol(AuraNodeKind.Trait, nameNode.text, `${filePath}:${nameNode.text}`, node)
+        }
+      } else if (node.type === 'extension_declaration') {
+        const nameNode = this.findFirstChildOfType(node, 'identifier')
+        if (nameNode) {
+          addSymbol(AuraNodeKind.Class, nameNode.text, `${filePath}:${nameNode.text}`, node, true, { dartExtension: true })
+        }
+      } else if (node.type === 'enum_declaration') {
+        const nameNode = node.childForFieldName('name') || this.findFirstChildOfType(node, 'identifier')
+        if (nameNode) {
+          addSymbol(AuraNodeKind.Enum, nameNode.text, `${filePath}:${nameNode.text}`, node)
+        }
+      } else if (node.type === 'function_signature') {
+        const nameNode = node.childForFieldName('name')
+        if (nameNode) {
+          // Top-level functions only (not methods inside class/mixin/extension bodies)
+          const parent = node.parent
+          const grandparent = parent?.parent
+          if (grandparent?.type === 'program' || parent?.type === 'program') {
+            addSymbol(AuraNodeKind.Function, nameNode.text, `${filePath}:${nameNode.text}`, node)
+          }
+        }
+      } else if (node.type === 'method_signature') {
+        // method_signature wraps function_signature — extract name from inner function_signature
+        const funcSig = this.findFirstChildOfType(node, 'function_signature')
+        const getterSig = this.findFirstChildOfType(node, 'getter_signature')
+        const setterSig = this.findFirstChildOfType(node, 'setter_signature')
+        const sigNode = funcSig || getterSig || setterSig
+        if (sigNode) {
+          const nameNode = sigNode.childForFieldName('name')
+          if (nameNode) {
+            const className = this.findEnclosingClassName(node)
+            const methodId = className ? `${filePath}:${className}.${nameNode.text}` : `${filePath}:${nameNode.text}`
+            const meta = getterSig ? { dartGetter: true } : setterSig ? { dartSetter: true } : undefined
+            addSymbol(AuraNodeKind.Method, nameNode.text, methodId, node, true, meta)
+          }
+        }
+      } else if (node.type === 'getter_signature') {
+        // Standalone getter (not inside method_signature)
+        const parent = node.parent
+        if (parent?.type !== 'method_signature') {
+          const nameNode = node.childForFieldName('name')
+          if (nameNode) {
+            const className = this.findEnclosingClassName(node)
+            const methodId = className ? `${filePath}:${className}.${nameNode.text}` : `${filePath}:${nameNode.text}`
+            addSymbol(AuraNodeKind.Method, nameNode.text, methodId, node, true, { dartGetter: true })
+          }
+        }
+      } else if (node.type === 'setter_signature') {
+        // Standalone setter (not inside method_signature)
+        const parent = node.parent
+        if (parent?.type !== 'method_signature') {
+          const nameNode = node.childForFieldName('name')
+          if (nameNode) {
+            const className = this.findEnclosingClassName(node)
+            const methodId = className ? `${filePath}:${className}.${nameNode.text}` : `${filePath}:${nameNode.text}`
+            addSymbol(AuraNodeKind.Method, nameNode.text, methodId, node, true, { dartSetter: true })
+          }
+        }
+      } else if (node.type === 'static_final_declaration' || node.type === 'variable_declaration') {
+        // Top-level variables only
+        const parent = node.parent
+        if (parent?.type === 'program' || parent?.type === 'static_final_declaration_list') {
+          const nameNode = this.findFirstChildOfType(node, 'identifier')
+          if (nameNode) {
+            addSymbol(AuraNodeKind.Variable, nameNode.text, `${filePath}:${nameNode.text}`, node)
+          }
+        }
+      } else if (node.type === 'type_alias') {
+        // tree-sitter-dart: typedef name is a 'type_identifier' child, NOT a named field
+        const nameNode = this.findFirstChildOfType(node, 'type_identifier')
+        if (nameNode) {
+          addSymbol(AuraNodeKind.TypeAlias, nameNode.text, `${filePath}:${nameNode.text}`, node)
+        }
+      }
+
+      for (let i = 0; i < node.childCount; i++) {
+        walk(node.child(i)!)
+      }
+    }
+    walk(tree.rootNode)
+  }
+
+  private extractDartImports(
+    tree: Tree,
+    filePath: string,
+    imports: AuraEdge[],
+  ): void {
+    const seenImportStrings = new Set<string>()
+    const walk = (node: SyntaxNode): void => {
+      // Dart: tree-sitter-dart nests imports as: import_or_export > library_import > import_specification > configurable_uri > uri > string_literal
+      // We just find all string_literal nodes within import-like constructs
+      if (node.type === 'import_or_export' || node.type === 'library_import' || node.type === 'import_specification') {
+        const stringNodes = this.findChildrenOfType(node, 'string_literal')
+        if (stringNodes.length > 0) {
+          let importPath = stringNodes[0].text.slice(1, -1) // Remove quotes
+          if (!seenImportStrings.has(importPath)) {
+            seenImportStrings.add(importPath)
+            let importKind = 'dart-import'
+            if (node.text.startsWith('export')) {
+              importKind = 'dart-export'
+            } else if (importPath.startsWith('dart:')) {
+              importKind = 'dart-sdk'
+            } else if (importPath.startsWith('package:')) {
+              importKind = 'dart-package'
+            }
+            imports.push({
+              source: filePath,
+              target: importPath,
+              type: AuraEdgeType.IMPORTS,
+              confidence: importPath.startsWith('dart:') ? 0.2 : importPath.startsWith('package:') ? 0.5 : 0.8,
+              metadata: { rawImportPath: importPath, importKind },
+            })
+          }
+        }
+      }
+      // Part statements
+      if (node.type === 'part_statement') {
+        const stringNode = this.findFirstChildOfType(node, 'string_literal')
+        if (stringNode) {
+          let importPath = stringNode.text.slice(1, -1)
+          if (!seenImportStrings.has(importPath)) {
+            seenImportStrings.add(importPath)
+            imports.push({
+              source: filePath,
+              target: importPath,
+              type: AuraEdgeType.IMPORTS,
+              confidence: 0.8,
+              metadata: { rawImportPath: importPath, importKind: 'dart-part' },
+            })
+          }
+        }
+      }
+
+      for (let i = 0; i < node.childCount; i++) {
+        walk(node.child(i)!)
+      }
+    }
+    walk(tree.rootNode)
+  }
+
+  private extractDartCalls(
+    tree: Tree,
+    filePath: string,
+    calls: AuraEdge[],
+    symbols: AuraNode[],
+  ): void {
+    const seenCalls = new Set<string>()
+
+    const walk = (node: SyntaxNode): void => {
+      if (node.type === 'invocation_expression' || node.type === 'identifier') {
+        let callName = ''
+        // For invocation_expression, try to get the function/method name
+        if (node.type === 'invocation_expression') {
+          const operand = node.child(0)
+          if (operand) {
+            callName = operand.text
+          }
+        } else if (node.type === 'identifier' && node.parent?.type !== 'invocation_expression') {
+          callName = node.text
+        }
+
+        if (callName && !this.isDartBuiltin(callName)) {
+          // Shorten method chains: "user.toJson()" → "toJson"
+          const shortName = callName.includes('.') ? callName.split('.').pop()! : callName
+          const enclosingSymbol = this.findEnclosingSymbolFromTree(node, symbols, filePath)
+          const source = enclosingSymbol ? enclosingSymbol.id : filePath
+          const dedupeKey = `${source}→${shortName}`
+          if (!seenCalls.has(dedupeKey)) {
+            seenCalls.add(dedupeKey)
+            calls.push({
+              source,
+              target: shortName,
+              type: AuraEdgeType.CALLS,
+              confidence: 0.6,
+              metadata: { callName: shortName, callTargetKind: 'function' },
+            })
+          }
+        }
+      }
+
+      for (let i = 0; i < node.childCount; i++) {
+        walk(node.child(i)!)
+      }
+    }
+    walk(tree.rootNode)
+  }
+
+  private isDartBuiltin(name: string): boolean {
+    const builtins = new Set([
+      // Keywords and literals
+      'print', 'assert', 'throw', 'rethrow', 'try', 'catch', 'finally',
+      'new', 'const', 'super', 'this', 'null', 'true', 'false',
+      // Core types
+      'int', 'double', 'String', 'bool', 'List', 'Map', 'Set', 'Object', 'dynamic',
+      'void', 'Never', 'Future', 'Stream', 'Iterable', 'Duration', 'DateTime',
+      'RegExp', 'StringBuffer', 'Comparable', 'num', 'BigInt', 'Uri', 'Stopwatch',
+      // Control flow
+      'if', 'else', 'for', 'while', 'do', 'switch', 'case', 'default',
+      'break', 'continue', 'return', 'yield', 'async', 'await',
+      // Common methods
+      'toString', 'hashCode', 'runtimeType', 'noSuchMethod',
+    ])
+    return builtins.has(name)
+  }
+
+  private extractDartHeritage(
+    tree: Tree,
+    filePath: string,
+    heritage: AuraEdge[],
+  ): void {
+    const walk = (node: SyntaxNode): void => {
+      if (node.type === 'class_definition') {
+        const nameNode = node.childForFieldName('name') || this.findFirstChildOfType(node, 'identifier')
+        const className = nameNode ? nameNode.text : ''
+
+        // superclass may contain 'mixins' as a nested child
+        const superclass = node.childForFieldName('superclass')
+        if (superclass) {
+          // The first type_identifier in superclass is the extended class
+          // mixins inside superclass are also type_identifiers
+          const allTypes = this.findChildrenOfType(superclass, 'type_identifier')
+          // First type_identifier is the extended class
+          if (allTypes.length > 0) {
+            heritage.push({
+              source: filePath,
+              target: allTypes[0].text,
+              type: AuraEdgeType.EXTENDS,
+              confidence: 0.9,
+              metadata: { heritageKind: 'class-extends', className },
+            })
+          }
+          // Any type_identifiers inside a 'mixins' child are mixin applications
+          const mixinsNode = this.findFirstChildOfType(superclass, 'mixins')
+          if (mixinsNode) {
+            for (const typeNode of this.findChildrenOfType(mixinsNode, 'type_identifier')) {
+              heritage.push({
+                source: filePath,
+                target: typeNode.text,
+                type: AuraEdgeType.IMPLEMENTS,
+                confidence: 0.9,
+                metadata: { heritageKind: 'mixin-with', className },
+              })
+            }
+          }
+        }
+
+        // implements clause
+        const interfaces = node.childForFieldName('interfaces')
+        if (interfaces) {
+          for (const typeNode of this.findChildrenOfType(interfaces, 'type_identifier')) {
+            heritage.push({
+              source: filePath,
+              target: typeNode.text,
+              type: AuraEdgeType.IMPLEMENTS,
+              confidence: 0.9,
+              metadata: { heritageKind: 'class-implements', className },
+            })
+          }
+        }
+
+        // Standalone 'with' clause (not inside superclass)
+        const mixins = node.childForFieldName('mixins')
+        if (mixins && !superclass) {
+          for (const typeNode of this.findChildrenOfType(mixins, 'type_identifier')) {
+            heritage.push({
+              source: filePath,
+              target: typeNode.text,
+              type: AuraEdgeType.IMPLEMENTS,
+              confidence: 0.9,
+              metadata: { heritageKind: 'mixin-with', className },
+            })
+          }
+        }
+      } else if (node.type === 'mixin_declaration') {
+        const nameNode = this.findFirstChildOfType(node, 'identifier')
+        if (!nameNode) {
+          for (let i = 0; i < node.childCount; i++) walk(node.child(i)!)
+          return
+        }
+
+        // Check for on clause (mixin constraints)
+        const onClause = node.childForFieldName('on')
+        if (onClause) {
+          for (const typeNode of this.findChildrenOfType(onClause, 'type_identifier')) {
+            heritage.push({
+              source: filePath,
+              target: typeNode.text,
+              type: AuraEdgeType.EXTENDS,
+              confidence: 0.9,
+              metadata: { heritageKind: 'mixin-on' },
+            })
+          }
+        }
+      }
+
+      for (let i = 0; i < node.childCount; i++) {
+        walk(node.child(i)!)
+      }
+    }
+
+    walk(tree.rootNode)
+  }
+
+  private findFirstChildOfType(node: SyntaxNode, type: string): SyntaxNode | null {
+    for (let i = 0; i < node.childCount; i++) {
+      const child = node.child(i)!
+      if (child.type === type) return child
+      const found = this.findFirstChildOfType(child, type)
+      if (found) return found
+    }
+    return null
+  }
+
+  private findChildrenOfType(node: SyntaxNode, type: string): SyntaxNode[] {
+    const result: SyntaxNode[] = []
+    const walk = (n: SyntaxNode) => {
+      for (let i = 0; i < n.childCount; i++) {
+        const child = n.child(i)!
+        if (child.type === type) result.push(child)
+        walk(child)
+      }
+    }
+    walk(node)
+    return result
+  }
+
+  // ── Kotlin parsing ──────────────────────────────────────────────────────────────
+
+  private parseKotlinFile(filePath: string, source: string): ParseResult {
+    const language = this.selectLanguage(filePath)
+    if (!language || !this.parser) {
+      return { filePath, symbols: [], imports: [], calls: [], heritage: [], contains: [], dataFlow: [] }
+    }
+
+    this.parser.setLanguage(language)
+    const tree = this.parser.parse(source)
+    if (!tree) {
+      return { filePath, symbols: [], imports: [], calls: [], heritage: [], contains: [], dataFlow: [] }
+    }
+
+    try {
+      const symbols: AuraNode[] = []
+      const imports: AuraEdge[] = []
+      const calls: AuraEdge[] = []
+      const heritage: AuraEdge[] = []
+      const contains: AuraEdge[] = []
+      const seenIds = new Set<string>()
+
+      this.extractKotlinDeclarations(tree, filePath, symbols, contains, seenIds)
+      this.extractKotlinImports(tree, filePath, imports)
+      this.extractKotlinCalls(tree, filePath, calls, symbols)
+      this.extractKotlinHeritage(tree, filePath, heritage)
+
+      return { filePath, symbols, imports, calls, heritage, contains, dataFlow: [] }
+    } finally {
+      tree.delete()
+    }
+  }
+
+  private extractKotlinDeclarations(
+    tree: Tree,
+    filePath: string,
+    symbols: AuraNode[],
+    contains: AuraEdge[],
+    seenIds: Set<string>,
+  ): void {
+    const walk = (node: SyntaxNode): void => {
+      const addSymbol = (kind: AuraNodeKind, name: string, id: string, node: SyntaxNode, exported = true, metadata?: Record<string, unknown>) => {
+        if (seenIds.has(id)) return
+        seenIds.add(id)
+        symbols.push({
+          id,
+          kind,
+          name,
+          filePath,
+          range: { startLine: node.startPosition.row + 1, endLine: node.endPosition.row + 1 },
+          exported,
+          ...(metadata ? { metadata } : {}),
+        })
+        contains.push({ source: filePath, target: id, type: AuraEdgeType.CONTAINS, confidence: 1.0 })
+      }
+
+      // In tree-sitter-kotlin, many things are parsed as 'class_declaration':
+      // - class Foo → class_declaration with 'class' keyword child
+      // - interface Foo → class_declaration with 'interface' keyword child
+      // - data class Foo → class_declaration with 'modifiers' and 'class' keyword
+      // - enum class Foo → class_declaration with 'enum' keyword and 'enum_class_body'
+      // Names are 'type_identifier' children (positional, not named field 'name').
+      if (node.type === 'class_declaration') {
+        // Check for keyword children to distinguish interface/enum/class
+        let isInterface = false
+        let isEnum = false
+        let hasModifiers = false
+        let isDataClass = false
+        let hasEnumClassBody = false
+        for (let i = 0; i < node.childCount; i++) {
+          const child = node.child(i)!
+          if (child.type === 'interface') isInterface = true
+          if (child.type === 'enum') isEnum = true
+          if (child.type === 'modifiers') {
+            hasModifiers = true
+            if (child.text.includes('data')) isDataClass = true
+          }
+          if (child.type === 'enum_class_body') hasEnumClassBody = true
+        }
+        if (hasEnumClassBody) isEnum = true
+
+        // Name is always a direct type_identifier child (not deep search — would find type refs in body)
+        let nameNode: SyntaxNode | null = null
+        for (let i = 0; i < node.childCount; i++) {
+          if (node.child(i)!.type === 'type_identifier') {
+            nameNode = node.child(i)!
+            break
+          }
+        }
+        if (nameNode) {
+          let kind: AuraNodeKind
+          if (isInterface) kind = AuraNodeKind.Interface
+          else if (isEnum) kind = AuraNodeKind.Enum
+          else if (isDataClass) kind = AuraNodeKind.Struct
+          else kind = AuraNodeKind.Class
+          addSymbol(kind, nameNode.text, `${filePath}:${nameNode.text}`, node)
+        }
+      } else if (node.type === 'object_declaration') {
+        // Name is direct type_identifier child
+        let nameNode: SyntaxNode | null = null
+        for (let i = 0; i < node.childCount; i++) {
+          if (node.child(i)!.type === 'type_identifier') {
+            nameNode = node.child(i)!
+            break
+          }
+        }
+        if (nameNode) {
+          addSymbol(AuraNodeKind.Class, nameNode.text, `${filePath}:${nameNode.text}`, node, true, { kotlinObject: true })
+        }
+      } else if (node.type === 'companion_object') {
+        // Name is an optional simple_identifier direct child (not deep search)
+        let companionName = 'Companion'
+        for (let i = 0; i < node.childCount; i++) {
+          if (node.child(i)!.type === 'simple_identifier') {
+            companionName = node.child(i)!.text
+            break
+          }
+        }
+        const className = this.findEnclosingClassName(node)
+        const id = className ? `${filePath}:${className}.${companionName}` : `${filePath}:${companionName}`
+        addSymbol(AuraNodeKind.Class, companionName, id, node, true, { companion: true })
+      } else if (node.type === 'function_declaration') {
+        // Name is simple_identifier child (positional, not named field)
+        const nameNode = this.findFirstChildOfType(node, 'simple_identifier')
+        if (nameNode) {
+          const name = nameNode.text
+          // Top-level function vs method inside class
+          const parent = node.parent
+          if (parent?.type === 'class_body' || parent?.type === 'enum_class_body' || parent?.type === 'object_body') {
+            const className = this.findEnclosingClassName(node)
+            const methodId = className ? `${filePath}:${className}.${name}` : `${filePath}:${name}`
+            addSymbol(AuraNodeKind.Method, name, methodId, node)
+          } else {
+            addSymbol(AuraNodeKind.Function, name, `${filePath}:${name}`, node)
+          }
+        }
+      } else if (node.type === 'property_declaration') {
+        // Only top-level properties
+        const parent = node.parent
+        if (parent?.type === 'source_file') {
+          const varDecl = this.findFirstChildOfType(node, 'variable_declaration')
+          if (varDecl) {
+            const idNode = this.findFirstChildOfType(varDecl, 'simple_identifier')
+            if (idNode) {
+              addSymbol(AuraNodeKind.Variable, idNode.text, `${filePath}:${idNode.text}`, node)
+            }
+          }
+        }
+      } else if (node.type === 'type_alias') {
+        const nameNode = this.findFirstChildOfType(node, 'type_identifier')
+        if (nameNode) {
+          addSymbol(AuraNodeKind.TypeAlias, nameNode.text, `${filePath}:${nameNode.text}`, node)
+        }
+      }
+
+      for (let i = 0; i < node.childCount; i++) {
+        walk(node.child(i)!)
+      }
+    }
+    walk(tree.rootNode)
+  }
+
+  private extractKotlinImports(
+    tree: Tree,
+    filePath: string,
+    imports: AuraEdge[],
+  ): void {
+    const walk = (node: SyntaxNode): void => {
+      // Kotlin: import_header contains an 'identifier' node which itself contains simple_identifier children
+      if (node.type === 'import_header') {
+        const identifier = node.childForFieldName('identifier')
+        if (identifier) {
+          const importPath = identifier.text // e.g. "com.example.models.User"
+          const isWildcard = node.text.includes('.*')
+
+          imports.push({
+            source: filePath,
+            target: importPath,
+            type: AuraEdgeType.IMPORTS,
+            confidence: isWildcard ? 0.3 : 0.7,
+            metadata: { rawImportPath: importPath, importKind: 'kotlin-import', isWildcard },
+          })
+        } else {
+          // Fallback: reconstruct from simple_identifier children
+          const idents = this.findChildrenOfType(node, 'simple_identifier')
+          if (idents.length > 0) {
+            const importPath = idents.map(i => i.text).join('.')
+            const isWildcard = node.text.includes('.*')
+            imports.push({
+              source: filePath,
+              target: importPath,
+              type: AuraEdgeType.IMPORTS,
+              confidence: isWildcard ? 0.3 : 0.7,
+              metadata: { rawImportPath: importPath, importKind: 'kotlin-import', isWildcard },
+            })
+          }
+        }
+      }
+
+      for (let i = 0; i < node.childCount; i++) {
+        walk(node.child(i)!)
+      }
+    }
+    walk(tree.rootNode)
+  }
+
+  private extractKotlinCalls(
+    tree: Tree,
+    filePath: string,
+    calls: AuraEdge[],
+    symbols: AuraNode[],
+  ): void {
+    const seenCalls = new Set<string>()
+
+    const walk = (node: SyntaxNode): void => {
+      if (node.type === 'call_expression') {
+        // call_expression → simple_identifier or navigation_expression
+        const firstChild = node.child(0)
+        if (firstChild) {
+          let callName = firstChild.text
+          // For navigation expressions like "repository.save(user)"
+          // firstChild would be "repository" — get the last part after '.'
+          if (callName.includes('.')) {
+            callName = callName.split('.').pop()!
+          }
+          // For simple calls like "println(...)"
+          if (callName && !this.isKotlinBuiltin(callName)) {
+            const enclosingSymbol = this.findEnclosingSymbolFromTree(node, symbols, filePath)
+            const source = enclosingSymbol ? enclosingSymbol.id : filePath
+            const dedupeKey = `${source}→${callName}`
+            if (!seenCalls.has(dedupeKey)) {
+              seenCalls.add(dedupeKey)
+              calls.push({
+                source,
+                target: callName,
+                type: AuraEdgeType.CALLS,
+                confidence: 0.6,
+                metadata: { callName, callTargetKind: 'function' },
+              })
+            }
+          }
+        }
+      }
+
+      for (let i = 0; i < node.childCount; i++) {
+        walk(node.child(i)!)
+      }
+    }
+    walk(tree.rootNode)
+  }
+
+  private isKotlinBuiltin(name: string): boolean {
+    const builtins = new Set([
+      // Standard library functions
+      'println', 'print', 'arrayOf', 'listOf', 'mapOf', 'setOf', 'mutableListOf',
+      'mutableMapOf', 'mutableSetOf', 'emptyList', 'emptyMap', 'emptySet',
+      'arrayOfNulls', 'intArrayOf', 'doubleArrayOf', 'longArrayOf', 'booleanArrayOf',
+      'charArrayOf', 'byteArrayOf', 'shortArrayOf', 'floatArrayOf',
+      // Scope functions
+      'also', 'apply', 'let', 'run', 'with', 'takeIf', 'takeUnless', 'use',
+      // Utility
+      'repeat', 'lazy', 'TODO', 'require', 'check', 'assert', 'error',
+      // Keywords
+      'return', 'throw', 'break', 'continue', 'if', 'else', 'for', 'while', 'do',
+      'when', 'try', 'catch', 'finally', 'new',
+      // Type conversions
+      'toString', 'toInt', 'toLong', 'toFloat', 'toDouble', 'toChar', 'toByte', 'toShort',
+      // Collection operations
+      'map', 'filter', 'forEach', 'flatMap', 'groupBy', 'sortedBy', 'sortedWith',
+      'associate', 'joinToString', 'maxBy', 'minBy', 'sumOf', 'count',
+      'first', 'last', 'firstOrNull', 'lastOrNull', 'single',
+      'drop', 'take', 'dropWhile', 'takeWhile', 'zip', 'unzip',
+      'distinct', 'intersect', 'union', 'plus', 'minus',
+      // Operators
+      'rangeTo', 'until', 'step', 'downTo', 'inc', 'dec',
+    ])
+    return builtins.has(name)
+  }
+
+  private extractKotlinHeritage(
+    tree: Tree,
+    filePath: string,
+    heritage: AuraEdge[],
+  ): void {
+    const walk = (node: SyntaxNode): void => {
+      // In tree-sitter-kotlin, both 'class' and 'interface' keywords produce 'class_declaration'
+      if (node.type === 'class_declaration' || node.type === 'object_declaration') {
+        // Name is direct type_identifier child (not deep search)
+        let nameNode: SyntaxNode | null = null
+        for (let i = 0; i < node.childCount; i++) {
+          if (node.child(i)!.type === 'type_identifier') {
+            nameNode = node.child(i)!
+            break
+          }
+        }
+        const className = nameNode ? nameNode.text : ''
+
+        // Check if this is an interface (for metadata)
+        let isInterface = false
+        for (let i = 0; i < node.childCount; i++) {
+          if (node.child(i)!.type === 'interface') isInterface = true
+        }
+
+        // delegation_specifier is a positional child (not a named field)
+        let delegation: SyntaxNode | null = null
+        for (let i = 0; i < node.childCount; i++) {
+          if (node.child(i)!.type === 'delegation_specifier') {
+            delegation = node.child(i)!
+            break
+          }
+        }
+        if (delegation) {
+          for (const typeNode of this.findChildrenOfType(delegation, 'type_identifier')) {
+            heritage.push({
+              source: filePath,
+              target: typeNode.text,
+              type: AuraEdgeType.IMPLEMENTS,
+              confidence: 0.9,
+              metadata: { heritageKind: 'class-implements', className },
+            })
+          }
+        }
+      }
+
+      for (let i = 0; i < node.childCount; i++) {
+        walk(node.child(i)!)
+      }
+    }
+    walk(tree.rootNode)
   }
 
   private parseHtmlFile(filePath: string, source: string): ParseResult {

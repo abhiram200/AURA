@@ -25,6 +25,7 @@ import { vue } from '@codemirror/lang-vue'
 import { csharp } from '@replit/codemirror-lang-csharp'
 import { StreamLanguage } from '@codemirror/language'
 import { shell } from '@codemirror/legacy-modes/mode/shell'
+import { dart, kotlin } from '@codemirror/legacy-modes/mode/clike'
 import * as prettier from 'prettier'
 import prettierPluginEstree from 'prettier/plugins/estree'
 import prettierPluginTypescript from 'prettier/plugins/typescript'
@@ -129,6 +130,8 @@ function getLanguageExtension(path: string) {
   if (path.endsWith('.yml') || path.endsWith('.yaml')) return yaml()
   if (path.endsWith('.php') || path.endsWith('.phtml')) return php()
   if (path.endsWith('.sh') || path.endsWith('.bash') || path.endsWith('.zsh')) return StreamLanguage.define(shell)
+  if (path.endsWith('.dart')) return StreamLanguage.define(dart)
+  if (path.endsWith('.kt') || path.endsWith('.kts')) return StreamLanguage.define(kotlin)
   return []
 }
 
