@@ -25,6 +25,8 @@ import {
   CSHARP_EXTENSIONS,
   GO_EXTENSIONS,
   RUST_EXTENSIONS,
+  LESS_EXTENSIONS,
+  SHELL_EXTENSIONS,
   PARSABLE_EXTENSIONS,
 } from './extensions.ts'
 
@@ -95,6 +97,7 @@ export class AuraParser {
   private csharpLang: Language | null = null
   private goLang: Language | null = null
   private rustLang: Language | null = null
+  private bashLang: Language | null = null
   private parser: Parser | null = null
   private dataFlowAnalyzer = new AuraDataFlow()
 
@@ -190,6 +193,13 @@ export class AuraParser {
       console.warn('tree-sitter-rust.wasm not found; Rust support disabled')
     }
 
+    try {
+      const bashWasm = path.join(grammarsDir, 'tree-sitter-bash.wasm')
+      this.bashLang = await Language.load(bashWasm)
+    } catch {
+      console.warn('tree-sitter-bash.wasm not found; Shell/Bash support disabled')
+    }
+
     // Note: tree-sitter-vue cannot be compiled to WASM due to its external scanner.
     // Vue SFC parsing uses regex-based block extraction + sub-parsing with JS/TS/CSS/SCSS grammars.
     // this.vueLang is not needed and remains null.
@@ -224,6 +234,9 @@ export class AuraParser {
     if (SCSS_EXTENSIONS.has(ext)) {
       return this.scssLang
     }
+    if (LESS_EXTENSIONS.has(ext)) {
+      return this.scssLang  // Less reuses the SCSS grammar (tree-sitter-less not on npm)
+    }
     if (PHP_EXTENSIONS.has(ext)) {
       return this.phpLang
     }
@@ -244,6 +257,9 @@ export class AuraParser {
     }
     if (RUST_EXTENSIONS.has(ext)) {
       return this.rustLang
+    }
+    if (SHELL_EXTENSIONS.has(ext)) {
+      return this.bashLang
     }
     // Vue doesn't use tree-sitter-vue (it has an incompatible external scanner).
     // parseVueFile uses regex-based block extraction + sub-parsing.
@@ -297,6 +313,12 @@ export class AuraParser {
     }
     if (RUST_EXTENSIONS.has(ext)) {
       return this.parseRustFile(filePath, source)
+    }
+    if (LESS_EXTENSIONS.has(ext)) {
+      return this.parseLessFile(filePath, source)
+    }
+    if (SHELL_EXTENSIONS.has(ext)) {
+      return this.parseShellFile(filePath, source)
     }
     if (VUE_EXTENSIONS.has(ext)) {
       return await this.parseVueFile(filePath, source)
@@ -5520,6 +5542,418 @@ export class AuraParser {
       'Some', 'None', 'Ok', 'Err', 'true', 'false',
       // Prelude macros
       'vec', 'dbg', 'write', 'writeln',
+    ])
+    return builtins.has(name)
+  }
+
+  // ── Less parsing ───────────────────────────────────────────────────────────
+  // tree-sitter-less is not on npm, so we reuse the SCSS grammar.
+  // Less imports, selectors, and at-rules parse well; parametric mixins
+  // and @variables appear as at_rule/class_selector nodes.
+
+  private parseLessFile(filePath: string, source: string): ParseResult {
+    const language = this.selectLanguage(filePath)
+    if (!language || !this.parser) {
+      return { filePath, symbols: [], imports: [], calls: [], heritage: [], contains: [], dataFlow: [] }
+    }
+
+    this.parser.setLanguage(language)
+    const tree = this.parser.parse(source)
+    if (!tree) {
+      return { filePath, symbols: [], imports: [], calls: [], heritage: [], contains: [], dataFlow: [] }
+    }
+
+    try {
+      const symbols: AuraNode[] = []
+      const imports: AuraEdge[] = []
+      const contains: AuraEdge[] = []
+      const seenIds = new Set<string>()
+
+      // Less-specific: variables and mixins first (so they claim symbols before generic CSS extraction)
+      this.extractLessVariables(tree, filePath, symbols, contains, seenIds)
+      this.extractLessMixins(tree, filePath, symbols, contains, seenIds)
+
+      // Reuse CSS extraction for imports, selectors, at-rules, custom properties
+      this.extractCssImports(tree, filePath, imports)
+      this.extractCssSelectors(language, tree, filePath, symbols, contains, seenIds)
+      this.extractCssAtRules(language, tree, filePath, symbols, contains, seenIds)
+      this.extractCssCustomProperties(tree, filePath, symbols, contains, seenIds)
+
+      return { filePath, symbols, imports, calls: [], heritage: [], contains, dataFlow: [] }
+    } finally {
+      tree.delete()
+    }
+  }
+
+  private extractLessVariables(
+    tree: Tree,
+    filePath: string,
+    symbols: AuraNode[],
+    contains: AuraEdge[],
+    seenIds: Set<string>,
+  ): void {
+    // Less variables appear as at_rule nodes with @-prefixed names in the SCSS grammar
+    // e.g. "@primary-color: #3498db;" → at_rule with at_keyword "@primary-color"
+    const walk = (node: SyntaxNode): void => {
+      if (node.type === 'at_rule') {
+        // Check if this is a variable declaration (at_keyword starts with @ and not a known at-rule)
+        for (let i = 0; i < node.childCount; i++) {
+          const child = node.child(i)!
+          if (child.type === 'at_keyword' && child.text.startsWith('@')) {
+            const name = child.text.substring(1) // Strip the @ prefix
+            if (!['media', 'keyframes', 'import', 'charset', 'font-face', 'supports',
+                 'page', 'namespace', 'counter-style', 'document', 'viewport',
+                 'use', 'forward'].includes(name)) {
+              const symbolId = `${filePath}:@${name}`
+              if (!seenIds.has(symbolId)) {
+                seenIds.add(symbolId)
+                symbols.push({
+                  id: symbolId,
+                  kind: AuraNodeKind.ScssVariable,
+                  name: `@${name}`,
+                  filePath,
+                  range: { startLine: node.startPosition.row + 1, endLine: node.endPosition.row + 1 },
+                  exported: true,
+                })
+                contains.push({ source: filePath, target: symbolId, type: AuraEdgeType.CONTAINS, confidence: 1.0 })
+              }
+            }
+          }
+        }
+      }
+
+      for (let i = 0; i < node.childCount; i++) {
+        walk(node.child(i)!)
+      }
+    }
+    walk(tree.rootNode)
+  }
+
+  private extractLessMixins(
+    tree: Tree,
+    filePath: string,
+    symbols: AuraNode[],
+    contains: AuraEdge[],
+    seenIds: Set<string>,
+  ): void {
+    // Less parametric mixins appear as rule_set with class_selector starting with .
+    // e.g. ".border-radius(@radius: 5px) { }" → rule_set > class_selector ".border-radius"
+    // The SCSS grammar parses mixin parentheses as ERROR nodes (siblings of selectors within rule_set)
+    // We detect these by checking if the rule_set has an ERROR sibling of selectors containing parentheses
+    // Note: SCSS grammar doesn't use 'selectors' as a named field — must find by child type
+    const walk = (node: SyntaxNode): void => {
+      if (node.type === 'rule_set') {
+        // Find selectors node by type (not by field name)
+        let selectors: SyntaxNode | null = null
+        for (let i = 0; i < node.childCount; i++) {
+          const child = node.child(i)!
+          if (child.type === 'selectors') {
+            selectors = child
+            break
+          }
+        }
+
+        if (selectors) {
+          // Check if rule_set has an ERROR child that contains parentheses (parametric mixin)
+          let hasParametricParens = false
+          for (let i = 0; i < node.childCount; i++) {
+            const child = node.child(i)!
+            if (child.type === 'ERROR' && (child.text.includes('(') || child.text.includes(')'))) {
+              hasParametricParens = true
+              break
+            }
+          }
+
+          for (let i = 0; i < selectors.childCount; i++) {
+            const sel = selectors.child(i)!
+            if (sel.type === 'class_selector') {
+              // SCSS grammar uses class_name child (not a 'name' field)
+              let nameNode: SyntaxNode | null = sel.childForFieldName('name')
+              if (!nameNode) {
+                // Fallback: look for class_name child type
+                for (let j = 0; j < sel.childCount; j++) {
+                  const c = sel.child(j)!
+                  if (c.type === 'class_name') {
+                    nameNode = c
+                    break
+                  }
+                }
+              }
+              if (nameNode) {
+                const name = nameNode.text
+                if (hasParametricParens || this.isLessMixinCall(node, name)) {
+                  const symbolId = `${filePath}:${name}`
+                  if (!seenIds.has(symbolId)) {
+                    seenIds.add(symbolId)
+                    symbols.push({
+                      id: symbolId,
+                      kind: AuraNodeKind.Mixin,
+                      name,
+                      filePath,
+                      range: { startLine: node.startPosition.row + 1, endLine: node.endPosition.row + 1 },
+                      exported: true,
+                    })
+                    contains.push({ source: filePath, target: symbolId, type: AuraEdgeType.CONTAINS, confidence: 1.0 })
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+
+      for (let i = 0; i < node.childCount; i++) {
+        walk(node.child(i)!)
+      }
+    }
+    walk(tree.rootNode)
+  }
+
+  private isLessMixinCall(node: SyntaxNode, name: string): boolean {
+    // Heuristic for detecting Less mixins without explicit parentheses.
+    // A rule_set that contains only at_rule nodes (Less variable references)
+    // and nested rule_sets, but no CSS property declarations, is likely a mixin.
+    const block = node.childForFieldName('block')
+    if (!block) return false
+
+    let hasDeclaration = false
+    let hasAtRuleRef = false
+    for (let i = 0; i < block.childCount; i++) {
+      const child = block.child(i)!
+      if (child.type === 'declaration') {
+        hasDeclaration = true
+      }
+      if (child.type === 'at_rule' || child.type === 'rule_set') {
+        hasAtRuleRef = true
+      }
+    }
+
+    // If the block only has at_rule/variable refs and no declarations, it's a mixin
+    if (hasAtRuleRef && !hasDeclaration) return true
+
+    // Common Less mixin naming patterns (dashed names like border-radius, center-block)
+    // Single-word names like clearfix are also common mixins
+    return false
+  }
+
+  // ── Shell/Bash parsing ─────────────────────────────────────────────────────
+
+  private parseShellFile(filePath: string, source: string): ParseResult {
+    const language = this.selectLanguage(filePath)
+    if (!language || !this.parser) {
+      return { filePath, symbols: [], imports: [], calls: [], heritage: [], contains: [], dataFlow: [] }
+    }
+
+    this.parser.setLanguage(language)
+    const tree = this.parser.parse(source)
+    if (!tree) {
+      return { filePath, symbols: [], imports: [], calls: [], heritage: [], contains: [], dataFlow: [] }
+    }
+
+    try {
+      const symbols: AuraNode[] = []
+      const imports: AuraEdge[] = []
+      const calls: AuraEdge[] = []
+      const contains: AuraEdge[] = []
+      const seenIds = new Set<string>()
+
+      this.extractShellDeclarations(tree, filePath, symbols, contains, seenIds)
+      this.extractShellImports(tree, filePath, imports)
+      this.extractShellCalls(tree, filePath, calls, symbols)
+
+      return { filePath, symbols, imports, calls, heritage: [], contains, dataFlow: [] }
+    } finally {
+      tree.delete()
+    }
+  }
+
+  private extractShellDeclarations(
+    tree: Tree,
+    filePath: string,
+    symbols: AuraNode[],
+    contains: AuraEdge[],
+    seenIds: Set<string>,
+  ): void {
+    const walk = (node: SyntaxNode): void => {
+      // Function definitions
+      if (node.type === 'function_definition') {
+        const nameNode = node.childForFieldName('name')
+        if (nameNode) {
+          const name = nameNode.text
+          const symbolId = `${filePath}:${name}`
+          if (!seenIds.has(symbolId)) {
+            seenIds.add(symbolId)
+            symbols.push({
+              id: symbolId,
+              kind: AuraNodeKind.Function,
+              name,
+              filePath,
+              range: { startLine: node.startPosition.row + 1, endLine: node.endPosition.row + 1 },
+              exported: true,
+            })
+            contains.push({ source: filePath, target: symbolId, type: AuraEdgeType.CONTAINS, confidence: 1.0 })
+          }
+        }
+      }
+
+      // Variable assignments (top-level only, not inside functions)
+      if (node.type === 'variable_assignment') {
+        const nameNode = node.childForFieldName('name')
+        if (nameNode) {
+          const name = nameNode.text
+          // Only track top-level variables (parent is program) or exported ones
+          const parent = node.parent
+          const isTopLevel = parent?.type === 'program'
+          const isExported = this.isShellExported(node)
+          if (isTopLevel || isExported) {
+            const symbolId = `${filePath}:${name}`
+            if (!seenIds.has(symbolId)) {
+              seenIds.add(symbolId)
+              symbols.push({
+                id: symbolId,
+                kind: AuraNodeKind.Variable,
+                name,
+                filePath,
+                range: { startLine: node.startPosition.row + 1, endLine: node.endPosition.row + 1 },
+                exported: isExported,
+                metadata: isExported ? { modifiers: ['export'] } : undefined,
+              })
+              contains.push({ source: filePath, target: symbolId, type: AuraEdgeType.CONTAINS, confidence: 1.0 })
+            }
+          }
+        }
+      }
+
+      for (let i = 0; i < node.childCount; i++) {
+        walk(node.child(i)!)
+      }
+    }
+    walk(tree.rootNode)
+  }
+
+  private isShellExported(node: SyntaxNode): boolean {
+    // Check if the variable is inside a declaration_command (export/declare/local)
+    const parent = node.parent
+    if (parent && parent.type === 'declaration_command') {
+      return true
+    }
+    // Check preceding sibling for 'export' keyword
+    if (parent) {
+      for (let i = 0; i < parent.childCount; i++) {
+        const child = parent.child(i)!
+        if (child === node) break
+        if (child.type === 'export') return true
+      }
+    }
+    return false
+  }
+
+  private extractShellImports(
+    tree: Tree,
+    filePath: string,
+    imports: AuraEdge[],
+  ): void {
+    const walk = (node: SyntaxNode): void => {
+      // In tree-sitter-bash, `source` and `.` are regular commands, not source_command nodes
+      // Look for command nodes where command_name is "source" or "."
+      if (node.type === 'command') {
+        const nameNode = node.childForFieldName('name')
+        if (nameNode && nameNode.type === 'command_name') {
+          const cmdName = nameNode.text.trim()
+          if (cmdName === 'source' || cmdName === '.') {
+            // Extract the first argument as the import path
+            for (let i = 0; i < node.childCount; i++) {
+              const child = node.child(i)!
+              if (child.type === 'word' || child.type === 'string') {
+                let importPath = child.text
+                // Strip quotes from string arguments
+                if (importPath.startsWith('"') && importPath.endsWith('"')) {
+                  importPath = importPath.slice(1, -1)
+                } else if (importPath.startsWith("'") && importPath.endsWith("'")) {
+                  importPath = importPath.slice(1, -1)
+                }
+                if (importPath) {
+                  imports.push({
+                    source: filePath,
+                    target: importPath,
+                    type: AuraEdgeType.IMPORTS,
+                    confidence: importPath.startsWith('/') || importPath.startsWith('./') || importPath.startsWith('../') ? 0.8 : 0.5,
+                    metadata: { rawImportPath: importPath, importKind: 'shell-source' },
+                  })
+                }
+                break // Only take the first argument
+              }
+            }
+          }
+        }
+      }
+
+      for (let i = 0; i < node.childCount; i++) {
+        walk(node.child(i)!)
+      }
+    }
+    walk(tree.rootNode)
+  }
+
+  private extractShellCalls(
+    tree: Tree,
+    filePath: string,
+    calls: AuraEdge[],
+    symbols: AuraNode[],
+  ): void {
+    const seenCalls = new Set<string>()
+
+    const walk = (node: SyntaxNode): void => {
+      if (node.type === 'command') {
+        const nameNode = node.childForFieldName('name')
+        if (nameNode && nameNode.type === 'command_name') {
+          const cmdName = nameNode.text.trim()
+          // Skip source/. commands (handled as imports) and builtins
+          if (cmdName !== 'source' && cmdName !== '.' && !this.isShellBuiltin(cmdName)) {
+            const enclosingSymbol = this.findEnclosingSymbolFromTree(node, symbols, filePath)
+            const source = enclosingSymbol ? enclosingSymbol.id : filePath
+            const dedupeKey = `${source}→${cmdName}`
+            if (!seenCalls.has(dedupeKey)) {
+              seenCalls.add(dedupeKey)
+              calls.push({
+                source,
+                target: cmdName,
+                type: AuraEdgeType.CALLS,
+                confidence: 0.6,
+                metadata: { callName: cmdName, callTargetKind: 'command' },
+              })
+            }
+          }
+        }
+      }
+
+      for (let i = 0; i < node.childCount; i++) {
+        walk(node.child(i)!)
+      }
+    }
+    walk(tree.rootNode)
+  }
+
+  private isShellBuiltin(name: string): boolean {
+    const builtins = new Set([
+      // Shell builtins
+      'echo', 'cd', 'pwd', 'exit', 'return', 'export', 'local', 'declare',
+      'readonly', 'unset', 'shift', 'eval', 'exec', 'trap', 'wait',
+      'set', 'unset', 'umask', 'alias', 'unalias', 'bind', 'builtin',
+      'caller', 'command', 'compgen', 'complete', 'compopt', 'dirs',
+      'disown', 'enable', 'fg', 'bg', 'jobs', 'hash', 'help', 'history',
+      'let', 'logout', 'mapfile', 'popd', 'pushd', 'printf', 'read',
+      'readarray', 'shopt', 'source', 'suspend', 'test', 'times',
+      'type', 'typeset', 'ulimit', 'getopts',
+      // Coreutils (too common to be useful as dependency edges)
+      'ls', 'cat', 'grep', 'sed', 'awk', 'find', 'rm', 'cp', 'mv',
+      'mkdir', 'rmdir', 'chmod', 'chown', 'ln', 'touch', 'wc', 'sort',
+      'uniq', 'cut', 'head', 'tail', 'tr', 'tee', 'date', 'sleep',
+      'true', 'false', 'yes', 'basename', 'dirname', 'dirname',
+      'xargs', 'install', 'df', 'du', 'stat', 'file', 'which',
+      // Common commands
+      'if', 'then', 'else', 'elif', 'fi', 'for', 'while', 'until', 'do', 'done',
+      'case', 'esac', 'in', 'function', 'select', 'time', 'coproc',
     ])
     return builtins.has(name)
   }

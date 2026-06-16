@@ -21,7 +21,7 @@ import type {
   FileHashEntry,
 } from './types.ts'
 import { computeProgress } from './types.ts'
-import { PY_EXTENSIONS, CSS_EXTENSIONS, SCSS_EXTENSIONS, HTML_EXTENSIONS, VUE_EXTENSIONS, PHP_EXTENSIONS, JAVA_EXTENSIONS, C_EXTENSIONS, CPP_EXTENSIONS, CSHARP_EXTENSIONS, GO_EXTENSIONS, RUST_EXTENSIONS } from './extensions.ts'
+import { PY_EXTENSIONS, CSS_EXTENSIONS, SCSS_EXTENSIONS, HTML_EXTENSIONS, VUE_EXTENSIONS, PHP_EXTENSIONS, JAVA_EXTENSIONS, C_EXTENSIONS, CPP_EXTENSIONS, CSHARP_EXTENSIONS, GO_EXTENSIONS, RUST_EXTENSIONS, LESS_EXTENSIONS, SHELL_EXTENSIONS } from './extensions.ts'
 import { getGitHead } from './git.ts'
 import { BM25SearchEngine } from './search/bm25.ts'
 import { EmbeddingService } from './search/embedding.ts'
@@ -472,7 +472,7 @@ export class AuraIndexer {
           const wildcard = match[1] || ''
           const resolved = replacement.replace(/\*/g, wildcard)
           // Try common extensions
-          const extensions = ['', '.ts', '.tsx', '.js', '.jsx', '.vue', '.php', '.phtml', '.java', '.h', '.hpp', '.c', '.cpp', '.go', '.rs', '/index.ts', '/index.tsx', '/index.js', '/index.jsx', '/index.vue']
+          const extensions = ['', '.ts', '.tsx', '.js', '.jsx', '.vue', '.php', '.phtml', '.java', '.h', '.hpp', '.c', '.cpp', '.go', '.rs', '.less', '.sh', '.bash', '.zsh', '/index.ts', '/index.tsx', '/index.js', '/index.jsx', '/index.vue']
           for (const ext of extensions) {
             const candidate = resolved + ext
             if (fileNodeMap.has(candidate)) return candidate
@@ -601,6 +601,91 @@ export class AuraIndexer {
               matched = true
               break
             }
+          }
+        }
+        if (!matched && fileNodeMap.has(resolvedPath)) {
+          edge.target = resolvedPath
+          edge.confidence = 0.9
+        } else if (!matched) {
+          edge.confidence = 0.5
+        }
+        continue
+      }
+
+      // ── Less import resolution ──
+      const isLessImport = LESS_EXTENSIONS.has(sourceExt)
+
+      if (isLessImport && !isPythonImport) {
+        if (!rawImportPath.startsWith('.')) {
+          // Non-relative: could be a package or partial — low confidence
+          edge.confidence = 0.3
+          continue
+        }
+
+        // Resolve relative Less import
+        const sourceDir = path.dirname(edge.source)
+        const resolvedPath = path.normalize(path.join(sourceDir, rawImportPath)).replace(/\\/g, '/')
+
+        // Less partial resolution: try _ prefix (same convention as SCSS)
+        const lessExtensions = ['.less', '.css', '/index.less', '/index.css']
+        const partialPrefix = path.basename(resolvedPath)
+        const partialDir = path.dirname(resolvedPath)
+        const partialPath = path.normalize(path.join(partialDir, '_' + partialPrefix)).replace(/\\/g, '/')
+
+        let matched = false
+        // Try partial first (Less/SCSS convention: @import "vars" resolves to _vars.less)
+        for (const ext of lessExtensions) {
+          const candidate = partialPath + ext
+          if (fileNodeMap.has(candidate)) {
+            edge.target = candidate
+            edge.confidence = 0.9
+            matched = true
+            break
+          }
+        }
+        if (!matched) {
+          for (const ext of lessExtensions) {
+            const candidate = resolvedPath + ext
+            if (fileNodeMap.has(candidate)) {
+              edge.target = candidate
+              edge.confidence = 0.9
+              matched = true
+              break
+            }
+          }
+        }
+        if (!matched && fileNodeMap.has(resolvedPath)) {
+          edge.target = resolvedPath
+          edge.confidence = 0.9
+        } else if (!matched) {
+          edge.confidence = 0.5
+        }
+        continue
+      }
+
+      // ── Shell import resolution ──
+      const isShellImport = SHELL_EXTENSIONS.has(sourceExt)
+
+      if (isShellImport && !isPythonImport) {
+        // Shell source/. commands — resolve relative paths
+        if (!rawImportPath.startsWith('.') && !rawImportPath.startsWith('/')) {
+          // Absolute path or $PATH lookup — low confidence
+          edge.confidence = 0.3
+          continue
+        }
+
+        const sourceDir = path.dirname(edge.source)
+        const resolvedPath = path.normalize(path.join(sourceDir, rawImportPath)).replace(/\\/g, '/')
+
+        const shellExtensions = ['.sh', '.bash', '.zsh', '/index.sh']
+        let matched = false
+        for (const ext of shellExtensions) {
+          const candidate = resolvedPath + ext
+          if (fileNodeMap.has(candidate)) {
+            edge.target = candidate
+            edge.confidence = 0.9
+            matched = true
+            break
           }
         }
         if (!matched && fileNodeMap.has(resolvedPath)) {

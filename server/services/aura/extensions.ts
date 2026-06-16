@@ -12,6 +12,8 @@ export const CPP_EXTENSIONS = new Set(['.cpp', '.cxx', '.cc', '.hpp', '.hxx', '.
 export const CSHARP_EXTENSIONS = new Set(['.cs'])
 export const GO_EXTENSIONS = new Set(['.go'])
 export const RUST_EXTENSIONS = new Set(['.rs'])
+export const LESS_EXTENSIONS = new Set(['.less'])
+export const SHELL_EXTENSIONS = new Set(['.sh', '.bash', '.zsh'])
 
 export const PARSABLE_EXTENSIONS = new Set([
   ...JS_EXTENSIONS,
@@ -28,4 +30,6 @@ export const PARSABLE_EXTENSIONS = new Set([
   ...CSHARP_EXTENSIONS,
   ...GO_EXTENSIONS,
   ...RUST_EXTENSIONS,
+  ...LESS_EXTENSIONS,
+  ...SHELL_EXTENSIONS,
 ])
