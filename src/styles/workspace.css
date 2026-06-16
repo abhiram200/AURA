@@ -456,21 +456,29 @@
   border-left-color: var(--accent-primary);
 }
 
-/* ── CodeMirror search panel (VS Code style) ── */
+/* ── CodeMirror search panel — VS Code style floating widget ── */
 .code-editor .cm-panel.cm-search {
+  position: absolute !important;
+  top: 0;
+  right: 16px;
+  z-index: 100;
   background: var(--bg-secondary, #1e1e2e);
-  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
-  padding: 8px 12px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-top: none;
+  border-radius: 0 0 6px 6px;
+  padding: 6px 10px 8px;
   font-size: 13px;
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 4px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+  width: 380px;
 }
 
 .code-editor .cm-panel.cm-search .cm-search-row {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 4px;
   flex-wrap: nowrap;
 }
 
@@ -478,14 +486,15 @@
 .code-editor .cm-panel.cm-search input {
   background: var(--bg-primary, #11111b);
   border: 1px solid rgba(255, 255, 255, 0.1);
-  border-radius: 4px;
+  border-radius: 3px;
   color: var(--text-primary, #cdd6f4);
   font-size: 13px;
-  padding: 4px 8px;
+  padding: 3px 6px;
   outline: none;
-  flex: 1;
+  width: 100%;
   min-width: 0;
   font-family: inherit;
+  box-sizing: border-box;
 }
 
 .code-editor .cm-panel.cm-search .cm-textfield:focus,
@@ -495,18 +504,19 @@
 
 .code-editor .cm-panel.cm-search .cm-button {
   background: rgba(255, 255, 255, 0.06);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 4px;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 3px;
   color: var(--text-secondary, #a6adc8);
   cursor: pointer;
-  font-size: 12px;
-  padding: 3px 8px;
+  font-size: 11px;
+  padding: 2px 6px;
   transition: background 0.15s, color 0.15s;
   white-space: nowrap;
+  line-height: 1.4;
 }
 
 .code-editor .cm-panel.cm-search .cm-button:hover {
-  background: rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.12);
   color: var(--text-primary, #cdd6f4);
 }
 
@@ -518,21 +528,24 @@
 
 .code-editor .cm-panel.cm-search label {
   color: var(--text-tertiary, #6c7086);
-  font-size: 12px;
+  font-size: 11px;
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: 3px;
   cursor: pointer;
+  padding: 0 2px;
 }
 
 .code-editor .cm-panel.cm-search label input[type="checkbox"] {
   accent-color: var(--accent-primary, #0891b2);
+  width: 13px;
+  height: 13px;
 }
 
 .code-editor .cm-panel.cm-search .cm-search-match-count {
   color: var(--text-tertiary, #6c7086);
-  font-size: 12px;
-  margin-left: 4px;
+  font-size: 11px;
+  margin-left: 2px;
   white-space: nowrap;
 }
 
@@ -2135,7 +2148,8 @@
 /* ── Light mode: search panel ── */
 .light .code-editor .cm-panel.cm-search {
   background: #f3f3f3;
-  border-bottom-color: rgba(0, 0, 0, 0.1);
+  border-color: rgba(0, 0, 0, 0.1);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
 }
 
 .light .code-editor .cm-panel.cm-search .cm-textfield,
