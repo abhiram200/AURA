@@ -102,6 +102,7 @@ export interface Settings {
   defaultProjectPath: string | null
   defaultProjectModel: string | null
   defaultEmbeddingModel: string | null
+  defaultVisionModel: string | null
   ollamaBaseUrl: string   // empty = use http://localhost:11434
   ollamaApiKey: string    // empty = fall back to process.env.OLLAMA_API_KEY
   codeEditorTheme: string
@@ -124,6 +125,7 @@ export interface OllamaModel {
   size: number
   modified_at: string
   isEmbedding?: boolean
+  isVision?: boolean
 }
 
 export interface OllamaChatMessage {

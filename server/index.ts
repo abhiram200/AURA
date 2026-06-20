@@ -67,6 +67,7 @@ async function start() {
     defaultProjectPath: null,
     defaultProjectModel: null,
     defaultEmbeddingModel: null,
+    defaultVisionModel: null,
     ollamaBaseUrl: '',
     ollamaApiKey: '',
   }

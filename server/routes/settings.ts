@@ -21,6 +21,7 @@ const DEFAULT_SETTINGS: Settings = {
   defaultProjectPath: null,
   defaultProjectModel: null,
   defaultEmbeddingModel: null,
+  defaultVisionModel: null,
   ollamaBaseUrl: '',
   ollamaApiKey: '',
   codeEditorTheme: 'catppuccin-mocha',
@@ -71,6 +72,10 @@ export function createSettingsRouter(store: FileStore) {
     }
     if (settings.defaultEmbeddingModel === undefined) {
       settings.defaultEmbeddingModel = null
+      await store.write('settings.json', settings)
+    }
+    if (settings.defaultVisionModel === undefined) {
+      settings.defaultVisionModel = null
       await store.write('settings.json', settings)
     }
     if (settings.ollamaBaseUrl === undefined) {

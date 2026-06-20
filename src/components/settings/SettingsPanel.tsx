@@ -480,6 +480,19 @@ export function SettingsPanel({
                     </div>
                     <div className="settings-modal-section">
                       <div className="settings-modal-label" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                        Default Vision Model
+                        <Tooltip content="Vision model used for image understanding tasks. Leave empty to use the default project model." position="top">
+                          <span className="help-icon">?</span>
+                        </Tooltip>
+                      </div>
+                      <ModelSelection
+                        models={models.filter(m => m.isVision)}
+                        defaultModel={settings.defaultVisionModel ?? ''}
+                        onDefaultModelChange={(model) => onSettingsChange({ defaultVisionModel: model || null })}
+                      />
+                    </div>
+                    <div className="settings-modal-section">
+                      <div className="settings-modal-label" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                         Code Editor Theme
                         <Tooltip content="Syntax highlighting theme for the workspace code editor. Change it anytime from the status bar too." position="top">
                           <span className="help-icon">?</span>

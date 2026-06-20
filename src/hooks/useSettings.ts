@@ -21,6 +21,7 @@ export interface AppSettings {
   defaultProjectPath: string | null
   defaultProjectModel: string | null
   defaultEmbeddingModel: string | null
+  defaultVisionModel: string | null
   ollamaBaseUrl: string
   ollamaApiKey: string
   hasEnvApiKey: boolean
@@ -42,6 +43,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   defaultProjectPath: null,
   defaultProjectModel: null,
   defaultEmbeddingModel: null,
+  defaultVisionModel: null,
   ollamaBaseUrl: '',
   ollamaApiKey: '',
   hasEnvApiKey: false,
@@ -54,6 +56,7 @@ export interface OllamaModel {
   size: number
   modified_at: string
   isEmbedding?: boolean
+  isVision?: boolean
 }
 
 export function useSettings() {
@@ -132,6 +135,12 @@ export function useSettings() {
       if (firstEmbed) updates.defaultEmbeddingModel = firstEmbed.name
       else updates.defaultEmbeddingModel = null
     }
+    // Vision model — clear if current one is missing (don't auto-select)
+    if (settings.defaultVisionModel && !models.some(m => m.name === settings.defaultVisionModel)) {
+      const firstVision = models.find(m => m.isVision)
+      if (firstVision) updates.defaultVisionModel = firstVision.name
+      else updates.defaultVisionModel = null
+    }
     if (Object.keys(updates).length > 0) updateSettings(updates)
   }, [models])
 
@@ -142,6 +151,7 @@ export function useSettings() {
 
   const chatModels = models.filter(m => !m.isEmbedding)
   const embeddingModels = models.filter(m => m.isEmbedding)
+  const visionModels = models.filter(m => m.isVision)
 
-  return { settings, models, chatModels, embeddingModels, loading, updateSettings, updatePreferences, fetchModels, fetchSettings }
+  return { settings, models, chatModels, embeddingModels, visionModels, loading, updateSettings, updatePreferences, fetchModels, fetchSettings }
 }
