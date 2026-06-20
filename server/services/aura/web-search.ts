@@ -33,7 +33,7 @@ export class WebSearchService {
   private rateLimitHit = false
 
   constructor(apiKey?: string) {
-    this.apiKey = apiKey || process.env.OLLAMA_API_KEY || null
+    this.apiKey = WebSearchService.resolveApiKey(apiKey)
   }
 
   // ── Main entry point ────────────────────────────────────────────────────────
@@ -256,6 +256,11 @@ export class WebSearchService {
   }
 
   // ── Utility ─────────────────────────────────────────────────────────────────
+
+  /** Resolve the API key: settings first, then env, then null */
+  static resolveApiKey(settingsApiKey?: string): string | null {
+    return settingsApiKey?.trim() || process.env.OLLAMA_API_KEY || null
+  }
 
   /** Truncate content to a max length with a notice appended */
   static truncateContent(content: string, maxLength: number): string {

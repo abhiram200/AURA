@@ -1985,10 +1985,8 @@ export class AuraAgent {
   private chatService: AuraChatService | null
   private chatId: string | null
   private webSearch: WebSearchService
-  private chatService: AuraChatService | null
-  private chatId: string | null
 
-  constructor(qs: AuraQueryService, projectPath: string, ollamaBaseUrl?: string, model?: string, contextWindow?: number, managedShells?: ManagedShellService, projectId?: string, chatService?: AuraChatService, chatId?: string) {
+  constructor(qs: AuraQueryService, projectPath: string, ollamaBaseUrl?: string, model?: string, contextWindow?: number, managedShells?: ManagedShellService, projectId?: string, chatService?: AuraChatService, chatId?: string, apiKey?: string) {
     this.qs = qs
     this.projectPath = projectPath
     this.ollamaBaseUrl = ollamaBaseUrl || process.env.OLLAMA_BASE_URL || 'http://localhost:11434'
@@ -1998,7 +1996,7 @@ export class AuraAgent {
     this.projectId = projectId || null
     this.chatService = chatService || null
     this.chatId = chatId || null
-    this.webSearch = new WebSearchService()
+    this.webSearch = new WebSearchService(apiKey)
     // Get or create the ApprovalManager for this project
     let am = globalApprovalManagers.get(projectPath)
     if (!am) {

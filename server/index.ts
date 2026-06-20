@@ -83,7 +83,7 @@ async function start() {
   const contextService = new ContextService()
   const conversationService = new ConversationService(store)
   const memoryService = new MemoryService(store)
-  const webSearch = new WebSearchService()
+  const webSearch = new WebSearchService(existingSettings?.ollamaApiKey)
   const skillsService = new SkillsService(store, webSearch)
   const projectService = new ProjectService(store)
   const groupService = new GroupService(DATA_DIR)

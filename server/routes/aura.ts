@@ -63,6 +63,7 @@ export function createAuraRouter(
       chatModel: settings?.defaultProjectModel || settings?.defaultModel || process.env.OLLAMA_MODEL || 'glm-5.1:cloud',
       embedModel: settings?.defaultEmbeddingModel || 'mxbai-embed-large:335m',
       contextWindow: settings?.contextWindowSize || 200_000,
+      apiKey: settings?.ollamaApiKey || undefined,
     }
   }
 
@@ -985,7 +986,7 @@ export function createAuraRouter(
     // Get chat ID for compaction persistence (best-effort — may not exist yet)
     const chatSession = await chatService.get(project.workspacePath)
     const chatId = chatSession?.id ?? null
-    const agent = new AuraAgent(qs, project.workspacePath, config.ollamaBaseUrl, config.chatModel, config.contextWindow, managedShellService, projectId, chatService, chatId)
+    const agent = new AuraAgent(qs, project.workspacePath, config.ollamaBaseUrl, config.chatModel, config.contextWindow, managedShellService, projectId, chatService, chatId, config.apiKey)
 
     // JSON mode — collect all SSE events and return a single response
     if (mode === 'json') {
