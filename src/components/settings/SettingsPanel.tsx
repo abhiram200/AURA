@@ -90,6 +90,10 @@ export function SettingsPanel({
   const [ollamaUrlInput, setOllamaUrlInput] = useState(settings.ollamaBaseUrl ?? '')
   const [ollamaTestResult, setOllamaTestResult] = useState<'idle' | 'testing' | 'success' | 'error'>('idle');
   const [ollamaTestError, setOllamaTestError] = useState('');
+  const [apiKeyInput, setApiKeyInput] = useState(settings.ollamaApiKey ?? '')
+  const [apiKeyVisible, setApiKeyVisible] = useState(false)
+  const [apiKeyTestResult, setApiKeyTestResult] = useState<'idle' | 'testing' | 'success' | 'error'>('idle')
+  const [apiKeyTestError, setApiKeyTestError] = useState('')
   const { theme, toggleTheme, animationIntensity, setAnimationIntensity } = useTheme();
 
   useEffect(() => {
@@ -99,6 +103,11 @@ export function SettingsPanel({
   useEffect(() => {
     setOllamaUrlInput(settings.ollamaBaseUrl ?? '')
   }, [settings.ollamaBaseUrl])
+
+  useEffect(() => {
+    setApiKeyInput(settings.ollamaApiKey ?? '')
+  }, [settings.ollamaApiKey])
+
   const slideTransition = getTransition({ type: 'spring', stiffness: 300, damping: 30 }, animationIntensity);
 
   const activeMemories = memories.filter((m) => m.active).length;
@@ -265,6 +274,88 @@ export function SettingsPanel({
                       </div>
                       {ollamaTestResult === 'success' && <span className="ollama-url-feedback ollama-url-feedback--success">Connected</span>}
                       {ollamaTestResult === 'error' && <span className="ollama-url-feedback ollama-url-feedback--error">{ollamaTestError || 'Connection failed'}</span>}
+                    </div>
+                    <div className="settings-modal-section">
+                      <div className="settings-modal-label" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                        Ollama API Key
+                        <Tooltip content="API key for Ollama cloud web search (free tier: 100 searches/day). Get yours at ollama.com/settings/keys" position="top">
+                          <span className="help-icon">?</span>
+                        </Tooltip>
+                      </div>
+                      <div className="ollama-url-input-wrapper">
+                        <input
+                          className="folder-picker__input"
+                          type={apiKeyVisible ? 'text' : 'password'}
+                          value={apiKeyInput}
+                          onChange={(e) => {
+                            setApiKeyInput(e.target.value)
+                            setApiKeyTestResult('idle')
+                            setApiKeyTestError('')
+                          }}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') {
+                              onSettingsChange({ ollamaApiKey: apiKeyInput })
+                            }
+                          }}
+                          placeholder="Leave empty to use .env key"
+                        />
+                        <button
+                          className="ollama-url-test-btn"
+                          onClick={() => setApiKeyVisible(!apiKeyVisible)}
+                          title={apiKeyVisible ? 'Hide key' : 'Show key'}
+                          style={{ fontSize: '14px', minWidth: '32px' }}
+                        >
+                          {apiKeyVisible ? '🙈' : '👁️'}
+                        </button>
+                        <button
+                          className={`ollama-url-test-btn${apiKeyTestResult === 'testing' ? ' ollama-url-test-btn--testing' : ''}`}
+                          disabled={apiKeyTestResult === 'testing' || !apiKeyInput.trim()}
+                          onClick={async () => {
+                            const key = apiKeyInput.trim()
+                            if (!key) return
+                            setApiKeyTestResult('testing')
+                            setApiKeyTestError('')
+                            try {
+                              const res = await fetch('/api/settings/test-api-key', {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({ apiKey: key }),
+                              })
+                              if (!res.ok) throw new Error(`Server error: ${res.status}`)
+                              const data = await res.json()
+                              if (data.valid) {
+                                setApiKeyTestResult('success')
+                                setApiKeyTestError('')
+                                onSettingsChange({ ollamaApiKey: key })
+                              } else {
+                                setApiKeyTestResult('error')
+                                setApiKeyTestError(data.error || 'Invalid API key')
+                              }
+                            } catch (err) {
+                              setApiKeyTestResult('error')
+                              setApiKeyTestError(err instanceof Error ? err.message : 'Test failed')
+                            }
+                          }}
+                          title="Test key & save"
+                        >
+                          {apiKeyTestResult === 'testing' ? '' : '↗'}
+                        </button>
+                      </div>
+                      {!apiKeyInput.trim() && settings.ollamaApiKey ? (
+                        <span className="ollama-url-feedback" style={{ color: 'var(--accent-primary, #4ade80)' }}>
+                          ✓ Key configured (from .env)
+                        </span>
+                      ) : apiKeyInput.trim() ? (
+                        <span className="ollama-url-feedback" style={{ color: 'var(--accent-primary, #4ade80)' }}>
+                          ✓ Key configured
+                        </span>
+                      ) : (
+                        <span className="ollama-url-feedback" style={{ color: 'var(--text-muted, #888)' }}>
+                          ✗ No key set — web search will be limited
+                        </span>
+                      )}
+                      {apiKeyTestResult === 'success' && <span className="ollama-url-feedback ollama-url-feedback--success">Key valid</span>}
+                      {apiKeyTestResult === 'error' && <span className="ollama-url-feedback ollama-url-feedback--error">{apiKeyTestError || 'Invalid key'}</span>}
                     </div>
                     <div className="settings-modal-section">
                       <div className="settings-modal-label">Default Model</div>
