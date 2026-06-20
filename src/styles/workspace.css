@@ -456,110 +456,6 @@
   border-left-color: var(--accent-primary);
 }
 
-/* ── CodeMirror search panel — VS Code style floating widget ── */
-.code-editor .cm-panel.cm-search {
-  position: absolute !important;
-  top: 0;
-  right: 16px;
-  z-index: 100;
-  background: var(--bg-secondary, #1e1e2e);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  border-top: none;
-  border-radius: 0 0 6px 6px;
-  padding: 6px 10px 8px;
-  font-size: 13px;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
-  width: 380px;
-}
-
-.code-editor .cm-panel.cm-search .cm-search-row {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  flex-wrap: nowrap;
-}
-
-.code-editor .cm-panel.cm-search .cm-textfield,
-.code-editor .cm-panel.cm-search input {
-  background: var(--bg-primary, #11111b);
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  border-radius: 3px;
-  color: var(--text-primary, #cdd6f4);
-  font-size: 13px;
-  padding: 3px 6px;
-  outline: none;
-  width: 100%;
-  min-width: 0;
-  font-family: inherit;
-  box-sizing: border-box;
-}
-
-.code-editor .cm-panel.cm-search .cm-textfield:focus,
-.code-editor .cm-panel.cm-search input:focus {
-  border-color: var(--accent-primary, #0891b2);
-}
-
-.code-editor .cm-panel.cm-search .cm-button {
-  background: rgba(255, 255, 255, 0.06);
-  border: 1px solid rgba(255, 255, 255, 0.06);
-  border-radius: 3px;
-  color: var(--text-secondary, #a6adc8);
-  cursor: pointer;
-  font-size: 11px;
-  padding: 2px 6px;
-  transition: background 0.15s, color 0.15s;
-  white-space: nowrap;
-  line-height: 1.4;
-}
-
-.code-editor .cm-panel.cm-search .cm-button:hover {
-  background: rgba(255, 255, 255, 0.12);
-  color: var(--text-primary, #cdd6f4);
-}
-
-.code-editor .cm-panel.cm-search .cm-button-active {
-  background: var(--accent-primary, #0891b2) !important;
-  border-color: var(--accent-primary, #0891b2) !important;
-  color: #fff !important;
-}
-
-.code-editor .cm-panel.cm-search label {
-  color: var(--text-tertiary, #6c7086);
-  font-size: 11px;
-  display: flex;
-  align-items: center;
-  gap: 3px;
-  cursor: pointer;
-  padding: 0 2px;
-}
-
-.code-editor .cm-panel.cm-search label input[type="checkbox"] {
-  accent-color: var(--accent-primary, #0891b2);
-  width: 13px;
-  height: 13px;
-}
-
-.code-editor .cm-panel.cm-search .cm-search-match-count {
-  color: var(--text-tertiary, #6c7086);
-  font-size: 11px;
-  margin-left: 2px;
-  white-space: nowrap;
-}
-
-/* Search match highlights */
-.code-editor .cm-searchMatch {
-  background: rgba(255, 200, 0, 0.25) !important;
-  outline: 1px solid rgba(255, 200, 0, 0.4);
-}
-
-.code-editor .cm-searchMatch-selected {
-  background: rgba(255, 200, 0, 0.45) !important;
-  outline: 1px solid rgba(255, 200, 0, 0.7);
-}
-
 .code-editor--binary {
   display: flex;
   align-items: center;
@@ -582,71 +478,89 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 40px;
+  padding: 32px;
 }
 
 .welcome-tab__content {
-  max-width: 480px;
+  max-width: 440px;
   text-align: center;
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 12px;
+  padding: 32px 40px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
+}
+
+.welcome-tab__header {
+  margin-bottom: 24px;
 }
 
 .welcome-tab__icon {
-  margin-bottom: 20px;
-  opacity: 0.5;
+  width: 56px;
+  height: 56px;
+  margin: 0 auto 18px;
+  color: var(--accent-primary);
+  opacity: 0.85;
 }
 
 .welcome-tab__title {
-  font-size: 28px;
-  font-weight: 200;
+  font-size: 26px;
+  font-weight: 500;
   color: var(--text-primary);
-  margin-bottom: 10px;
-  letter-spacing: 1px;
+  margin-bottom: 8px;
+  letter-spacing: 0.2px;
 }
 
 .welcome-tab__subtitle {
-  font-size: 14px;
+  font-size: 13px;
   color: var(--text-tertiary);
-  margin-bottom: 40px;
+  margin: 0;
   line-height: 1.5;
 }
 
 .welcome-tab__shortcuts {
   text-align: left;
-  background: rgba(255, 255, 255, 0.02);
-  border: 1px solid rgba(255, 255, 255, 0.06);
-  border-radius: 10px;
-  padding: 16px 20px;
 }
 
 .welcome-tab__shortcuts-title {
   font-size: 11px;
   font-weight: 700;
-  letter-spacing: 1px;
+  letter-spacing: 1.5px;
   text-transform: uppercase;
   color: var(--text-tertiary);
-  margin-bottom: 14px;
+  margin-bottom: 12px;
+  text-align: center;
+}
+
+.welcome-tab__grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px 16px;
 }
 
 .welcome-tab__shortcut {
   display: flex;
-  justify-content: space-between;
   align-items: center;
-  padding: 6px 0;
+  gap: 10px;
+  padding: 4px 0;
 }
 
 .welcome-tab__kbd {
   font-family: 'Inter', sans-serif;
   font-size: 11px;
-  font-weight: 500;
-  background: rgba(255, 255, 255, 0.06);
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  border-radius: 5px;
-  padding: 3px 10px;
+  font-weight: 600;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 4px;
+  padding: 3px 8px;
   color: var(--text-secondary);
+  white-space: nowrap;
+  min-width: 44px;
+  text-align: center;
 }
 
 .welcome-tab__action {
-  font-size: 13px;
+  font-size: 12px;
   color: var(--text-tertiary);
 }
 
@@ -1036,6 +950,233 @@
   text-align: center;
   color: var(--text-tertiary);
   font-size: 13px;
+}
+
+/* === Find & Replace Bar === */
+.find-replace {
+  position: absolute;
+  top: 0;
+  right: 12px;
+  z-index: 30;
+  display: flex;
+  flex-direction: column;
+  background: #1e1e2e;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-top: none;
+  border-radius: 0 0 8px 8px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+  padding: 4px 8px;
+  min-width: 360px;
+  font-size: 12px;
+  font-family: 'Inter', -apple-system, sans-serif;
+  animation: find-replace-slide-in 0.12s ease-out;
+}
+
+@keyframes find-replace-slide-in {
+  from { opacity: 0; transform: translateY(-4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.find-replace__row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 0;
+}
+
+.find-replace__row--replace {
+  margin-top: 2px;
+}
+
+.find-replace__toggle-replace {
+  background: none;
+  border: none;
+  color: var(--text-tertiary);
+  cursor: pointer;
+  padding: 2px;
+  border-radius: 3px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: transform 0.15s ease, color 0.1s ease;
+  flex-shrink: 0;
+  width: 20px;
+  height: 20px;
+}
+
+.find-replace__toggle-replace--open {
+  transform: rotate(90deg);
+  color: var(--text-secondary);
+}
+
+.find-replace__toggle-replace:hover {
+  color: var(--text-primary);
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.find-replace__replace-spacer {
+  width: 20px;
+  flex-shrink: 0;
+}
+
+.find-replace__input-wrap {
+  flex: 1;
+  position: relative;
+  display: flex;
+  align-items: center;
+  min-width: 0;
+}
+
+.find-replace__input {
+  width: 100%;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 4px;
+  color: var(--text-primary);
+  font-size: 12px;
+  padding: 3px 60px 3px 6px;
+  outline: none;
+  font-family: 'Inter', -apple-system, sans-serif;
+  line-height: 1.4;
+}
+
+.find-replace__input:focus {
+  border-color: var(--accent-primary);
+  box-shadow: 0 0 0 1px var(--accent-primary);
+}
+
+.find-replace__input::placeholder {
+  color: var(--text-tertiary);
+}
+
+.find-replace__input--error {
+  border-color: #f14c4c !important;
+  box-shadow: 0 0 0 1px #f14c4c !important;
+}
+
+.find-replace__match-count {
+  position: absolute;
+  right: 6px;
+  font-size: 10px;
+  color: var(--text-tertiary);
+  pointer-events: none;
+  white-space: nowrap;
+  user-select: none;
+}
+
+.find-replace__match-count--no-results {
+  color: #f14c4c;
+}
+
+.find-replace__toggles {
+  display: flex;
+  gap: 1px;
+}
+
+.find-replace__toggle-btn {
+  background: none;
+  border: 1px solid transparent;
+  color: var(--text-tertiary);
+  cursor: pointer;
+  padding: 2px 5px;
+  border-radius: 3px;
+  font-size: 11px;
+  font-weight: 600;
+  font-family: 'Inter', -apple-system, sans-serif;
+  transition: all 0.1s ease;
+  white-space: nowrap;
+  line-height: 1.4;
+}
+
+.find-replace__toggle-btn:hover {
+  color: var(--text-secondary);
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.find-replace__toggle-btn--active {
+  color: var(--accent-primary);
+  background: rgba(0, 240, 255, 0.1);
+  border-color: rgba(0, 240, 255, 0.2);
+}
+
+.find-replace__nav {
+  display: flex;
+  gap: 1px;
+}
+
+.find-replace__nav-btn {
+  background: none;
+  border: none;
+  color: var(--text-tertiary);
+  cursor: pointer;
+  padding: 3px;
+  border-radius: 3px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.1s ease;
+  width: 22px;
+  height: 22px;
+}
+
+.find-replace__nav-btn:hover {
+  color: var(--text-primary);
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.find-replace__close {
+  background: none;
+  border: none;
+  color: var(--text-tertiary);
+  cursor: pointer;
+  padding: 3px;
+  border-radius: 3px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.1s ease;
+  margin-left: 2px;
+  width: 22px;
+  height: 22px;
+}
+
+.find-replace__close:hover {
+  color: var(--text-primary);
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.find-replace__replace-actions {
+  display: flex;
+  gap: 4px;
+}
+
+.find-replace__replace-btn {
+  background: none;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: var(--text-secondary);
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 3px;
+  cursor: pointer;
+  font-family: 'Inter', -apple-system, sans-serif;
+  transition: all 0.1s ease;
+  white-space: nowrap;
+  line-height: 1.4;
+}
+
+.find-replace__replace-btn:hover:not(:disabled) {
+  color: var(--text-primary);
+  background: rgba(255, 255, 255, 0.06);
+  border-color: rgba(255, 255, 255, 0.15);
+}
+
+.find-replace__replace-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.find-replace__replace-btn--all {
+  font-weight: 500;
 }
 
 /* === Confirm Modal === */
@@ -1886,14 +2027,36 @@
 }
 
 /* Welcome Tab */
-.light .welcome-tab__shortcuts {
-  background: rgba(0, 0, 0, 0.02);
+.light .welcome-tab__content {
+  background: #ffffff;
   border-color: rgba(0, 0, 0, 0.08);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.08);
+}
+
+.light .welcome-tab__icon {
+  color: #0891b2;
+}
+
+.light .welcome-tab__title {
+  color: #1e293b;
+}
+
+.light .welcome-tab__subtitle {
+  color: #64748b;
+}
+
+.light .welcome-tab__shortcuts-title {
+  color: #94a3b8;
 }
 
 .light .welcome-tab__kbd {
-  background: rgba(0, 0, 0, 0.06);
-  border-color: rgba(0, 0, 0, 0.1);
+  background: rgba(0, 0, 0, 0.05);
+  border-color: rgba(0, 0, 0, 0.12);
+  color: #475569;
+}
+
+.light .welcome-tab__action {
+  color: #64748b;
 }
 
 /* Terminal Panel */
@@ -1986,6 +2149,94 @@
 
 .light .quick-open__result:hover {
   background: rgba(0, 0, 0, 0.04);
+}
+
+/* Find & Replace Bar - Light Mode */
+.light .find-replace {
+  background: #ffffff;
+  border-color: rgba(0, 0, 0, 0.1);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.1);
+}
+
+.light .find-replace__input {
+  background: rgba(0, 0, 0, 0.04);
+  border-color: rgba(0, 0, 0, 0.12);
+  color: #1e293b;
+}
+
+.light .find-replace__input:focus {
+  border-color: #0891b2;
+  box-shadow: 0 0 0 1px #0891b2;
+}
+
+.light .find-replace__input::placeholder {
+  color: #94a3b8;
+}
+
+.light .find-replace__input--error {
+  border-color: #dc2626 !important;
+  box-shadow: 0 0 0 1px #dc2626 !important;
+}
+
+.light .find-replace__match-count {
+  color: #94a3b8;
+}
+
+.light .find-replace__match-count--no-results {
+  color: #dc2626;
+}
+
+.light .find-replace__toggle-replace {
+  color: #94a3b8;
+}
+
+.light .find-replace__toggle-replace:hover {
+  color: #1e293b;
+  background: rgba(0, 0, 0, 0.05);
+}
+
+.light .find-replace__toggle-btn {
+  color: #94a3b8;
+}
+
+.light .find-replace__toggle-btn:hover {
+  color: #475569;
+  background: rgba(0, 0, 0, 0.05);
+}
+
+.light .find-replace__toggle-btn--active {
+  color: #0891b2;
+  background: rgba(8, 145, 178, 0.1);
+  border-color: rgba(8, 145, 178, 0.2);
+}
+
+.light .find-replace__nav-btn {
+  color: #94a3b8;
+}
+
+.light .find-replace__nav-btn:hover {
+  color: #1e293b;
+  background: rgba(0, 0, 0, 0.05);
+}
+
+.light .find-replace__close {
+  color: #94a3b8;
+}
+
+.light .find-replace__close:hover {
+  color: #1e293b;
+  background: rgba(0, 0, 0, 0.05);
+}
+
+.light .find-replace__replace-btn {
+  border-color: rgba(0, 0, 0, 0.12);
+  color: #64748b;
+}
+
+.light .find-replace__replace-btn:hover:not(:disabled) {
+  color: #1e293b;
+  background: rgba(0, 0, 0, 0.05);
+  border-color: rgba(0, 0, 0, 0.2);
 }
 
 /* Confirm Modal */
@@ -2143,52 +2394,4 @@
 
 .light .git-tree-panel__commit--selected {
   background: rgba(8, 145, 178, 0.08) !important;
-}
-
-/* ── Light mode: search panel ── */
-.light .code-editor .cm-panel.cm-search {
-  background: #f3f3f3;
-  border-color: rgba(0, 0, 0, 0.1);
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
-}
-
-.light .code-editor .cm-panel.cm-search .cm-textfield,
-.light .code-editor .cm-panel.cm-search input {
-  background: #ffffff;
-  border-color: rgba(0, 0, 0, 0.15);
-  color: #1e293b;
-}
-
-.light .code-editor .cm-panel.cm-search .cm-textfield:focus,
-.light .code-editor .cm-panel.cm-search input:focus {
-  border-color: var(--accent-primary, #0891b2);
-}
-
-.light .code-editor .cm-panel.cm-search .cm-button {
-  background: rgba(0, 0, 0, 0.05);
-  border-color: rgba(0, 0, 0, 0.1);
-  color: #475569;
-}
-
-.light .code-editor .cm-panel.cm-search .cm-button:hover {
-  background: rgba(0, 0, 0, 0.08);
-  color: #1e293b;
-}
-
-.light .code-editor .cm-panel.cm-search label {
-  color: #64748b;
-}
-
-.light .code-editor .cm-panel.cm-search .cm-search-match-count {
-  color: #64748b;
-}
-
-.light .code-editor .cm-searchMatch {
-  background: rgba(255, 180, 0, 0.3) !important;
-  outline: 1px solid rgba(255, 160, 0, 0.5);
-}
-
-.light .code-editor .cm-searchMatch-selected {
-  background: rgba(255, 180, 0, 0.5) !important;
-  outline: 1px solid rgba(255, 140, 0, 0.8);
 }

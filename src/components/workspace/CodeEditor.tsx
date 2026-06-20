@@ -1,10 +1,11 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, forwardRef, useImperativeHandle } from 'react'
 import { EditorState, Compartment } from '@codemirror/state'
-import { EditorView, keymap, lineNumbers, highlightActiveLine } from '@codemirror/view'
+import { EditorView, keymap, lineNumbers, highlightActiveLine, ViewPlugin, Decoration, type ViewUpdate, type PluginValue } from '@codemirror/view'
+import { RangeSetBuilder } from '@codemirror/state'
 import { defaultKeymap, history, historyKeymap, indentWithTab } from '@codemirror/commands'
 import { foldGutter, indentUnit, bracketMatching, indentOnInput } from '@codemirror/language'
 import { autocompletion, closeBrackets, closeBracketsKeymap, completionKeymap } from '@codemirror/autocomplete'
-import { searchKeymap, highlightSelectionMatches } from '@codemirror/search'
+import { search, highlightSelectionMatches, getSearchQuery } from '@codemirror/search'
 import { javascript } from '@codemirror/lang-javascript'
 import { css } from '@codemirror/lang-css'
 import { html } from '@codemirror/lang-html'
@@ -67,6 +68,56 @@ function getPrettierPlugins(parser: string) {
 const themeCompartment = new Compartment()
 const lightOverrideCompartment = new Compartment()
 
+// Custom search highlighter that decorates matches regardless of whether
+// the built-in search panel is open. The default searchHighlighter only
+// highlights when a panel exists, but we use our own FindReplaceBar UI.
+const matchMark = Decoration.mark({ class: 'cm-searchMatch' })
+const selectedMatchMark = Decoration.mark({ class: 'cm-searchMatch cm-searchMatch-selected' })
+
+const customSearchHighlighter = ViewPlugin.fromClass(class implements PluginValue {
+  decorations: ReturnType<typeof Decoration.set>
+
+  constructor(view: EditorView) {
+    this.decorations = this.buildDecorations(view)
+  }
+
+  update(update: ViewUpdate) {
+    if (update.docChanged || update.selectionSet || update.viewportChanged) {
+      this.decorations = this.buildDecorations(update.view)
+    }
+  }
+
+  buildDecorations(view: EditorView) {
+    const query = getSearchQuery(view.state)
+    if (!query.search || !query.valid) return Decoration.none
+
+    const sel = view.state.selection.main
+    const builder = new RangeSetBuilder<Decoration>()
+
+    for (const { from, to } of view.visibleRanges) {
+      let cursor: Iterator<{ from: number; to: number }> | null = null
+      try {
+        cursor = query.getCursor(view.state, from, to)
+      } catch {
+        continue
+      }
+      while (true) {
+        const result = cursor.next()
+        if (result.done) break
+        const { from: mFrom, to: mTo } = result.value
+        const isSelected = mFrom <= sel.from && mTo >= sel.to && sel.from !== sel.to
+          ? mFrom <= sel.head && mTo >= sel.head
+          : mFrom === sel.from && mTo === sel.to
+        builder.add(mFrom, mTo, isSelected ? selectedMatchMark : matchMark)
+      }
+    }
+
+    return builder.finish()
+  }
+}, {
+  decorations: (v) => v.decorations,
+})
+
 const LIGHT_THEME_OVERRIDE = EditorView.theme({
   '&': { backgroundColor: '#ffffff', color: '#1e293b' },
   '.cm-gutters': { backgroundColor: '#f8f8fa', color: '#94a3b8', borderRight: '1px solid rgba(0,0,0,0.06)' },
@@ -98,7 +149,13 @@ const LIGHT_THEME_OVERRIDE = EditorView.theme({
   '.cm-link': { color: '#4078f2' },
   '.cm-url': { color: '#0284c7' },
   '.cm-processingInstruction': { color: '#a626a4' },
+  '.cm-searchMatch': { backgroundColor: 'rgba(8, 145, 178, 0.25) !important' },
+  '.cm-searchMatch-selected': { backgroundColor: 'rgba(8, 145, 178, 0.5) !important' },
 }, { dark: false })
+
+export interface CodeEditorHandle {
+  getView: () => EditorView | null
+}
 
 interface CodeEditorProps {
   file: OpenFile
@@ -135,12 +192,17 @@ function getLanguageExtension(path: string) {
   return []
 }
 
-export function CodeEditor({ file, onChange, onSave, editorTheme = 'catppuccin-mocha', isLightMode = false }: CodeEditorProps) {
+export const CodeEditor = forwardRef<CodeEditorHandle, CodeEditorProps>(
+  function CodeEditor({ file, onChange, onSave, editorTheme = 'catppuccin-mocha', isLightMode = false }, ref) {
   const containerRef = useRef<HTMLDivElement>(null)
   const viewRef = useRef<EditorView | null>(null)
   const isUpdating = useRef(false)
   const onChangeRef = useRef(onChange)
   const onSaveRef = useRef(onSave)
+
+  useImperativeHandle(ref, () => ({
+    getView: () => viewRef.current,
+  }), [])
 
   onChangeRef.current = onChange
   onSaveRef.current = onSave
@@ -183,6 +245,8 @@ export function CodeEditor({ file, onChange, onSave, editorTheme = 'catppuccin-m
         indentUnit.of('  '),
         history(),
         highlightSelectionMatches(),
+        search(),
+        customSearchHighlighter,
         autocompletion(),
         themeCompartment.of(getThemeExtension(editorTheme)),
         lightOverrideCompartment.of((isLightMode && !getThemeInfo(editorTheme).isLight) ? LIGHT_THEME_OVERRIDE : []),
@@ -190,7 +254,6 @@ export function CodeEditor({ file, onChange, onSave, editorTheme = 'catppuccin-m
         keymap.of([
           ...closeBracketsKeymap,
           ...defaultKeymap,
-          ...searchKeymap,
           ...historyKeymap,
           ...completionKeymap,
           indentWithTab,
@@ -211,6 +274,8 @@ export function CodeEditor({ file, onChange, onSave, editorTheme = 'catppuccin-m
         EditorView.theme({
           '&': { height: '100%', width: '100%', fontSize: '15px' },
           '.cm-scroller': { overflow: 'auto' },
+          '.cm-searchMatch': { backgroundColor: 'rgba(0, 240, 255, 0.25) !important' },
+          '.cm-searchMatch-selected': { backgroundColor: 'rgba(0, 240, 255, 0.55) !important' },
         }),
       ],
     })
@@ -265,4 +330,5 @@ export function CodeEditor({ file, onChange, onSave, editorTheme = 'catppuccin-m
   return (
     <div className="code-editor" ref={containerRef} />
   )
-}
+  }
+)

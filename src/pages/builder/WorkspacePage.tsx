@@ -1,18 +1,17 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
-import { EditorView } from '@codemirror/view'
-import { openSearchPanel } from '@codemirror/search'
 import { useWorkspace } from '../../hooks/useWorkspace'
 import { useSettings } from '../../hooks/useSettings'
 import { useTheme } from '../../hooks/useTheme'
 import { getThemeInfo } from '../../utils/editorThemes'
 import { FileExplorer } from '../../components/workspace/FileExplorer'
 import { EditorTabs } from '../../components/workspace/EditorTabs'
-import { CodeEditor } from '../../components/workspace/CodeEditor'
+import { CodeEditor, type CodeEditorHandle } from '../../components/workspace/CodeEditor'
 import { WelcomeTab } from '../../components/workspace/WelcomeTab'
 import { TerminalPanel } from '../../components/workspace/TerminalPanel'
 import { StatusBar } from '../../components/workspace/StatusBar'
 import { PanelResizeHandle } from '../../components/workspace/PanelResizeHandle'
 import { QuickOpen } from '../../components/workspace/QuickOpen'
+import { FindReplaceBar } from '../../components/workspace/FindReplaceBar'
 
 interface WorkspacePageProps {
   projectId: string
@@ -34,6 +33,10 @@ export function WorkspacePage({ projectId, projectName, workspacePath, pendingFi
   const [explorerWidth, setExplorerWidth] = useState(250)
   const [terminalHeight, setTerminalHeight] = useState(200)
   const [showQuickOpen, setShowQuickOpen] = useState(false)
+  const [showFindReplace, setShowFindReplace] = useState(false)
+  const [findReplaceMode, setFindReplaceMode] = useState<'find' | 'replace'>('find')
+  const [findReplaceInitialText, setFindReplaceInitialText] = useState('')
+  const editorHandleRef = useRef<CodeEditorHandle>(null)
 
   // Handle file open requests from other tabs (e.g., Dependencies)
   useEffect(() => {
@@ -100,17 +103,37 @@ export function WorkspacePage({ projectId, projectName, workspacePath, pendingFi
       setShowQuickOpen(true)
     } else if (ctrl && e.key === 'f') {
       e.preventDefault()
-      // Focus the editor and open CodeMirror's search panel
-      const editorEl = document.querySelector('.code-editor .cm-editor')
-      if (editorEl) {
-        const view = EditorView.find(editorEl as HTMLElement)
-        if (view) {
-          view.focus()
-          openSearchPanel(view)
-        }
+      if (showFindReplace && findReplaceMode === 'find') {
+        setShowFindReplace(false)
+      } else {
+        const view = editorHandleRef.current?.getView()
+        const selectedText = view ? view.state.sliceDoc(
+          view.state.selection.main.from,
+          view.state.selection.main.to
+        ) : ''
+        setFindReplaceInitialText(selectedText)
+        setFindReplaceMode('find')
+        setShowFindReplace(true)
       }
+    } else if (ctrl && e.key === 'h') {
+      e.preventDefault()
+      if (showFindReplace && findReplaceMode === 'replace') {
+        setShowFindReplace(false)
+      } else {
+        const view = editorHandleRef.current?.getView()
+        const selectedText = view ? view.state.sliceDoc(
+          view.state.selection.main.from,
+          view.state.selection.main.to
+        ) : ''
+        setFindReplaceInitialText(selectedText)
+        setFindReplaceMode('replace')
+        setShowFindReplace(true)
+      }
+    } else if (e.key === 'Escape' && showFindReplace) {
+      e.preventDefault()
+      setShowFindReplace(false)
     }
-  }, [ws])
+  }, [ws, showFindReplace, findReplaceMode])
 
   useEffect(() => {
     window.addEventListener('keydown', handleKeyDown)
@@ -163,6 +186,7 @@ export function WorkspacePage({ projectId, projectName, workspacePath, pendingFi
           <div className="workspace-ide__editor-content">
             {ws.activeFile ? (
               <CodeEditor
+                ref={editorHandleRef}
                 file={ws.activeFile}
                 onChange={(content) => {
                   ws.updateFileContent(ws.activeFile!.path, content)
@@ -177,6 +201,14 @@ export function WorkspacePage({ projectId, projectName, workspacePath, pendingFi
               />
             ) : (
               <WelcomeTab projectName={projectName} />
+            )}
+            {showFindReplace && ws.activeFile && (
+              <FindReplaceBar
+                editorHandle={editorHandleRef}
+                onClose={() => setShowFindReplace(false)}
+                initialSearchText={findReplaceInitialText}
+                initialReplaceVisible={findReplaceMode === 'replace'}
+              />
             )}
           </div>
         </div>
