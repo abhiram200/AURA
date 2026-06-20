@@ -33,7 +33,8 @@ function maskApiKey(key: string): string {
 }
 
 function isMasked(value: string): boolean {
-  return value.includes('...')
+  // Match the mask format: 4+ chars + "..." + 4+ chars, or the short-key mask "****"
+  return /^.{4,}\.\.\..{4,}$/.test(value) || value === '****'
 }
 
 export function createSettingsRouter(store: FileStore) {
