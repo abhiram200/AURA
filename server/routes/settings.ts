@@ -152,5 +152,42 @@ export function createSettingsRouter(store: FileStore) {
     }
   })
 
+  // Test Ollama API Key — validates key against Ollama cloud
+  router.post('/test-api-key', async (req, res) => {
+    const { apiKey } = req.body as { apiKey?: string }
+    if (!apiKey || !apiKey.trim()) {
+      res.json({ valid: false, error: 'No API key provided' })
+      return
+    }
+    try {
+      const response = await fetch('https://ollama.com/api/web_search', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${apiKey.trim()}`,
+        },
+        body: JSON.stringify({ query: 'test', max_results: 1 }),
+        signal: AbortSignal.timeout(10000),
+      })
+      if (response.status === 401 || response.status === 403) {
+        res.json({ valid: false, error: 'Invalid API key' })
+      } else if (response.status === 429) {
+        // Key is valid but rate-limited — still counts as valid
+        res.json({ valid: true })
+      } else if (response.ok) {
+        res.json({ valid: true })
+      } else {
+        res.json({ valid: false, error: `Unexpected response: ${response.status} ${response.statusText}` })
+      }
+    } catch (err) {
+      let message = 'Connection failed'
+      if (err instanceof Error) {
+        if (err.message.includes('abort') || err.message.includes('timeout')) message = 'Connection timed out'
+        else message = err.message
+      }
+      res.json({ valid: false, error: message })
+    }
+  })
+
   return router
 }
