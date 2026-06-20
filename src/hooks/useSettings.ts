@@ -23,6 +23,7 @@ export interface AppSettings {
   defaultEmbeddingModel: string | null
   ollamaBaseUrl: string
   ollamaApiKey: string
+  hasEnvApiKey: boolean
   codeEditorTheme: string
   autoSave: boolean
 }
@@ -43,6 +44,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   defaultEmbeddingModel: null,
   ollamaBaseUrl: '',
   ollamaApiKey: '',
+  hasEnvApiKey: false,
   codeEditorTheme: 'catppuccin-mocha',
   autoSave: false,
 }

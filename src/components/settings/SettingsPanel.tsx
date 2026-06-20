@@ -346,6 +346,10 @@ export function SettingsPanel({
                         <span className="ollama-url-feedback" style={{ color: 'var(--accent-primary, #4ade80)' }}>
                           ✓ Key configured
                         </span>
+                      ) : settings.hasEnvApiKey ? (
+                        <span className="ollama-url-feedback" style={{ color: 'var(--accent-primary, #4ade80)' }}>
+                          ✓ Using environment key
+                        </span>
                       ) : (
                         <span className="ollama-url-feedback" style={{ color: 'var(--text-muted, #888)' }}>
                           ✗ No key set — web search will be limited

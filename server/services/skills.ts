@@ -219,6 +219,10 @@ export class SkillsService {
 
   async executeBuiltin(action: string, args: Record<string, unknown>): Promise<string> {
     if (action === 'search_web') {
+      // Refresh the API key from settings before each search
+      const settings = await this.store.read<{ ollamaApiKey?: string }>('settings.json')
+      this.webSearch.setApiKey(settings?.ollamaApiKey)
+
       const result = await this.webSearch.search({
         query: args.query,
         url: args.url,

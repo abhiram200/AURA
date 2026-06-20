@@ -36,6 +36,12 @@ export class WebSearchService {
     this.apiKey = WebSearchService.resolveApiKey(apiKey)
   }
 
+  /** Update the API key (e.g. after settings change) */
+  setApiKey(apiKey?: string): void {
+    this.apiKey = WebSearchService.resolveApiKey(apiKey)
+    this.rateLimitHit = false
+  }
+
   // ── Main entry point ────────────────────────────────────────────────────────
 
   async search(args: {

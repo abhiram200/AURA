@@ -89,6 +89,7 @@ export function createSettingsRouter(store: FileStore) {
     const clientSettings = {
       ...settings,
       ollamaApiKey: maskApiKey(settings.ollamaApiKey || ''),
+      hasEnvApiKey: !!process.env.OLLAMA_API_KEY,
     }
     res.json(clientSettings)
   })
@@ -118,6 +119,7 @@ export function createSettingsRouter(store: FileStore) {
     const clientMerged = {
       ...merged,
       ollamaApiKey: maskApiKey(merged.ollamaApiKey || ''),
+      hasEnvApiKey: !!process.env.OLLAMA_API_KEY,
     }
     res.json(clientMerged)
   })
