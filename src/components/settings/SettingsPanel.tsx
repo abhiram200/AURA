@@ -486,9 +486,10 @@ export function SettingsPanel({
                         </Tooltip>
                       </div>
                       <ModelSelection
-                        models={models.filter(m => m.isVision)}
+                        models={models}
                         defaultModel={settings.defaultVisionModel ?? ''}
                         onDefaultModelChange={(model) => onSettingsChange({ defaultVisionModel: model || null })}
+                        filterEmbedding
                       />
                     </div>
                     <div className="settings-modal-section">
