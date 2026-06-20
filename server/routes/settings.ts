@@ -114,7 +114,11 @@ export function createSettingsRouter(store: FileStore) {
       }
     }
     await store.write('settings.json', merged)
-    res.json(merged)
+    const clientMerged = {
+      ...merged,
+      ollamaApiKey: maskApiKey(merged.ollamaApiKey || ''),
+    }
+    res.json(clientMerged)
   })
 
   // Test Ollama connectivity — proxies the request to avoid CORS issues
