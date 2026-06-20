@@ -103,6 +103,7 @@ export interface Settings {
   defaultProjectModel: string | null
   defaultEmbeddingModel: string | null
   ollamaBaseUrl: string   // empty = use http://localhost:11434
+  ollamaApiKey: string    // empty = fall back to process.env.OLLAMA_API_KEY
   codeEditorTheme: string
   autoSave: boolean
 }

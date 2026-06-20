@@ -68,6 +68,7 @@ async function start() {
     defaultProjectModel: null,
     defaultEmbeddingModel: null,
     ollamaBaseUrl: '',
+    ollamaApiKey: '',
   }
   const existingSettings = await store.read('settings.json')
   if (!existingSettings) {

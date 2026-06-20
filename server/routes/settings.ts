@@ -22,8 +22,18 @@ const DEFAULT_SETTINGS: Settings = {
   defaultProjectModel: null,
   defaultEmbeddingModel: null,
   ollamaBaseUrl: '',
+  ollamaApiKey: '',
   codeEditorTheme: 'catppuccin-mocha',
   autoSave: false,
+}
+
+function maskApiKey(key: string): string {
+  if (!key || key.length < 8) return key ? '****' : ''
+  return key.slice(0, 4) + '...' + key.slice(-4)
+}
+
+function isMasked(value: string): boolean {
+  return value.includes('...')
 }
 
 export function createSettingsRouter(store: FileStore) {
@@ -66,16 +76,28 @@ export function createSettingsRouter(store: FileStore) {
       settings.ollamaBaseUrl = ''
       await store.write('settings.json', settings)
     }
+    if (settings.ollamaApiKey === undefined) {
+      settings.ollamaApiKey = ''
+      await store.write('settings.json', settings)
+    }
     // Migration: remove deprecated builderContextWindowSize (builder now uses contextWindowSize from the slider)
     if ('builderContextWindowSize' in settings) {
       delete (settings as Record<string, unknown>).builderContextWindowSize
       await store.write('settings.json', settings)
     }
-    res.json(settings)
+    const clientSettings = {
+      ...settings,
+      ollamaApiKey: maskApiKey(settings.ollamaApiKey || ''),
+    }
+    res.json(clientSettings)
   })
 
   router.put('/', async (req, res) => {
     const updates = req.body as Partial<Settings>
+    // If the client sent a masked API key back, preserve the existing one
+    if (isMasked(updates.ollamaApiKey ?? '')) {
+      delete updates.ollamaApiKey
+    }
     // Normalize bare host:port → http://host:port
     if (updates.ollamaBaseUrl && !/^https?:\/\//i.test(updates.ollamaBaseUrl)) {
       updates.ollamaBaseUrl = `http://${updates.ollamaBaseUrl}`
