@@ -286,6 +286,7 @@ export function SettingsPanel({
                         <input
                           className="folder-picker__input"
                           type={apiKeyVisible ? 'text' : 'password'}
+                          autoComplete="off"
                           value={apiKeyInput}
                           onChange={(e) => {
                             setApiKeyInput(e.target.value)
@@ -341,11 +342,7 @@ export function SettingsPanel({
                           {apiKeyTestResult === 'testing' ? '' : '↗'}
                         </button>
                       </div>
-                      {!apiKeyInput.trim() && settings.ollamaApiKey ? (
-                        <span className="ollama-url-feedback" style={{ color: 'var(--accent-primary, #4ade80)' }}>
-                          ✓ Key configured (from .env)
-                        </span>
-                      ) : apiKeyInput.trim() ? (
+                      {settings.ollamaApiKey || apiKeyInput.trim() ? (
                         <span className="ollama-url-feedback" style={{ color: 'var(--accent-primary, #4ade80)' }}>
                           ✓ Key configured
                         </span>
