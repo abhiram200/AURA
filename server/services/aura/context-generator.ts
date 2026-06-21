@@ -10,52 +10,26 @@ import type {
   ContextManifest,
 } from './types.ts'
 import { AuraNodeKind, AuraEdgeType } from './types.ts'
+import type { OllamaService } from '../../ollama.ts'
 
 const CHAT_TIMEOUT = 30000
 const MAX_CONCURRENT = 3
-const AVAILABILITY_CACHE_MS = 60000
 const CONTEXT_CACHE_MAX = 50
 
 export class ContextGenerator {
-  private ollamaBaseUrl: string
+  private ollama: OllamaService
   private chatModel: string
   private available = false
-  private lastAvailabilityCheck = 0
-  private availabilityCacheResult = false
   private contextCache = new Map<string, string>()
 
-  constructor(ollamaBaseUrl?: string, chatModel?: string) {
-    this.ollamaBaseUrl = ollamaBaseUrl || process.env.OLLAMA_BASE_URL || 'http://localhost:11434'
-    this.chatModel = chatModel || process.env.OLLAMA_MODEL || 'glm-5.1:cloud'
+  constructor(ollama: OllamaService, chatModel?: string) {
+    this.ollama = ollama
+    this.chatModel = chatModel || 'glm-5.1:cloud'
   }
 
   async checkAvailability(): Promise<boolean> {
-    const now = Date.now()
-    if (now - this.lastAvailabilityCheck < AVAILABILITY_CACHE_MS) {
-      return this.availabilityCacheResult
-    }
-
-    try {
-      const res = await fetch(`${this.ollamaBaseUrl}/api/tags`, {
-        signal: AbortSignal.timeout(5000),
-      })
-      if (!res.ok) {
-        this.availabilityCacheResult = false
-        this.lastAvailabilityCheck = now
-        return false
-      }
-      const data = await res.json() as { models?: Array<{ name: string }> }
-      const modelExists = (data.models ?? []).some(
-        m => m.name.startsWith(this.chatModel.split(':')[0]),
-      )
-      this.availabilityCacheResult = modelExists
-      this.lastAvailabilityCheck = now
-      return modelExists
-    } catch {
-      this.availabilityCacheResult = false
-      this.lastAvailabilityCheck = now
-      return false
-    }
+    this.available = await this.ollama.checkAvailability(this.chatModel)
+    return this.available
   }
 
   async generateContexts(
@@ -192,7 +166,7 @@ export class ContextGenerator {
     }
     const data = this.gatherFolderData(graph, folderPath, depMap)
     const messages = this.buildPrompt(data)
-    const llmSummary = await this.callOllama(messages)
+    const llmSummary = await this.ollama.chatSimple(this.chatModel, messages, { timeout: CHAT_TIMEOUT })
     if (!llmSummary) return null
     return this.formatContextMarkdown(data, llmSummary)
   }
@@ -203,7 +177,7 @@ export class ContextGenerator {
   ): Promise<string | null> {
     const projectData = this.gatherProjectData(graph, depMap)
     const messages = this.buildRootPrompt(projectData)
-    const llmSummary = await this.callOllama(messages)
+    const llmSummary = await this.ollama.chatSimple(this.chatModel, messages, { timeout: CHAT_TIMEOUT })
     if (!llmSummary) return null
     // Ensure proper header
     if (llmSummary.trimStart().startsWith('# ')) {
@@ -629,36 +603,6 @@ API calls: ${apiCallsDesc}
 Total symbols: ${data.symbolCount}, Total edges: ${data.edgeCount}`,
       },
     ]
-  }
-
-  // ── Ollama Chat API ──────────────────────────────────────────────────────────
-
-  private async callOllama(
-    messages: Array<{ role: string; content: string }>,
-  ): Promise<string | null> {
-    try {
-      const res = await fetch(`${this.ollamaBaseUrl}/api/chat`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          model: this.chatModel,
-          messages,
-          stream: false,
-        }),
-        signal: AbortSignal.timeout(CHAT_TIMEOUT),
-      })
-      if (!res.ok) {
-        // Invalidate availability cache so next check is live
-        this.lastAvailabilityCheck = 0
-        return null
-      }
-      const data = await res.json() as { message?: { content?: string } }
-      return data.message?.content ?? null
-    } catch {
-      // Invalidate availability cache so next check is live
-      this.lastAvailabilityCheck = 0
-      return null
-    }
   }
 
   // ── Output Formatting ───────────────────────────────────────────────────────
