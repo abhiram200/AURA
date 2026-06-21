@@ -27,6 +27,7 @@ import { BM25SearchEngine } from './search/bm25.ts'
 import { EmbeddingService } from './search/embedding.ts'
 import { ContextGenerator } from './context-generator.ts'
 import { ProcessTracer } from './process-tracer.ts'
+import type { OllamaService } from '../ollama.ts'
 
 const execFileAsync = (cmd: string, args: string[], options: import('child_process').ExecFileOptions) =>
   new Promise<{ stdout: string; stderr: string }>((resolve, reject) => {
@@ -59,9 +60,9 @@ export class AuraIndexer {
     message: 'Idle',
   }
   private listeners: Set<StatusListener> = new Set()
-  private config: { ollamaBaseUrl?: string; chatModel?: string; embedModel?: string }
+  private config: { ollama: OllamaService; chatModel?: string; embedModel?: string }
 
-  constructor(projectPath: string, config?: { ollamaBaseUrl?: string; chatModel?: string; embedModel?: string }) {
+  constructor(projectPath: string, config?: { ollama: OllamaService; chatModel?: string; embedModel?: string }) {
     this.projectPath = projectPath
     this.parser = new AuraParser()
     this.config = config ?? {}
@@ -232,7 +233,7 @@ export class AuraIndexer {
       this.bm25Engine.buildIndex(this.graph.nodes)
 
       this.updateStatus('searchIndexing', 0.3, filePaths.length, filePaths.length, this.graph.nodes.length, this.graph.edges.length, 'Generating embeddings...')
-      this.embeddingService = new EmbeddingService(this.config.ollamaBaseUrl, this.config.embedModel)
+      this.embeddingService = new EmbeddingService(this.config.ollama, this.config.embedModel)
 
       // Run embeddings first, then context generation — avoids overwhelming Ollama with concurrent requests
       const EMBEDDING_TIMEOUT = 120_000 // 2 minute timeout for all embeddings
@@ -247,7 +248,7 @@ export class AuraIndexer {
       ])
 
       this.updateStatus('searchIndexing', 0.8, filePaths.length, filePaths.length, this.graph.nodes.length, this.graph.edges.length, embeddingAvailable ? 'Embeddings complete, generating context files...' : 'Embeddings timed out, generating context files...')
-      this.contextGenerator = new ContextGenerator(this.config.ollamaBaseUrl, this.config.chatModel)
+      this.contextGenerator = new ContextGenerator(this.config.ollama, this.config.chatModel)
       await this.generateContextsInternal(filePaths.length)
 
       if (!embeddingAvailable) {
@@ -2058,13 +2059,13 @@ export class AuraIndexer {
     this.bm25Engine.buildIndex(this.graph.nodes)
 
     this.updateStatus('searchIndexing', 0.3, reparseList.length, reparseList.length, this.graph.nodes.length, this.graph.edges.length, 'Incremental: generating embeddings...')
-    this.embeddingService = this.embeddingService ?? new EmbeddingService(this.config.ollamaBaseUrl, this.config.embedModel)
+    this.embeddingService = this.embeddingService ?? new EmbeddingService(this.config.ollama, this.config.embedModel)
     // Remove embeddings for re-parsed nodes, then regenerate
     this.embeddingService.removeNodes(new Set(reparseList))
     await this.embeddingService.generateEmbeddings(this.graph.nodes)
 
     // Regenerate context files for changed folders only
-    this.contextGenerator = this.contextGenerator ?? new ContextGenerator(this.config.ollamaBaseUrl, this.config.chatModel)
+    this.contextGenerator = this.contextGenerator ?? new ContextGenerator(this.config.ollama, this.config.chatModel)
     const changedFolders = this.getChangedFolders(reparseList)
     if (changedFolders.length > 0) {
       this.updateStatus('searchIndexing', 0.6, reparseList.length, reparseList.length, this.graph.nodes.length, this.graph.edges.length, 'Incremental: regenerating context files...')

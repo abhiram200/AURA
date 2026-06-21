@@ -39,6 +39,7 @@ import { BM25SearchEngine } from './search/bm25.ts'
 import { EmbeddingService } from './search/embedding.ts'
 import { HybridSearchEngine } from './search/hybrid.ts'
 import { ContextGenerator } from './context-generator.ts'
+import type { OllamaService } from '../ollama.ts'
 
 type AdjacencyEntry = { edge: AuraEdge; neighbor: AuraNode }
 
@@ -69,7 +70,7 @@ function scoreToSeverity(score: number): 'critical' | 'moderate' | 'low' {
 
 export class AuraQueryService {
   private projectPath: string
-  private config: { ollamaBaseUrl?: string; chatModel?: string; embedModel?: string }
+  private config: { ollama: OllamaService; chatModel?: string; embedModel?: string }
   private loaded = false
   private graphData: GraphData = { nodes: [], edges: [] }
   private metaData: AuraMeta | null = null
@@ -83,7 +84,7 @@ export class AuraQueryService {
   private embeddingService: EmbeddingService | null = null
   private hybridEngine: HybridSearchEngine | null = null
   private contextManifest: ContextManifest | null = null
-  constructor(projectPath: string, config?: { ollamaBaseUrl?: string; chatModel?: string; embedModel?: string }) {
+  constructor(projectPath: string, config?: { ollama: OllamaService; chatModel?: string; embedModel?: string }) {
     this.projectPath = projectPath
     this.config = config ?? {}
   }
@@ -166,18 +167,18 @@ export class AuraQueryService {
       try {
         const raw = await fs.readFile(embeddingsPath, 'utf-8')
         const data = JSON.parse(raw)
-        this.embeddingService = EmbeddingService.fromJSON(data, this.nodeMap, this.config.ollamaBaseUrl, this.config.embedModel)
+        this.embeddingService = EmbeddingService.fromJSON(data, this.nodeMap, this.config.ollama, this.config.embedModel)
       } catch {
         this.embeddingService = null
       }
     }
 
     if (this.bm25Engine || this.embeddingService) {
-      this.hybridEngine = new HybridSearchEngine(this.bm25Engine, this.embeddingService ?? new EmbeddingService(this.config.ollamaBaseUrl, this.config.embedModel))
+      this.hybridEngine = new HybridSearchEngine(this.bm25Engine, this.embeddingService ?? new EmbeddingService(this.config.ollama, this.config.embedModel))
     }
 
     // Load context manifest
-    const contextGen = new ContextGenerator(this.config.ollamaBaseUrl, this.config.chatModel)
+    const contextGen = new ContextGenerator(this.config.ollama, this.config.chatModel)
     this.contextManifest = contextGen.loadManifest(this.projectPath)
 
     this.loaded = true
@@ -436,7 +437,7 @@ export class AuraQueryService {
     this.bm25Engine = bm25
     this.embeddingService = embedding
     if (bm25 || embedding) {
-      this.hybridEngine = new HybridSearchEngine(bm25, embedding ?? new EmbeddingService(this.config.ollamaBaseUrl, this.config.embedModel))
+      this.hybridEngine = new HybridSearchEngine(bm25, embedding ?? new EmbeddingService(this.config.ollama, this.config.embedModel))
     } else {
       this.hybridEngine = null
     }
@@ -447,12 +448,12 @@ export class AuraQueryService {
   }
 
   getContextForFolder(folderPath: string): string | null {
-    const contextGen = new ContextGenerator(this.config.ollamaBaseUrl, this.config.chatModel)
+    const contextGen = new ContextGenerator(this.config.ollama, this.config.chatModel)
     return contextGen.getContextForFolder(this.projectPath, folderPath)
   }
 
   getAllFolderContexts(): Record<string, string> {
-    const contextGen = new ContextGenerator(this.config.ollamaBaseUrl, this.config.chatModel)
+    const contextGen = new ContextGenerator(this.config.ollama, this.config.chatModel)
     return contextGen.getAllContexts(this.projectPath)
   }
 
