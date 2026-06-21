@@ -10,7 +10,7 @@ export class OllamaService {
 
   constructor(store: FileStore, fallbackUrl?: string) {
     this.store = store
-    this.fallbackUrl = fallbackUrl || process.env.OLLAMA_URL ?? 'http://localhost:11434'
+    this.fallbackUrl = fallbackUrl || process.env.OLLAMA_URL || 'http://localhost:11434'
   }
 
   // ── Dynamic URL resolution ──────────────────────────────────────────────────
