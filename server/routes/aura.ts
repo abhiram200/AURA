@@ -5,6 +5,7 @@ import type { ProjectService } from '../services/project.ts'
 import type { GroupService } from '../services/group.ts'
 import type { FileStore } from '../storage/fileStore.ts'
 import type { Settings } from '../storage/types.ts'
+import { OllamaService } from '../services/ollama.ts'
 
 // Lazy-imported services — instantiated per project on demand
 import { AuraIndexer } from '../services/aura/indexer.ts'
@@ -50,17 +51,15 @@ export function createAuraRouter(
   dataDir: string,
   store: FileStore,
   managedShellService: ManagedShellService,
+  ollama: OllamaService,
 ): Router {
   const router = Router()
 
   async function getAuraConfig() {
     const settings = await store.read<Settings>('settings.json')
     return {
-      ollamaBaseUrl: (() => {
-        const raw = (settings?.ollamaBaseUrl?.trim() || process.env.OLLAMA_BASE_URL || 'http://localhost:11434')
-        return /^https?:\/\//i.test(raw) ? raw : `http://${raw}`
-      })(),
-      chatModel: settings?.defaultProjectModel || settings?.defaultModel || process.env.OLLAMA_MODEL || 'glm-5.1:cloud',
+      ollama,
+      chatModel: OllamaService.resolveModel(settings),
       embedModel: settings?.defaultEmbeddingModel || 'mxbai-embed-large:335m',
       contextWindow: settings?.contextWindowSize || 200_000,
       apiKey: settings?.ollamaApiKey || undefined,
@@ -986,7 +985,7 @@ export function createAuraRouter(
     // Get chat ID for compaction persistence (best-effort — may not exist yet)
     const chatSession = await chatService.get(project.workspacePath)
     const chatId = chatSession?.id ?? null
-    const agent = new AuraAgent(qs, project.workspacePath, config.ollamaBaseUrl, config.chatModel, config.contextWindow, managedShellService, projectId, chatService, chatId, config.apiKey)
+    const agent = new AuraAgent(qs, project.workspacePath, ollama, config.chatModel, config.contextWindow, managedShellService, projectId, chatService, chatId, config.apiKey)
 
     // JSON mode — collect all SSE events and return a single response
     if (mode === 'json') {
@@ -1119,7 +1118,7 @@ export function createAuraRouter(
 
     const config = await getAuraConfig()
     const { AuraAgent } = await import('../services/aura/agent.ts')
-    const estimate = AuraAgent.estimateSystemTokens(qs, project.workspacePath, config.ollamaBaseUrl, config.chatModel)
+    const estimate = AuraAgent.estimateSystemTokens(qs, project.workspacePath)
 
     res.json({
       systemTokens: estimate,

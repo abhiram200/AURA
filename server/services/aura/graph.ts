@@ -84,9 +84,9 @@ export class AuraQueryService {
   private embeddingService: EmbeddingService | null = null
   private hybridEngine: HybridSearchEngine | null = null
   private contextManifest: ContextManifest | null = null
-  constructor(projectPath: string, config?: { ollama: OllamaService; chatModel?: string; embedModel?: string }) {
+  constructor(projectPath: string, config: { ollama: OllamaService; chatModel?: string; embedModel?: string }) {
     this.projectPath = projectPath
-    this.config = config ?? {}
+    this.config = config
   }
 
   async load(): Promise<void> {

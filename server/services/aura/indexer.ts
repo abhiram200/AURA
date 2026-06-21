@@ -62,10 +62,10 @@ export class AuraIndexer {
   private listeners: Set<StatusListener> = new Set()
   private config: { ollama: OllamaService; chatModel?: string; embedModel?: string }
 
-  constructor(projectPath: string, config?: { ollama: OllamaService; chatModel?: string; embedModel?: string }) {
+  constructor(projectPath: string, config: { ollama: OllamaService; chatModel?: string; embedModel?: string }) {
     this.projectPath = projectPath
     this.parser = new AuraParser()
-    this.config = config ?? {}
+    this.config = config
   }
 
   async scan(): Promise<string[]> {

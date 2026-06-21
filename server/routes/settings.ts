@@ -1,4 +1,5 @@
 import { Router } from 'express'
+import { OllamaService } from '../services/ollama.ts'
 import type { FileStore } from '../storage/fileStore.ts'
 import type { Settings, UserPreferences } from '../storage/types.ts'
 
@@ -38,7 +39,7 @@ function isMasked(value: string): boolean {
   return /^.{4,}\.\.\..{4,}$/.test(value) || value === '****'
 }
 
-export function createSettingsRouter(store: FileStore) {
+export function createSettingsRouter(store: FileStore, ollama: OllamaService) {
   const router = Router()
 
   router.get('/', async (_req, res) => {
@@ -132,18 +133,13 @@ export function createSettingsRouter(store: FileStore) {
   // Test Ollama connectivity — proxies the request to avoid CORS issues
   router.post('/test-ollama', async (req, res) => {
     const { url } = req.body as { url?: string }
-    const testUrl = url?.trim() || 'http://localhost:11434'
-    // Normalize bare host:port → http://host:port
-    const normalized = /^https?:\/\//i.test(testUrl) ? testUrl : `http://${testUrl}`
     try {
-      const resp = await fetch(`${normalized}/api/tags`, { signal: AbortSignal.timeout(5000) })
-      if (resp.ok) {
-        const data = await resp.json()
-        const modelCount = data?.models?.length ?? 0
-        res.json({ ok: true, modelCount, url: normalized })
-      } else {
-        res.json({ ok: false, error: `HTTP ${resp.status} ${resp.statusText}`, url: normalized })
-      }
+      // If a custom URL is provided, create a temporary service for testing
+      const testService = url?.trim()
+        ? new OllamaService(store, url.trim())
+        : ollama
+      const models = await testService.listModels()
+      res.json({ ok: true, modelCount: models.length })
     } catch (err: unknown) {
       let message = 'Connection failed'
       if (err instanceof Error) {
@@ -156,6 +152,7 @@ export function createSettingsRouter(store: FileStore) {
         else if (cause?.message) message = cause.message
         else message = err.message
       }
+      const normalized = url?.trim() ? OllamaService.resolveBaseUrl(url) : undefined
       res.json({ ok: false, error: message, url: normalized })
     }
   })

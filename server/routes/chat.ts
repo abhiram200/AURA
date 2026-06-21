@@ -439,16 +439,15 @@ export function createChatRouter(
         try {
           const conv = await conversationService.get(conversationId)
           if (conv && conv.title === 'New Conversation') {
-            const titleResponse = await ollama.chat({
-              model: conversation.model || settings.defaultModel,
-              messages: [
-                { role: 'user', content: `${TITLE_GENERATE}\nUser: ${message}\nAssistant: ${fullResponse}` },
-              ],
-              stream: false,
-            })
-            const title = titleResponse.message.content.trim().replace(/^["']|["']$/g, '')
+            const title = await ollama.chatSimple(
+              conversation.model || settings.defaultModel,
+              [{ role: 'user', content: `${TITLE_GENERATE}\nUser: ${message}\nAssistant: ${fullResponse}` }],
+            )
             if (title) {
-              await conversationService.updateTitle(conversationId, title)
+              const cleaned = title.replace(/^["']|["']$/g, '')
+              if (cleaned) {
+                await conversationService.updateTitle(conversationId, cleaned)
+              }
             }
           }
         } catch {
@@ -470,17 +469,15 @@ export function createChatRouter(
               // Re-compact if no summary exists or tokens have grown past threshold again
               if (!existingSummary || activeTokens > compactionThreshold) {
                 const conversationText = activePath.map((m) => `${m.role}: ${m.content}`).join('\n')
-                const compactionResponse = await ollama.chat({
-                  model: conversation.model || settings.defaultModel,
-                  messages: [
-                    { role: 'user', content: `${COMPACTION_PROMPT}\n${conversationText}` },
-                  ],
-                  stream: false,
-                })
-                const raw = compactionResponse.message.content.trim()
-                const workingState = ctxService.parseWorkingState(raw)
-                if (workingState) {
-                  await conversationService.updateSummary(conversationId, conv.activeLeafId ?? 'default', JSON.stringify(workingState))
+                const raw = await ollama.chatSimple(
+                  conversation.model || settings.defaultModel,
+                  [{ role: 'user', content: `${COMPACTION_PROMPT}\n${conversationText}` }],
+                )
+                if (raw) {
+                  const workingState = ctxService.parseWorkingState(raw)
+                  if (workingState) {
+                    await conversationService.updateSummary(conversationId, conv.activeLeafId ?? 'default', JSON.stringify(workingState))
+                  }
                 }
               }
             }
@@ -496,21 +493,13 @@ export function createChatRouter(
               fullResponse,
               conversationId,
               async (messages) => {
-                const resp = await ollama.chat({
-                  model: conversation.model || settings.defaultModel,
-                  messages,
-                  stream: false,
-                })
-                return resp.message.content
+                const content = await ollama.chatSimple(conversation.model || settings.defaultModel, messages)
+                return content ?? ''
               },
             )
             await memoryService.compactIfNeeded(async (messages) => {
-              const resp = await ollama.chat({
-                model: conversation.model || settings.defaultModel,
-                messages,
-                stream: false,
-              })
-              return resp.message.content
+              const content = await ollama.chatSimple(conversation.model || settings.defaultModel, messages)
+              return content ?? ''
             })
           } catch {
             // Memory extraction/compaction failed, not critical

@@ -31,7 +31,6 @@ import { createTasksRouter } from './routes/tasks.ts'
 import { WebSocketServer } from 'ws'
 
 const PORT = parseInt(process.env.PORT ?? '3001', 10)
-const OLLAMA_URL = process.env.OLLAMA_URL ?? 'http://localhost:11434'
 const DATA_DIR = join(process.cwd(), 'data')
 
 async function start() {
@@ -41,6 +40,8 @@ async function start() {
 
   const store = new FileStore(DATA_DIR)
   await store.init()
+
+  const ollama = new OllamaService(store)
 
   // Auto-detect first available model from Ollama
   let detectedModel = 'llama3.2'
@@ -80,7 +81,6 @@ async function start() {
     await store.write('settings.json', existingSettings)
   }
 
-  const ollama = new OllamaService(OLLAMA_URL)
   const contextService = new ContextService()
   const conversationService = new ConversationService(store)
   const memoryService = new MemoryService(store)
@@ -104,27 +104,18 @@ async function start() {
   app.use('/api/skills', createSkillsRouter(skillsService, ollama, store))
   app.use('/api/projects', createProjectsRouter(projectService, ollama, store))
   app.use('/api/workspace', createWorkspaceRouter(workspaceService))
-  app.use('/api/settings', createSettingsRouter(store))
-  app.use('/api/aura', createAuraRouter(projectService, auraIndexers, auraQueries, groupService, DATA_DIR, store, managedShellService))
+  app.use('/api/settings', createSettingsRouter(store, ollama))
+  app.use('/api/aura', createAuraRouter(projectService, auraIndexers, auraQueries, groupService, DATA_DIR, store, managedShellService, ollama))
   app.use('/api/managed-shells', createManagedShellRouter(managedShellService))
   app.use('/api/projects', createTasksRouter(taskService))
 
   app.get('/api/health', async (_req, res) => {
-    let ollama = false
-    try {
-      const settings = await store.read('settings.json') as { ollamaBaseUrl?: string } | null
-      const url = settings?.ollamaBaseUrl?.trim() || OLLAMA_URL
-      const resp = await fetch(`${url}/api/tags`, { signal: AbortSignal.timeout(3000) })
-      ollama = resp.ok
-    } catch {
-      // Ollama not reachable
-    }
-    res.json({ status: 'ok', ollama })
+    const ollamaHealthy = await ollama.isHealthy()
+    res.json({ status: 'ok', ollama: ollamaHealthy })
   })
 
   const server = app.listen(PORT, () => {
     console.log(`A.U.R.A. backend running on http://localhost:${PORT}`)
-    console.log(`Ollama endpoint: ${OLLAMA_URL}`)
   })
 
   // Single WebSocket server for terminal and file watching
