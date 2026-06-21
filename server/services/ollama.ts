@@ -17,7 +17,7 @@ export class OllamaService {
 
   private async getBaseUrl(): Promise<string> {
     const settings = await this.store.read<Settings>('settings.json')
-    return OllamaService.resolveBaseUrl(settings?.ollamaBaseUrl)
+    return OllamaService.resolveBaseUrl(settings?.ollamaBaseUrl || this.fallbackUrl)
   }
 
   // ── Static config resolution ────────────────────────────────────────────────
