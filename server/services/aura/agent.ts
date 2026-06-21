@@ -13,6 +13,8 @@ import { WebSearchService } from './web-search.ts'
 import { PlanPersistenceService, type SavedPlan } from './plan-persistence.ts'
 import { BUILDER_COMPACTION_PROMPT } from '../../prompts.ts'
 import type { AuraChatService, CompactionCheckpoint } from '../aura-chat.ts'
+import type { OllamaService } from '../ollama.ts'
+import type { OllamaChatRequest } from '../../storage/types.ts'
 import { writeScreen, readEvents as readVisualEvents, startVisualCompanion, stopVisualCompanion } from './visual-companion.ts'
 
 const execFileAsync = promisify(execFile)
@@ -188,7 +190,7 @@ function buildFallbackSummary(
 async function generateCompactionSummary(
   messages: OllamaMessage[],
   todoList: AuraTodoItem[],
-  ollamaBaseUrl: string,
+  ollama: OllamaService,
   model: string,
   planResume?: PlanResumeContext | null,
 ): Promise<string | null> {
@@ -208,22 +210,7 @@ async function generateCompactionSummary(
   }
 
   try {
-    const res = await fetch(`${ollamaBaseUrl}/api/chat`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        model,
-        messages: [
-          { role: 'user', content: `${BUILDER_COMPACTION_PROMPT}\n${compactionInput}${extraContext}` },
-        ],
-        stream: false,
-      }),
-      signal: AbortSignal.timeout(30000),
-    })
-    if (!res.ok) return null
-    const data = await res.json() as { message?: { content?: string } }
-    const content = data.message?.content?.trim()
-    if (!content) return null
+    const content = await ollama.chatSimple(model, [{ role: 'user', content: `${BUILDER_COMPACTION_PROMPT}\n${compactionInput}${extraContext}` }], { timeout: 30000 })
     return content
   } catch {
     return null
@@ -247,7 +234,7 @@ async function compactMessagesAsync(
   systemPrompt: string,
   todoList: AuraTodoItem[],
   contextWindow: number,
-  ollamaBaseUrl: string,
+  ollama: OllamaService,
   model: string,
   compactionFailures: number,
   planResume?: PlanResumeContext | null,
@@ -301,7 +288,7 @@ async function compactMessagesAsync(
 
   // Try AI-generated summary first
   let summary: string | null = await generateCompactionSummary(
-    removedMessages, todoList, ollamaBaseUrl, model, planResume,
+    removedMessages, todoList, ollama, model, planResume,
   )
 
   const aiGenerated = summary !== null
@@ -1975,7 +1962,7 @@ function buildOllamaTools(tools: AgentTool[]): OllamaTool[] {
 export class AuraAgent {
   private qs: AuraQueryService
   private projectPath: string
-  private ollamaBaseUrl: string
+  private ollama: OllamaService
   private model: string
   private contextWindow: number
   private abortController: AbortController | null = null
@@ -1986,11 +1973,11 @@ export class AuraAgent {
   private chatId: string | null
   private webSearch: WebSearchService
 
-  constructor(qs: AuraQueryService, projectPath: string, ollamaBaseUrl?: string, model?: string, contextWindow?: number, managedShells?: ManagedShellService, projectId?: string, chatService?: AuraChatService, chatId?: string, apiKey?: string) {
+  constructor(qs: AuraQueryService, projectPath: string, ollama: OllamaService, model?: string, contextWindow?: number, managedShells?: ManagedShellService, projectId?: string, chatService?: AuraChatService, chatId?: string, apiKey?: string) {
     this.qs = qs
     this.projectPath = projectPath
-    this.ollamaBaseUrl = ollamaBaseUrl || process.env.OLLAMA_BASE_URL || 'http://localhost:11434'
-    this.model = model || process.env.OLLAMA_MODEL || 'glm-5.1:cloud'
+    this.ollama = ollama
+    this.model = model || 'glm-5.1:cloud'
     this.contextWindow = contextWindow ?? 200_000
     this.managedShells = managedShells || null
     this.projectId = projectId || null
@@ -2006,7 +1993,7 @@ export class AuraAgent {
     this.approvalManager = am
   }
 
-  static estimateSystemTokens(qs: AuraQueryService, projectPath: string, ollamaBaseUrl: string, model: string): number {
+  static estimateSystemTokens(qs: AuraQueryService, projectPath: string): number {
     const systemPrompt = buildSystemPrompt('', undefined, undefined, undefined, undefined, platform() === 'win32')
     return estimateTokens(systemPrompt)
   }
@@ -2193,7 +2180,7 @@ export class AuraAgent {
       if (totalTokensBefore > this.contextWindow * COMPACT_THRESHOLD) {
         eventSink.emit(AgentEventType.Status, { status: 'compacting' })
       }
-      const compactResult = await compactMessagesAsync(messages, systemPrompt, todoList, this.contextWindow, this.ollamaBaseUrl, this.model, compactionFailures, planResume)
+      const compactResult = await compactMessagesAsync(messages, systemPrompt, todoList, this.contextWindow, this.ollama, this.model, compactionFailures, planResume)
       if (compactResult.messages !== messages) {
         messages.length = 0
         messages.push(...compactResult.messages)
@@ -2746,48 +2733,34 @@ export class AuraAgent {
       if (this.abortController?.signal.aborted) return null
 
       try {
-        const payload = {
-          model: this.model,
-          messages: messages.map(m => {
-            const msg: Record<string, unknown> = { role: m.role, content: m.content }
-            if (m.tool_calls) msg.tool_calls = m.tool_calls
-            if (m.tool_call_id) msg.tool_call_id = m.tool_call_id
-            if (m.name) msg.name = m.name
-            return msg
-          }),
-          tools: tools.length > 0 ? tools : undefined,
-          stream: true,
-          options: { num_ctx: this.contextWindow },
-        }
-        const response = await fetch(`${this.ollamaBaseUrl}/api/chat`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload),
-          signal: this.abortController?.signal,
-        })
-
-        if (!response.ok || !response.body) {
-          const errText = await response.text().catch(() => response.statusText)
-          lastError = `${response.status} ${errText}`
-          // Don't retry on rate limits — show the error immediately
-          if (response.status === 429) {
-            eventSink.emit('error', { message: `Ollama chat failed: ${lastError}` })
-            return null
-          }
-          // Retry on server errors (5xx), not on client errors (4xx)
-          if (response.status >= 500) {
-            if (attempt < maxRetries) {
-              const delay = Math.min(1000 * Math.pow(2, attempt - 1), 8000)
-              if (attempt === 1) eventSink.emit('token', { content: `Connection interrupted, retrying…` })
-              await new Promise(r => setTimeout(r, delay))
-              continue
-            }
+        let stream: ReadableStream<Uint8Array>
+        try {
+          stream = await this.ollama.chatStream({
+            model: this.model,
+            messages: messages.map(m => {
+              const msg: Record<string, unknown> = { role: m.role, content: m.content }
+              if (m.tool_calls) msg.tool_calls = m.tool_calls
+              if (m.tool_call_id) msg.tool_call_id = m.tool_call_id
+              if (m.name) msg.name = m.name
+              return msg
+            }),
+            tools: tools.length > 0 ? tools : undefined,
+            stream: true,
+            options: { num_ctx: this.contextWindow },
+          } as OllamaChatRequest)
+        } catch (err) {
+          lastError = err instanceof Error ? err.message : String(err)
+          if (attempt < maxRetries) {
+            const delay = Math.min(1000 * Math.pow(2, attempt - 1), 8000)
+            if (attempt === 1) eventSink.emit('token', { content: 'Connection interrupted, retrying…' })
+            await new Promise(r => setTimeout(r, delay))
+            continue
           }
           eventSink.emit('error', { message: `Ollama chat failed: ${lastError}` })
           return null
         }
 
-        const reader = response.body.getReader()
+        const reader = stream.getReader()
         const decoder = new TextDecoder()
         let fullContent = ''
         let buffer = ''
@@ -2994,21 +2967,6 @@ Focus on: ${task.focus}`
   private availabilityCache: { available: boolean; timestamp: number } | null = null
 
   async checkAvailability(): Promise<boolean> {
-    const now = Date.now()
-    if (this.availabilityCache && now - this.availabilityCache.timestamp < 60000) {
-      return this.availabilityCache.available
-    }
-
-    try {
-      const response = await fetch(`${this.ollamaBaseUrl}/api/tags`, {
-        signal: AbortSignal.timeout(5000),
-      })
-      const available = response.ok
-      this.availabilityCache = { available, timestamp: now }
-      return available
-    } catch {
-      this.availabilityCache = { available: false, timestamp: now }
-      return false
-    }
+    return this.ollama.checkAvailability(this.model)
   }
 }
