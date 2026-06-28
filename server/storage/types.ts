@@ -124,6 +124,7 @@ export interface OllamaModel {
   name: string
   size: number
   modified_at: string
+  capabilities?: string[]  // top-level field from Ollama API (e.g. ['vision', 'thinking', 'completion', 'tools'])
   isEmbedding?: boolean
   isVision?: boolean
 }
@@ -131,6 +132,7 @@ export interface OllamaModel {
 export interface OllamaChatMessage {
   role: string
   content: string
+  images?: string[]  // base64-encoded image data (for vision models)
   tool_calls?: {
     function: {
       name: string

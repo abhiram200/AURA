@@ -1,5 +1,6 @@
 import type { OllamaChatRequest, OllamaChatResponse, OllamaModel, OllamaTagsResponse, Settings } from '../storage/types.ts'
 import type { FileStore } from '../storage/fileStore.ts'
+import { isVisionModel, hasVisionCapability } from './aura/utils/model-utils.ts'
 
 const AVAILABILITY_CACHE_MS = 60_000
 
@@ -35,6 +36,21 @@ export class OllamaService {
       || settings?.defaultModel
       || process.env.OLLAMA_MODEL
       || 'glm-5.1:cloud'
+  }
+
+  static resolveVisionModel(settings?: Settings | null, models?: OllamaModel[]): string | null {
+    // If the user explicitly set a vision model, use it — no second-guessing
+    if (settings?.defaultVisionModel) return settings.defaultVisionModel
+    // Fall back to the project/default model, but only if it's vision-capable
+    const fallback = OllamaService.resolveModel(settings)
+    if (models) {
+      // When models list is available, check capabilities field (not just name patterns)
+      const fallbackModel = models.find(m => m.name === fallback)
+      if (fallbackModel && hasVisionCapability(fallbackModel)) return fallbackModel.name
+    }
+    // Name-only check as last resort when no model list is available
+    if (isVisionModel(fallback)) return fallback
+    return null
   }
 
   // ── Availability ────────────────────────────────────────────────────────────
@@ -143,6 +159,46 @@ export class OllamaService {
       return data.message?.content?.trim() ?? null
     } catch {
       return null
+    }
+  }
+
+  /**
+   * Send a chat request with image attachments to a vision-capable model.
+   * Images are provided as base64-encoded strings in the Ollama `images` field.
+   * Returns the model's text response, or an error string if the model doesn't support images.
+   */
+  async chatWithImage(
+    model: string,
+    messages: Array<{ role: string; content: string; images?: string[] }>,
+    options?: { timeout?: number },
+  ): Promise<{ content: string | null; error: string | null }> {
+    try {
+      const baseUrl = await this.getBaseUrl()
+      const res = await fetch(`${baseUrl}/api/chat`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ model, messages, stream: false }),
+        signal: AbortSignal.timeout(options?.timeout ?? 120000),
+      })
+      if (!res.ok) {
+        const errorText = await res.text().catch(() => '')
+        return { content: null, error: `Vision model error: ${model} returned HTTP ${res.status}${errorText ? ` — ${errorText.slice(0, 200)}` : ''}. The model may not support image input. Please select a vision-capable model in Settings > Projects > Vision Model.` }
+      }
+      const data = await res.json() as { message?: { content?: string }; error?: string }
+      if (data.error) {
+        return { content: null, error: `Vision model error: ${data.error}` }
+      }
+      const content = data.message?.content?.trim() ?? null
+      if (!content) {
+        return { content: null, error: `Vision model ${model} returned no response.` }
+      }
+      return { content, error: null }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err)
+      if (message.includes('timeout') || message.includes('Timeout')) {
+        return { content: null, error: `Vision model request timed out after ${Math.round((options?.timeout ?? 120000) / 1000)}s. The model may be too slow or the image too large.` }
+      }
+      return { content: null, error: `Failed to reach vision model: ${message}` }
     }
   }
 }

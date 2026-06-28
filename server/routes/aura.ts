@@ -19,6 +19,7 @@ import type { AuraChatSession } from '../services/aura-chat.ts'
 import type { GitDiffScope } from '../services/aura/types.ts'
 import { globalApprovalManagers } from '../services/aura/agent.ts'
 import { PlanPersistenceService } from '../services/aura/plan-persistence.ts'
+import { PlaywrightService } from '../services/aura/playwright.ts'
 import type { ManagedShellService } from '../services/managedShell.ts'
 import { AgentEventType } from '../services/aura/sse.ts'
 import { serveVisualPage, serveVisualFile, recordEvent, getProjectPathByDirName, startVisualCompanion } from '../services/aura/visual-companion.ts'
@@ -57,9 +58,11 @@ export function createAuraRouter(
 
   async function getAuraConfig() {
     const settings = await store.read<Settings>('settings.json')
+    const models = await ollama.listModels().catch(() => [])
     return {
       ollama,
       chatModel: OllamaService.resolveModel(settings),
+      visionModel: OllamaService.resolveVisionModel(settings, models),
       embedModel: settings?.defaultEmbeddingModel || 'mxbai-embed-large:335m',
       contextWindow: settings?.contextWindowSize || 200_000,
       apiKey: settings?.ollamaApiKey || undefined,
@@ -985,7 +988,8 @@ export function createAuraRouter(
     // Get chat ID for compaction persistence (best-effort — may not exist yet)
     const chatSession = await chatService.get(project.workspacePath)
     const chatId = chatSession?.id ?? null
-    const agent = new AuraAgent(qs, project.workspacePath, ollama, config.chatModel, config.contextWindow, managedShellService, projectId, chatService, chatId, config.apiKey)
+    const playwright = new PlaywrightService(project.workspacePath)
+    const agent = new AuraAgent(qs, project.workspacePath, ollama, config.chatModel, config.contextWindow, managedShellService, projectId, chatService, chatId, config.apiKey, config.visionModel, playwright)
 
     // JSON mode — collect all SSE events and return a single response
     if (mode === 'json') {
@@ -997,6 +1001,9 @@ export function createAuraRouter(
       } catch (err) {
         res.status(500).json({ error: err instanceof Error ? err.message : 'Agent failed' })
         return
+      } finally {
+        // Clean up browser session
+        playwright.close().catch(() => {})
       }
 
       const tokens = sink.tokens.join('')
@@ -1045,6 +1052,8 @@ export function createAuraRouter(
       }
     } finally {
       eventSink.close()
+      // Clean up browser session
+      playwright.close().catch(() => {})
     }
   })
 
@@ -1163,7 +1172,7 @@ export function createAuraRouter(
 
     const resolved = am.resolve(approvalId, { approved, feedback })
     if (!resolved) {
-      res.status(404).json({ error: 'Approval request not found or expired' })
+      res.status(404).json({ error: 'Approval request not found' })
       return
     }
 

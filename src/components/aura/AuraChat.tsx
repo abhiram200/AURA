@@ -249,6 +249,9 @@ const SUB_AGENT_TYPE_LABELS: Record<string, string> = {
   research: 'Researcher',
   fix: 'Fixer',
   plan: 'Planner',
+  designer: 'Designer',
+  implementer: 'Implementer',
+  reviewer: 'Reviewer',
 }
 
 const AskUserSection = memo(function AskUserSection({ tc }: { tc: AuraToolCall }) {

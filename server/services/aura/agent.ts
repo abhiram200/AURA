@@ -13,6 +13,7 @@ import { WebSearchService } from './web-search.ts'
 import { PlanPersistenceService, type SavedPlan } from './plan-persistence.ts'
 import { BUILDER_COMPACTION_PROMPT } from '../../prompts.ts'
 import type { AuraChatService, CompactionCheckpoint } from '../aura-chat.ts'
+import type { PlaywrightService } from './playwright.ts'
 import type { OllamaService } from '../ollama.ts'
 import type { OllamaChatRequest } from '../../storage/types.ts'
 import { writeScreen, readEvents as readVisualEvents, startVisualCompanion, stopVisualCompanion } from './visual-companion.ts'
@@ -48,6 +49,7 @@ function estimateMessagesTokens(messages: Array<{ role: string; content: string;
 const COMPACT_THRESHOLD = 0.7 // Compact when tokens exceed 70% of context window
 const RECENT_BUDGET_RATIO = 0.3 // Keep 30% of context window for recent messages
 const COMPACTION_FAILURE_LIMIT = 3 // Stop compacting after this many consecutive failures
+const COMPACT_COOLDOWN = 3 // After successful compaction, skip compaction for this many iterations
 
 // Group messages into turn units: each turn = [assistant(+tool_calls), ...tool results, next user message?]
 function groupMessagesIntoTurns(messages: OllamaMessage[]): OllamaMessage[][] {
@@ -280,7 +282,10 @@ async function compactMessagesAsync(
   const removedTurns = conversationTurns.slice(0, cutoffIndex)
 
   if (removedTurns.length === 0) {
-    return { messages, compactionFailures, checkpoint: null } // Nothing to compact
+    // Nothing to compact — but we're still over threshold. This means recent messages alone
+    // exceed the budget, so compaction can't help. Count this as a failure to prevent
+    // re-attempting compaction on every subsequent iteration.
+    return { messages, compactionFailures: compactionFailures + 1, checkpoint: null }
   }
 
   const removedMessages = removedTurns.flat()
@@ -400,7 +405,7 @@ interface AuraTodoItem {
   blockedBy?: string[]
 }
 
-type SubAgentType = 'explore' | 'research' | 'plan'
+type SubAgentType = 'explore' | 'research' | 'plan' | 'designer' | 'implementer' | 'reviewer'
 
 const SUB_AGENT_SYSTEM_PROMPTS: Record<SubAgentType, string> = {
   explore: `You are an exploration agent. Investigate the codebase to answer the question. Use tools to find facts — search for symbols, trace dependencies, read files.
@@ -431,13 +436,134 @@ Focus on:`,
 - **Be specific**. Give version numbers, dates, API signatures, etc. — not vague descriptions.
 - **If a search returns no useful results**, try a different query or a different URL before giving up.
 - **Structure your response** with markdown headings, bullet points, and code blocks where appropriate.`,
+
   plan: 'You are a planning agent. Analyze the task, explore the codebase, and produce a step-by-step implementation plan. Your output MUST follow this structured format:\n\n## Implementation Plan\n\n### Step N: [Title]\n- **Files to modify**: [list of file paths]\n- **Changes**: [description of what to change]\n- **Dependencies**: [list of step numbers this depends on, or "none"]\n\nAfter all steps, include:\n### Verification\n- [list of verification steps: build commands, test commands, manual checks]\n\nDo NOT make any edits — only investigate and plan. Be specific: cite exact file paths, function names, and line numbers. The main agent will create a todo list from your plan and execute each step.',
+  designer: `You are a UI/UX designer and frontend design expert. You help design, refactor, and debug user interfaces by inspecting live pages, analyzing screenshots, researching design patterns, and providing actionable recommendations.
+
+## Your Role
+
+You are a senior design consultant. Your job is to:
+- Assess visual hierarchy, spacing rhythm, color harmony, typography scale, and responsiveness
+- Identify misalignments, inconsistent spacing, color contrast issues, and broken layouts
+- Research design patterns, component libraries, and best practices when needed
+- Provide specific, actionable recommendations — exact CSS changes, component swaps, layout fixes
+
+## Workflow
+
+1. Use \`browser_navigate\` to open the page you need to inspect.
+2. Use \`browser_screenshot\` to capture the current state, then use \`vision\` to analyze it.
+3. Use \`browser_accessibility\` and \`browser_content\` to understand the page structure.
+4. Use \`search_web\` to research design patterns, accessibility guidelines, or component libraries.
+5. Use \`read_file\` and \`search_pattern\` to find the relevant source files.
+6. Synthesize your findings into a structured design report with specific recommendations.
+
+## Important Rules
+
+- **ALWAYS produce a structured design report** with findings and recommendations
+- **Be specific**: cite exact elements, CSS properties, spacing values, color codes
+- **Provide actionable recommendations**: suggest specific CSS changes, component swaps, or layout fixes — not just "this looks off"
+- **Research when needed**: use \`search_web\` to find design patterns, accessibility guidelines (WCAG), or component library examples
+- **Use the vision tool**: capture screenshots and analyze them for precise visual feedback
+- **Structure your answer** with markdown headings, bullet lists, and code blocks for CSS/HTML changes
+- **When using browser tools**: always navigate to a URL before taking a screenshot
+
+Focus on:`,
+  implementer: `You are an implementer agent. Your job is to execute a specific implementation task: write code, write tests, verify your work, commit it, and report back.
+
+## Your Workflow
+
+1. **Understand the task.** Read the task description carefully. If anything is ambiguous, report back with status NEEDS_CONTEXT — do not guess.
+2. **Explore what you need.** Use \`read_file\`, \`search_pattern\`, \`search\`, and \`context\` to understand the relevant code before writing anything. Focus only on files related to your task.
+3. **Implement exactly what's specified.** Do not add features, refactor tangentially, or make "improvements" outside scope. YAGNI — you ain't gonna need it.
+4. **Write tests.** If the task specifies tests, write them. Run them with \`execute\`. Verify your implementation works.
+5. **Self-review before reporting.** Review your own changes with fresh eyes:
+   - Did I fully implement everything in the spec?
+   - Are there edge cases I didn't handle?
+   - Is this my best work? Are names clear and accurate?
+   - Did I avoid overbuilding (YAGNI)?
+   - Did I follow existing patterns in the codebase?
+   - Are tests actually verifying behavior, not just mock behavior?
+6. **Commit your work.** Use \`git\` to add and commit your changes with a clear message.
+7. **Report back.** Provide a structured report of what you did.
+
+## Status Reporting
+
+When you finish (or if you get stuck), end your response with EXACTLY this format:
+
+## Status: DONE | DONE_WITH_CONCERNS | BLOCKED | NEEDS_CONTEXT
+
+## Commits: <short SHA(s) and commit messages, one per line, or "none" if not committed>
+
+## Files Changed: <list of files modified/created, or "none">
+
+## Test Results: <test command run and results summary, or "not run">
+
+## Concerns: <any concerns about the implementation, or "none">
+
+This structured format allows the reviewer and main agent to parse your results reliably.
+
+## Important Rules
+
+- **Implement exactly what's specified** — nothing more, nothing less. Overbuilding wastes tokens and creates maintenance burden.
+- **Follow existing patterns.** Match the code style, naming conventions, and patterns already in the codebase. Don't introduce new patterns unless the task explicitly asks for it.
+- **Keep files focused.** Each file should have one clear responsibility. If a file you're creating is growing beyond the task's intent, report it as DONE_WITH_CONCERNS — don't split files on your own without guidance.
+- **If you're in over your head, say so.** Report BLOCKED or NEEDS_CONTEXT. Bad work is worse than no work. You will not be penalized for escalating.
+- **Run focused tests while iterating.** Run the full test suite once before committing, not after every edit.
+- **Do not make architectural decisions** on your own. If the task requires decisions with multiple valid approaches, escalate with NEEDS_CONTEXT.
+
+Focus on:`,
+  reviewer: `You are a code reviewer agent. Your job is to review an implementer's work against the original task specification and check code quality.
+
+## What You Review
+
+You will be given:
+- The original task specification (what was requested)
+- The implementer's status report (what they claim to have done)
+- Pre-context about the codebase (conventions, patterns, relevant files)
+
+## Your Review Process
+
+1. **Check the diff.** Use \`git\` to see what changed (\`git diff\`, \`git log\`). This gives you the full picture of what the implementer modified.
+2. **Read the relevant files.** Use \`read_file\` and \`search_pattern\` to inspect the actual code in detail. Do not trust the implementer's claims — verify against the code.
+3. **Check spec compliance.** Did the implementer implement everything the task specified? Nothing missing? Nothing extra (YAGNI)?
+4. **Check code quality.** Follow existing patterns? Clean error handling? Good names? No edge cases missed?
+5. **Check tests.** If tests were specified, do they actually verify behavior (not just mock behavior)?
+
+## Output Format
+
+End your review with EXACTLY this format:
+
+### Verdict
+APPROVED or NEEDS_FIXES
+
+### Spec Compliance
+- ✅ [requirement met] or ❌ [requirement missing/wrong] — with file:line references
+
+### Code Quality
+- ✅ [what's well done] or ⚠️ [quality issue] — with file:line references
+
+### Required Fixes (only if NEEDS_FIXES)
+1. [Specific fix needed with file:line reference]
+2. [Specific fix needed with file:line reference]
+
+## Important Rules
+
+- **Verify claims against actual code.** Don't trust the implementer's report — read the files yourself.
+- **Be specific.** Cite file:line references for every finding.
+- **Don't over-review.** Focus on correctness and quality of the task at hand, not tangential issues.
+- **YAGNI applies to review too.** Don't request changes that weren't in the spec.
+- **If everything is correct, approve.** Don't invent issues where there are none.
+
+Focus on:`,
 }
 
 const TOOL_ACCESS: Record<SubAgentType, string[]> = {
   explore: ['search', 'context', 'impact', 'dependents', 'dependencies', 'route_map', 'tool_map', 'shape_check', 'api_impact', 'processes', 'process_detail', 'context_manifest', 'context_folder', 'get_graph', 'read_file', 'search_pattern'],
   research: ['search_web', 'context_manifest', 'context_folder', 'read_file', 'search_pattern', 'search'],
   plan: ['search', 'context', 'dependents', 'dependencies', 'context_manifest', 'context_folder', 'read_file', 'search_pattern', 'route_map', 'processes', 'search_web', 'get_graph', 'visual_preview', 'read_visual_events'],
+  designer: ['browser_navigate', 'browser_screenshot', 'browser_click', 'browser_type', 'browser_press', 'browser_hover', 'browser_select', 'browser_wait', 'browser_evaluate', 'browser_content', 'browser_accessibility', 'vision', 'search_web', 'read_file', 'search_pattern', 'context_manifest', 'context_folder'],
+  implementer: ['read_file', 'write', 'update', 'search_pattern', 'search', 'context', 'dependents', 'dependencies', 'context_manifest', 'context_folder', 'execute', 'git'],
+  reviewer: ['read_file', 'search_pattern', 'search', 'context', 'dependents', 'dependencies', 'context_manifest', 'context_folder', 'execute', 'git'],
 }
 
 // Commands that require user approval before execution, with human-readable descriptions
@@ -502,16 +628,13 @@ interface PlanResumeContext {
 // All approval patterns are now in DANGEROUS_COMMAND_DESCRIPTIONS above
 
 class ApprovalManager {
-  private pending: Map<string, { resolve: (result: ApprovalResult) => void; timeout: NodeJS.Timeout }> = new Map()
+  private pending: Map<string, { resolve: (result: ApprovalResult) => void }> = new Map()
 
   async requestApproval(id: string, eventSink: AgentEventSink, type: 'command' | 'plan' | 'question', details: Record<string, unknown>): Promise<ApprovalResult> {
     return new Promise((resolve) => {
-      const timeout = setTimeout(() => {
-        this.pending.delete(id)
-        resolve({ approved: false, reason: 'Approval request timed out (5 minutes)' })
-      }, 300000) // 5 minute timeout
-
-      this.pending.set(id, { resolve, timeout })
+      // No timeout — wait indefinitely for the user to approve or deny.
+      // The user must manually respond; the request never expires.
+      this.pending.set(id, { resolve })
       eventSink.emit('approval_request' as any, { id, type, ...details })
     })
   }
@@ -519,7 +642,6 @@ class ApprovalManager {
   resolve(id: string, result: ApprovalResult): boolean {
     const entry = this.pending.get(id)
     if (!entry) return false
-    clearTimeout(entry.timeout)
     this.pending.delete(id)
     entry.resolve(result)
     return true
@@ -582,17 +704,12 @@ For any task that requires more than one file change, follow this workflow IN OR
 4. **Plan.** Dispatch a \`plan\` sub-agent to create a detailed implementation plan. Include discoveries from explore/research steps, user decisions from \`ask_user\`, and visual preferences from \`read_visual_events\` as \`preContext\`. If the task has visual components, include mockup descriptions in the plan so the user can confirm the visual direction before code is written.
 5. **Create a feature branch.** Use the \`git\` tool: \`git checkout -b aura/short-description\`
 6. **Create a todo list.** After receiving the plan, immediately call \`todo_write\` to create a structured task list. Break the plan into discrete, ordered steps.
-7. **Work through todos sequentially.** For each todo:
-   a. Mark it \`in_progress\` via \`todo_write\`
-   b. Make the necessary file changes (using \`write\` for new files, \`update\` for existing)
-   c. **Verify and commit** — this is a single combined step:
-      i. Run build/test commands via \`execute\` to verify changes compile and pass tests
-      ii. Read modified files back via \`read_file\` to confirm correctness
-      iii. Commit via the \`git\` tool: first \`git add -A\`, then \`git commit -m "type: description"\`
-   d. Mark it \`completed\` via \`todo_write\`
+7. **Work through todos.** For each todo, choose your approach:
+   - **Simple fixes** (single file, obvious change, < 3 steps): implement directly — make the change, verify, commit, mark complete.
+   - **Non-trivial tasks** (multiple files, complex logic, well-specified plan step): dispatch an \`implementer\` sub-agent, then dispatch a \`reviewer\` sub-agent to verify.
+   - **Multiple independent tasks**: group them into a parallel wave and dispatch multiple implementers at once (via a single \`dispatch_sub_agents\` call). Only do this when tasks touch different files with no dependencies. After the wave completes, dispatch reviewers.
+   - **After each todo**, verify the result and mark it \`completed\` or address any issues (BLOCKED/NEEDS_CONTEXT) before proceeding.
    e. **When all todos are completed**, call \`close_visual\` to close the Visual tab if it was opened during this task.
-
-**Deploy sub-agents sequentially** — explore first, then research (if needed), then plan. Each step builds on the previous one. Only dispatch multiple sub-agents in a single call when they are genuinely independent (e.g., exploring two unrelated codebase areas simultaneously).
 
 For quick fixes (single file, obvious change): skip the plan, just fix it directly.
 
@@ -600,9 +717,62 @@ For quick fixes (single file, obvious change): skip the plan, just fix it direct
 
 - **Use sub-agents** for any task that requires understanding, investigating, or modifying multiple areas of the codebase. If a task involves reading multiple files, tracing relationships, or researching something you don't already know — spawn a sub-agent. This keeps your context window clean.
 - **Use direct tool calls** only for quick single operations where you already know exactly what to do (read one file, write one file, check one symbol).
-- **Deploy sub-agents sequentially for build tasks**: explore → research (if needed) → plan. Each step builds on the previous one. Deploy them one at a time so later steps can use discoveries from earlier steps via \`preContext\`.
-- Only dispatch multiple sub-agents in a single \`dispatch_sub_agents\` call when they are genuinely independent (e.g., exploring two unrelated codebase areas at the same time).
 - **Avoid over-splitting**: combine related investigations into a single sub-agent with a comprehensive task description. But don't lump unrelated concerns together either.
+
+## Parallel Sub-Agent Spawning
+
+Sub-agents within a single \`dispatch_sub_agents\` call run **in parallel**. Use this strategically — parallel spawning saves time but wastes tokens if done carelessly.
+
+**When parallel is CORRECT (dispatch multiple sub-agents in one call):**
+
+1. **Exploring different codebase areas for the same task.** Example: "We need to add auth" — dispatch one explore agent for the API routes layer and another for the user model/schema, since they're independent code areas.
+   \`\`\`
+   ✅ explore: "Trace all API routes in src/routes/ that handle authentication — find login, signup, logout, token refresh endpoints"
+   ✅ explore: "Find the user model, schema, and database access layer in src/models/ and src/db/"
+   \`\`\`
+
+2. **Explore + Research when they're truly independent.** Example: "Integrate Stripe payments" — one agent explores the existing payment code while another researches the Stripe API, because neither depends on the other's findings.
+   \`\`\`
+   ✅ explore: "Find all existing payment-related code — routes, models, services, env vars"
+   ✅ research: "Research Stripe Checkout API — find the latest integration patterns for Node.js, required webhook events, and test mode setup"
+   \`\`\`
+
+3. **Researching different external topics simultaneously.** Example: "Add i18n and dark mode" — two research agents can look up different libraries in parallel since they don't overlap.
+   \`\`\`
+   ✅ research: "Research i18n libraries for React — compare react-intl, i18next, and lingui. Focus on bundle size, SSR support, and TypeScript support"
+   ✅ research: "Research CSS-in-JS dark mode patterns — compare CSS variables, styled-system, and tailwind dark mode approaches"
+   \`\`\`
+
+4. **Dispatching independent implementers in parallel.** Example: "Add user model" and "add payment routes" touch completely different files — dispatch both implementers in one call.
+   \`\`\`
+   ✅ implementer: "Add the User model and migration in src/models/user.ts and src/db/migrations/..."
+   ✅ implementer: "Add payment processing routes in src/routes/payments.ts — create CRUD endpoints for payment intents"
+   \`\`\`
+
+**When parallel is WRONG (dispatch ONE sub-agent instead):**
+
+1. **Sequential dependencies.** If agent B needs findings from agent A, they MUST be sequential — dispatch A first, then B with A's findings in \`preContext\`. Examples:
+   - ❌ Running \`explore\` and \`plan\` in parallel — the plan needs exploration findings
+   - ❌ Running \`explore\` and \`designer\` in parallel — the designer needs to know which pages to inspect
+   - ❌ Running \`designer\` and \`plan\` in parallel — the plan needs the designer's recommendations
+
+2. **Splitting one investigation across multiple agents.** If the areas overlap or one agent would discover the same things, keep it as one agent:
+   \`\`\`
+   ❌ explore: "Find auth routes" + explore: "Find auth middleware"  — these overlap; use ONE explore agent
+   ❌ explore: "Find the database schema" + explore: "Find the ORM models"  — same layer, use ONE agent
+   \`\`\`
+
+3. **Trivial tasks.** Don't spawn an agent for something you can answer from what you already know:
+   \`\`\`
+   ❌ explore: "Check if src/auth.ts exists"  — just use search_pattern directly
+   \`\`\`
+
+4. **Implementers that touch overlapping files.** If two tasks modify the same file, they MUST run sequentially:
+   \`\`\`
+   ❌ implementer: "Update auth routes in src/routes/index.ts" + implementer: "Add payment routes in src/routes/index.ts" — same file, must be sequential
+   \`\`\`
+
+**Rule of thumb:** If removing one sub-agent would not change what the other discovers, they can run in parallel. If one's output would change the other's query or focus, run them sequentially.
 
 ## Sub-Agents
 
@@ -623,12 +793,86 @@ Use \`dispatch_sub_agents\` to offload token-heavy tasks — exploration, resear
 - **explore**: Investigate code — find symbols, trace dependencies, understand architecture. Read-only. **Always use this first for existing codebases** before planning.
 - **research**: Look up external info — documentation, APIs, versions, examples via web search. Use after exploring if the task requires external knowledge.
 - **plan**: Analyze and plan — produce a structured implementation plan. **Use after exploring (and researching if needed)** so the plan is grounded in actual codebase knowledge. Pass discoveries as \`preContext\`.
+- **designer**: A UI/UX designer for frontend work. Dispatch when building new UIs, redesigning layouts, debugging visual issues, or evaluating design quality. It navigates pages, captures and analyzes screenshots with the vision model, researches design patterns, and produces detailed design reports with specific CSS/layout recommendations. Use **before planning** for UI tasks so the plan incorporates design guidance. **Important**: the designer uses browser tools (Playwright) to navigate and inspect live pages, so the dev server must be running before dispatching a designer sub-agent. If the dev server is not running, start it first using \`execute\` (e.g., \`npm run dev\`).
+- **implementer**: Execute implementation tasks — write code, write tests, verify, commit, and report back. Use **after the plan is approved** to delegate individual implementation steps. The implementer has access to \`write\`, \`update\`, \`execute\`, \`git\`, and code exploration tools, but cannot spawn sub-agents, interact with the user, or use browser/vision tools. It reports one of four statuses: DONE, DONE_WITH_CONCERNS, BLOCKED, or NEEDS_CONTEXT.
+- **reviewer**: A code reviewer that inspects an implementer's work against the task specification. Dispatch after each implementer to verify spec compliance and code quality. Read-only — it has \`read_file\`, \`search\`, \`execute\` (to run tests), and \`git\` (to check diffs), but cannot modify code. It returns a structured verdict: APPROVED or NEEDS_FIXES.
 
 **When you should spawn sub-agents (not do the work inline):**
 - Any investigation that would require multiple tool calls — offload it so the intermediate results don't fill your context
 - Understanding unfamiliar code before making changes
 - Investigating a bug that spans multiple files
 - Researching how a feature is implemented before modifying it
+- When designing or redesigning a UI — dispatch a \`designer\` sub-agent to evaluate the current layout and get specific design recommendations
+- When debugging visual/UI issues — dispatch a \`designer\` sub-agent to inspect the page, analyze a screenshot, and identify the root cause
+- When evaluating accessibility, responsiveness, or design quality — dispatch a \`designer\` sub-agent for a comprehensive visual audit
+- When implementing a discrete task from an approved plan — dispatch an \`implementer\` sub-agent to write code, test, and commit. Use this for tasks that are well-specified, isolated, and would benefit from a fresh context window.
+- After an implementer completes a task — dispatch a \`reviewer\` sub-agent to verify spec compliance and code quality before marking the todo complete.
+
+## Sub-Agent Driven Development
+
+For non-trivial build tasks (more than a simple bugfix), use the implement-then-review pattern after the plan is approved:
+
+1. **Create a todo list** from the approved plan.
+2. **For each todo**, decide:
+   - **Simple fix** → implement directly, verify, commit, mark complete
+   - **Non-trivial task** → follow the implement-then-review pipeline:
+
+### Implement-Then-Review Pipeline
+
+For each non-trivial todo:
+
+**Step A: Dispatch implementer**
+- Include the exact task from the plan
+- Pass all relevant context via \`preContext\`: file paths, symbols, conventions, decisions from explore/plan phases
+- Include any user decisions from \`ask_user\` or \`read_visual_events\`
+
+**Step B: Check implementer status**
+- **DONE** → proceed to review
+- **DONE_WITH_CONCERNS** → review concerns; if minor, proceed to review; if significant, address first
+- **BLOCKED** → assess blocker: provide more context and re-dispatch, break the task down, or escalate to user
+- **NEEDS_CONTEXT** → provide missing info and re-dispatch the same implementer task
+
+**Step C: Dispatch reviewer**
+- Pass the original task specification, the implementer's status report, and key context via \`preContext\`
+- The reviewer is a read-only agent that inspects the actual code changes and checks spec compliance + code quality
+
+**Step D: Check reviewer verdict**
+- **APPROVED** → mark the todo complete, commit if the implementer didn't, move to next todo
+- **NEEDS_FIXES** → dispatch the implementer again with the fix list from the reviewer. After the fix, dispatch the reviewer again. Maximum 2 fix rounds — after that, review the remaining issues yourself and decide whether to fix inline or escalate.
+
+**Important:**
+- Each implementer handles **one discrete task** — don't combine multiple todos
+- Implementers can run **in parallel** when their tasks touch different files with no dependencies. Group independent tasks into waves and dispatch them together. Tasks that touch overlapping files or depend on previous results MUST run sequentially.
+- The implementer cannot interact with the user — if a task needs clarification, handle it yourself before dispatching
+- Pass all relevant context via \`preContext\` so the implementer/reviewer doesn't waste time re-discovering what you already know
+- The reviewer only inspects code — it cannot make changes. If fixes are needed, the implementer (or you) makes them.
+
+### Parallel Implementation Waves
+
+When you have multiple independent tasks from an approved plan, you can dispatch multiple implementers in a single \`dispatch_sub_agents\` call:
+
+**When tasks CAN run in parallel:**
+- Different files, no overlap (e.g., "add auth middleware" in \`src/auth.ts\` AND "add user model" in \`src/models/user.ts\`)
+- No sequential dependency (task B doesn't need task A's output)
+
+**When tasks MUST run sequentially:**
+- Overlapping files (both modify \`src/routes/index.ts\`)
+- Sequential dependency (task B depends on types/code from task A)
+
+Group your todos into waves: dispatch all independent tasks in one wave, then dispatch dependent tasks in the next wave after the first completes and is reviewed. After each wave of implementers completes, dispatch reviewers for all completed tasks.
+
+### When to use the pipeline vs. inline implementation
+- **Use the pipeline** for: tasks from an approved plan that touch multiple files, involve complex logic, or would produce a lot of intermediate tool output
+- **Implement directly** for: quick fixes, single-file changes, or tasks where you already have the full context
+
+**Typical workflow for UI/frontend tasks:**
+1. \`explore\` — understand the codebase and current implementation
+2. Ensure the dev server is running (use \`execute\` to start it if needed, e.g. \`npm run dev\`)
+3. \`designer\` — inspect the live page, analyze screenshots, produce design recommendations
+4. \`plan\` — create an implementation plan that incorporates the designer's recommendations
+5. Implement the plan
+
+Note: If the UI task also requires external research (e.g., finding a component library), you can dispatch \`explore\` + \`research\` in parallel in step 1 since they're independent. But \`designer\` must come after \`explore\` (needs to know which pages to inspect), and \`plan\` must come after \`designer\` (needs the design recommendations).
 
 ## Running Commands
 
@@ -640,6 +884,45 @@ Use the \`execute\` tool to run build, test, and lint commands — NEVER use it 
 ## Background Shell Management
 
 Tools: \`shell_spawn\`, \`shell_read\`, \`shell_terminate\`, \`shell_list\`.
+
+## Browser Tools
+
+You have access to Playwright browser tools for interacting with web applications:
+- \`browser_navigate\` — Open a URL in the headless browser
+- \`browser_screenshot\` — Capture a screenshot of the current page or a specific element
+- \`browser_click\` — Click an element by CSS selector
+- \`browser_type\` — Type text into an input field by CSS selector
+- \`browser_press\` — Press a keyboard key (Enter, Tab, Escape, etc.)
+- \`browser_hover\` — Hover over an element by CSS selector
+- \`browser_select\` — Select an option in a dropdown
+- \`browser_wait\` — Wait for an element to appear, disappear, or reach a state
+- \`browser_evaluate\` — Run JavaScript in the page context and return the result
+- \`browser_content\` — Get the page's HTML content, title, and URL
+- \`browser_accessibility\` — Get a structured accessibility snapshot of all visible elements
+
+Use browser tools for:
+- Verifying UI changes after editing code (navigate to the page, screenshot, check the result)
+- Debugging visual issues by inspecting the rendered page
+- Taking screenshots to share visual state with the user
+- Interacting with running applications (clicking buttons, filling forms, checking outputs)
+- Running accessibility checks on your UI
+
+The browser is shared across all tool calls — navigate once, then interact as needed. Always \`browser_navigate\` to a URL before using other browser tools.
+
+## Vision Tool
+
+Use the \`vision\` tool to analyze images and screenshots with a vision model. It accepts an image file path (relative to the project root), a prompt describing what to analyze, and optional context. The tool sends the image to the configured vision model and returns a textual analysis.
+
+Typical workflow:
+1. Use \`browser_navigate\` to open a page
+2. Use \`browser_screenshot\` to capture a screenshot (returns a file path)
+3. Use \`vision\` with the screenshot path and a specific prompt like "Check the layout alignment and spacing of the navigation bar" or "Describe the visual hierarchy and identify any UI issues"
+
+The vision tool is especially useful for:
+- UI debugging — identify misalignments, spacing issues, broken layouts
+- Visual review — assess design quality, color contrast, typography
+- Accessibility analysis — check element visibility, focus states, readability
+- Design guidance — get specific CSS/layout recommendations
 
 **When to use which:**
 - \`execute\` — quick commands that finish in seconds (git status, ls, cat)
@@ -999,7 +1282,7 @@ function formatContext(context: Record<string, unknown>, maxTokens = 4000): stri
 
 // ── Tool definitions ───────────────────────────────────────────────────────
 
-function defineAgentTools(qs: AuraQueryService, projectPath: string, managedShells?: ManagedShellService, projectId?: string, webSearch?: WebSearchService): AgentTool[] {
+function defineAgentTools(qs: AuraQueryService, projectPath: string, managedShells?: ManagedShellService, projectId?: string, webSearch?: WebSearchService, playwright?: PlaywrightService, ollama?: OllamaService, visionModel?: string | null): AgentTool[] {
   return [
     // ── Graph & Indexing Tools ────────────────────────────────────────────
 
@@ -1553,13 +1836,13 @@ function defineAgentTools(qs: AuraQueryService, projectPath: string, managedShel
         type: 'object',
         properties: {
           command: { type: 'string', description: 'Shell command to run, e.g. "npm run build", "npx tsc --noEmit", "npm test". Do NOT use for git commands — use the `git` tool instead.' },
-          timeout: { type: 'number', description: 'Timeout in seconds (default: 30, max: 120)' },
+          timeout: { type: 'number', description: 'Timeout in seconds (default: 60, max: 600). Use higher values for download-heavy commands like npm install or pip install.' },
         },
         required: ['command'],
       },
       execute: async (args) => {
         const command = args.command as string
-        const timeoutSeconds = Math.min(120, (args.timeout as number | undefined) ?? 30)
+        const timeoutSeconds = Math.min(600, (args.timeout as number | undefined) ?? 60)
         const timeoutMs = timeoutSeconds * 1000
 
         // Route git commands to the dedicated git tool (including chained commands)
@@ -1594,7 +1877,7 @@ function defineAgentTools(qs: AuraQueryService, projectPath: string, managedShel
         } catch (err: unknown) {
           const execErr = err as { stdout?: string; stderr?: string; code?: string; killed?: boolean; signal?: string }
           if (execErr.killed) {
-            return { exitCode: -1, stdout: (execErr.stdout || '').trim(), stderr: `Command timed out after ${timeoutSeconds}s`, timedOut: true }
+            return { exitCode: -1, stdout: (execErr.stdout || '').trim(), stderr: `Command timed out after ${timeoutSeconds}s (max 600s). For long-running commands like npm install, use a higher timeout value.`, timedOut: true }
           }
           return {
             exitCode: typeof execErr.code === 'number' ? execErr.code : 1,
@@ -1750,6 +2033,278 @@ function defineAgentTools(qs: AuraQueryService, projectPath: string, managedShel
       },
     },
 
+    // ── Browser (Playwright) Tools ────────────────────────────────────────────
+
+    {
+      name: 'browser_navigate',
+      description: 'Open a URL in the headless browser. Use this before any other browser_* tool — the browser must be on a page before you can interact with it. Returns the page title and final URL (after any redirects).',
+      parameters: {
+        type: 'object',
+        properties: {
+          url: { type: 'string', description: 'The URL to navigate to (e.g. "http://localhost:5173/dashboard")' },
+          waitUntil: { type: 'string', enum: ['load', 'domcontentloaded', 'networkidle'], description: 'When to consider navigation complete. Default: "domcontentloaded".' },
+        },
+        required: ['url'],
+      },
+      execute: async (args) => {
+        if (!playwright) return { error: 'Browser tools are not available. Playwright service was not initialized for this project.' }
+        try {
+          return await playwright.navigate(args.url as string, { waitUntil: args.waitUntil as 'load' | 'domcontentloaded' | 'networkidle' | undefined })
+        } catch (err) {
+          return { error: `Failed to navigate: ${err instanceof Error ? err.message : String(err)}` }
+        }
+      },
+    },
+    {
+      name: 'browser_screenshot',
+      description: 'Capture a screenshot of the current browser page (or a specific element). Returns the file path and a brief description. Use after browser_navigate to verify the visual state of a page. Use fullPage: true to capture the entire scrollable page. Use selector to screenshot a specific element.',
+      parameters: {
+        type: 'object',
+        properties: {
+          fullPage: { type: 'boolean', description: 'Capture the entire scrollable page instead of just the viewport. Default: false.' },
+          selector: { type: 'string', description: 'CSS selector to screenshot a specific element instead of the full viewport.' },
+        },
+      },
+      execute: async (args) => {
+        if (!playwright) return { error: 'Browser tools are not available. Playwright service was not initialized for this project.' }
+        try {
+          const result = await playwright.screenshot({ fullPage: args.fullPage as boolean | undefined, selector: args.selector as string | undefined })
+          return { path: result.path, description: `Screenshot saved to ${result.path}. Use the vision tool to analyze this image.` }
+        } catch (err) {
+          return { error: `Failed to capture screenshot: ${err instanceof Error ? err.message : String(err)}` }
+        }
+      },
+    },
+    {
+      name: 'browser_click',
+      description: 'Click an element on the page by CSS selector. Use after browser_navigate to interact with buttons, links, or any clickable element.',
+      parameters: {
+        type: 'object',
+        properties: {
+          selector: { type: 'string', description: 'CSS selector of the element to click (e.g. "button.submit", "#login-btn", "a[href=\'/about\']")' },
+        },
+        required: ['selector'],
+      },
+      execute: async (args) => {
+        if (!playwright) return { error: 'Browser tools are not available.' }
+        try {
+          return await playwright.click(args.selector as string)
+        } catch (err) {
+          return { error: `Failed to click: ${err instanceof Error ? err.message : String(err)}` }
+        }
+      },
+    },
+    {
+      name: 'browser_type',
+      description: 'Type text into an input field identified by CSS selector. Optionally clear the field first with clear: true. Use for filling forms, search boxes, and text inputs.',
+      parameters: {
+        type: 'object',
+        properties: {
+          selector: { type: 'string', description: 'CSS selector of the input element (e.g. "input[name=\'email\']", "#search-box")' },
+          text: { type: 'string', description: 'The text to type into the element.' },
+          clear: { type: 'boolean', description: 'Whether to clear the existing text before typing. Default: false.' },
+        },
+        required: ['selector', 'text'],
+      },
+      execute: async (args) => {
+        if (!playwright) return { error: 'Browser tools are not available.' }
+        try {
+          return await playwright.type(args.selector as string, args.text as string, { clear: args.clear as boolean | undefined })
+        } catch (err) {
+          return { error: `Failed to type: ${err instanceof Error ? err.message : String(err)}` }
+        }
+      },
+    },
+    {
+      name: 'browser_press',
+      description: 'Press a keyboard key (e.g. Enter, Tab, Escape, ArrowDown). Use selector to press on a specific element, or omit to press on the page.',
+      parameters: {
+        type: 'object',
+        properties: {
+          selector: { type: 'string', description: 'CSS selector of the element to focus before pressing. Leave empty to press on the page.' },
+          key: { type: 'string', description: 'The key to press (e.g. "Enter", "Tab", "Escape", "ArrowDown", "Control+a")' },
+        },
+        required: ['key'],
+      },
+      execute: async (args) => {
+        if (!playwright) return { error: 'Browser tools are not available.' }
+        try {
+          return await playwright.press((args.selector as string) || '', args.key as string)
+        } catch (err) {
+          return { error: `Failed to press key: ${err instanceof Error ? err.message : String(err)}` }
+        }
+      },
+    },
+    {
+      name: 'browser_hover',
+      description: 'Hover over an element by CSS selector. Use to trigger hover menus, tooltips, or dropdown reveals.',
+      parameters: {
+        type: 'object',
+        properties: {
+          selector: { type: 'string', description: 'CSS selector of the element to hover over.' },
+        },
+        required: ['selector'],
+      },
+      execute: async (args) => {
+        if (!playwright) return { error: 'Browser tools are not available.' }
+        try {
+          return await playwright.hover(args.selector as string)
+        } catch (err) {
+          return { error: `Failed to hover: ${err instanceof Error ? err.message : String(err)}` }
+        }
+      },
+    },
+    {
+      name: 'browser_select',
+      description: 'Select an option in a <select> dropdown by its value(s). Use for choosing dropdown options.',
+      parameters: {
+        type: 'object',
+        properties: {
+          selector: { type: 'string', description: 'CSS selector of the <select> element.' },
+          values: { type: 'array', items: { type: 'string' }, description: 'The option value(s) to select.' },
+        },
+        required: ['selector', 'values'],
+      },
+      execute: async (args) => {
+        if (!playwright) return { error: 'Browser tools are not available.' }
+        try {
+          return await playwright.select(args.selector as string, args.values as string[])
+        } catch (err) {
+          return { error: `Failed to select: ${err instanceof Error ? err.message : String(err)}` }
+        }
+      },
+    },
+    {
+      name: 'browser_wait',
+      description: 'Wait for an element to appear, disappear, or reach a specific state on the page. Use after navigation or interactions to wait for content to load before taking screenshots or interacting further.',
+      parameters: {
+        type: 'object',
+        properties: {
+          selector: { type: 'string', description: 'CSS selector to wait for.' },
+          state: { type: 'string', enum: ['attached', 'detached', 'visible', 'hidden'], description: 'The state to wait for. Default: "visible".' },
+          timeout: { type: 'number', description: 'Maximum time to wait in milliseconds. Default: 15000.' },
+        },
+        required: ['selector'],
+      },
+      execute: async (args) => {
+        if (!playwright) return { error: 'Browser tools are not available.' }
+        try {
+          return await playwright.waitFor(args.selector as string, { timeout: args.timeout as number | undefined, state: args.state as 'attached' | 'detached' | 'visible' | 'hidden' | undefined })
+        } catch (err) {
+          return { error: `Failed to wait for element: ${err instanceof Error ? err.message : String(err)}` }
+        }
+      },
+    },
+    {
+      name: 'browser_evaluate',
+      description: 'Run JavaScript code in the browser page context and return the result. Use for inspecting DOM state, reading computed styles, checking element dimensions, or extracting data from the page.',
+      parameters: {
+        type: 'object',
+        properties: {
+          expression: { type: 'string', description: 'JavaScript expression to evaluate in the page context. The expression must be self-contained and return a JSON-serializable value. Example: "document.querySelectorAll(\\".error\\").length"' },
+        },
+        required: ['expression'],
+      },
+      execute: async (args) => {
+        if (!playwright) return { error: 'Browser tools are not available.' }
+        try {
+          return await playwright.evaluate(args.expression as string)
+        } catch (err) {
+          return { error: `Failed to evaluate: ${err instanceof Error ? err.message : String(err)}` }
+        }
+      },
+    },
+    {
+      name: 'browser_content',
+      description: 'Get the current page\'s full HTML content, title, and URL. Use when you need to inspect the page structure, find elements, or extract text content.',
+      parameters: {
+        type: 'object',
+        properties: {},
+      },
+      execute: async () => {
+        if (!playwright) return { error: 'Browser tools are not available.' }
+        try {
+          return await playwright.content()
+        } catch (err) {
+          return { error: `Failed to get page content: ${err instanceof Error ? err.message : String(err)}` }
+        }
+      },
+    },
+    {
+      name: 'browser_accessibility',
+      description: 'Get a structured accessibility snapshot of the current page — all visible elements with their roles, names, and values. More useful than HTML for understanding the page structure from a user perspective. Use for checking if elements exist, what text they show, and how they\'re organized.',
+      parameters: {
+        type: 'object',
+        properties: {},
+      },
+      execute: async () => {
+        if (!playwright) return { error: 'Browser tools are not available.' }
+        try {
+          return await playwright.accessibility()
+        } catch (err) {
+          return { error: `Failed to get accessibility snapshot: ${err instanceof Error ? err.message : String(err)}` }
+        }
+      },
+    },
+
+    // ── Vision Tool ──────────────────────────────────────────────────────────
+
+    {
+      name: 'vision',
+      description: 'Send an image to the configured vision model for analysis. Returns a textual summary describing what the model sees in the image — useful for UI debugging, layout analysis, screenshot review, and visual inspection. The image must be a file path relative to the project root (e.g. ".aura/browser/screenshot-123.png"). Use browser_screenshot first to capture a screenshot, then pass the path to this tool for analysis.',
+      parameters: {
+        type: 'object',
+        properties: {
+          image_path: { type: 'string', description: 'Path to the image file relative to the project root. Use browser_screenshot to capture a screenshot first, then pass the returned path here.' },
+          prompt: { type: 'string', description: 'What to analyze about the image. Be specific — e.g. "Check the layout alignment and spacing of the navigation bar" or "Describe the visual hierarchy and color contrast of this page".' },
+          pre_context: { type: 'string', description: 'Optional additional context — e.g. what you were expecting to see, known issues, or relevant CSS/component details.' },
+        },
+        required: ['image_path', 'prompt'],
+      },
+      execute: async (args: Record<string, unknown>) => {
+        const imagePath = args.image_path as string
+        const prompt = args.prompt as string
+        const preContext = (args.pre_context as string) || ''
+
+        if (!visionModel) {
+          return { error: 'No vision model configured. Set a vision model in Settings > Projects > Vision Model to use the vision tool.' }
+        }
+
+        if (!ollama) {
+          return { error: 'Ollama service is not available.' }
+        }
+
+        // Resolve and validate the image path
+        const fullPath = path.resolve(projectPath, imagePath)
+        if (!fullPath.startsWith(path.resolve(projectPath))) {
+          return { error: `Invalid image path: ${imagePath} (escapes project directory)` }
+        }
+
+        try {
+          const imageBuffer = await fs.readFile(fullPath)
+          const imageBase64 = imageBuffer.toString('base64')
+          const contextSection = preContext ? `\n\nAdditional context:\n${preContext}` : ''
+          const messages = [
+            {
+              role: 'user' as const,
+              content: `${prompt}${contextSection}`,
+              images: [imageBase64],
+            },
+          ]
+
+          const result = await ollama.chatWithImage(visionModel, messages, { timeout: 120000 })
+
+          if (result.error) {
+            return { error: result.error }
+          }
+
+          return { analysis: result.content || 'Vision model returned no response.', model: visionModel }
+        } catch (err) {
+          return { error: `Failed to analyze image: ${err instanceof Error ? err.message : String(err)}` }
+        }
+      },
+    },
+
     // ── Web Research Tools ─────────────────────────────────────────────────
 
     {
@@ -1834,7 +2389,7 @@ function defineAgentTools(qs: AuraQueryService, projectPath: string, managedShel
 
     {
       name: 'dispatch_sub_agents',
-      description: 'Spawn sub-agents for token-heavy tasks like exploration, research, or planning — this offloads work from your context window so it does not get bloated with intermediate tool results. Each sub-agent runs its own tool-calling loop and returns a concise summary. Write DETAILED task descriptions — sub-agents start with no conversation context, so include all relevant details, file paths, and specific questions in the task field. Use preContext to forward facts you have already discovered so the sub-agent does not re-discover them. Choose the right type: "explore" for investigating code, "research" for web/docs, "plan" for creating implementation plans.',
+      description: 'Spawn sub-agents for token-heavy tasks like exploration, research, planning, or UI design — this offloads work from your context window so it does not get bloated with intermediate tool results. Each sub-agent runs its own tool-calling loop and returns a concise summary. Write DETAILED task descriptions — sub-agents start with no conversation context, so include all relevant details, file paths, and specific questions in the task field. Use preContext to forward facts you have already discovered so the sub-agent does not re-discover them. Choose the right type: "explore" for investigating code, "research" for web/docs, "plan" for creating implementation plans, "designer" for UI design — inspecting pages, analyzing screenshots, and producing design recommendations.',
       parameters: {
         type: 'object',
         properties: {
@@ -1846,7 +2401,7 @@ function defineAgentTools(qs: AuraQueryService, projectPath: string, managedShel
                 title: { type: 'string', description: 'Short title for this task, e.g. "Explore auth module" or "Trace API dependencies"' },
                 task: { type: 'string', description: 'A detailed, specific prompt for the sub-agent. Include file paths, symbol names, error messages, and exactly what to find or produce. The sub-agent has no conversation context — everything it needs to know must be in this field or preContext. Vague prompts waste iterations.' },
                 focus: { type: 'string', description: 'Specific focus area — e.g., "upstream dependencies", "API surface", "auth module"' },
-                type: { type: 'string', enum: ['explore', 'research', 'plan'], description: 'Agent type: "explore" (investigate code, read-only), "research" (web/docs), "plan" (create implementation plan, read-only)' },
+                type: { type: 'string', enum: ['explore', 'research', 'plan', 'designer', 'implementer', 'reviewer'], description: 'Agent type: "explore" (investigate code, read-only), "research" (web/docs), "plan" (create implementation plan, read-only), "designer" (UI/UX design — inspect pages, analyze screenshots, produce design recommendations), "implementer" (execute implementation tasks — write code, test, commit, report back), "reviewer" (code review — inspect implementer work, verify spec compliance and code quality)' },
                 preContext: { type: 'string', description: 'Optional context to give the sub-agent a head start — relevant findings, file paths, or facts the main agent has already discovered. Use this when you have information that would save the sub-agent from re-discovering it. Only include what is directly relevant to the task.' },
               },
               required: ['title', 'task'],
@@ -1972,8 +2527,10 @@ export class AuraAgent {
   private chatService: AuraChatService | null
   private chatId: string | null
   private webSearch: WebSearchService
+  private visionModel: string | null
+  private playwright: PlaywrightService | null
 
-  constructor(qs: AuraQueryService, projectPath: string, ollama: OllamaService, model?: string, contextWindow?: number, managedShells?: ManagedShellService, projectId?: string, chatService?: AuraChatService, chatId?: string, apiKey?: string) {
+  constructor(qs: AuraQueryService, projectPath: string, ollama: OllamaService, model?: string, contextWindow?: number, managedShells?: ManagedShellService, projectId?: string, chatService?: AuraChatService, chatId?: string, apiKey?: string, visionModel?: string | null, playwright?: PlaywrightService | null) {
     this.qs = qs
     this.projectPath = projectPath
     this.ollama = ollama
@@ -1984,6 +2541,8 @@ export class AuraAgent {
     this.chatService = chatService || null
     this.chatId = chatId || null
     this.webSearch = new WebSearchService(apiKey)
+    this.visionModel = visionModel ?? null
+    this.playwright = playwright ?? null
     // Get or create the ApprovalManager for this project
     let am = globalApprovalManagers.get(projectPath)
     if (!am) {
@@ -2077,7 +2636,7 @@ export class AuraAgent {
     const systemPrompt = buildSystemPrompt(skillContent, contextSection, isGreenfield || undefined, gitContext || undefined, planResume || undefined, isWindows)
 
     // Build tools
-    const tools = defineAgentTools(this.qs, this.projectPath, this.managedShells ?? undefined, this.projectId ?? undefined, this.webSearch)
+    const tools = defineAgentTools(this.qs, this.projectPath, this.managedShells ?? undefined, this.projectId ?? undefined, this.webSearch, this.playwright ?? undefined, this.ollama, this.visionModel)
     const ollamaTools = buildOllamaTools(tools)
 
     const priorMsgs = priorMessages || []
@@ -2169,15 +2728,16 @@ export class AuraAgent {
     const recentToolCalls: string[] = []  // Track tool call signatures for deduplication
     let todoList: AuraTodoItem[] = planResume ? [...planResume.todos] : []
     let compactionFailures = 0
+    let compactionCooldown = 0  // Skip compaction for N iterations after a successful compaction
     for (let i = 0; i < maxIterations; i++) {
       if (this.abortController.signal.aborted) {
         eventSink.emit('done', {})
         return
       }
 
-      // Compact messages if context is getting too large
+      // Compact messages if context is getting too large (but respect cooldown after a successful compaction)
       const totalTokensBefore = estimateTokens(systemPrompt) + estimateMessagesTokens(messages)
-      if (totalTokensBefore > this.contextWindow * COMPACT_THRESHOLD) {
+      if (totalTokensBefore > this.contextWindow * COMPACT_THRESHOLD && compactionFailures < COMPACTION_FAILURE_LIMIT && compactionCooldown <= 0) {
         eventSink.emit(AgentEventType.Status, { status: 'compacting' })
       }
       const compactResult = await compactMessagesAsync(messages, systemPrompt, todoList, this.contextWindow, this.ollama, this.model, compactionFailures, planResume)
@@ -2248,6 +2808,13 @@ export class AuraAgent {
         }
       }
       compactionFailures = compactResult.compactionFailures
+      // After successful compaction, skip compaction for a few iterations to avoid
+      // repeatedly trying to compact when recent messages alone exceed the threshold
+      if (compactResult.messages !== messages) {
+        compactionCooldown = COMPACT_COOLDOWN
+      } else {
+        compactionCooldown = Math.max(0, compactionCooldown - 1)
+      }
 
       const result = await this.streamChat(messages, ollamaTools, eventSink)
 
@@ -2828,13 +3395,14 @@ export class AuraAgent {
     eventSink: AgentEventSink,
     context?: Record<string, unknown>,
   ): Promise<Array<{ focus: string; result: string }>> {
-    const allTools = defineAgentTools(this.qs, this.projectPath, this.managedShells ?? undefined, this.projectId ?? undefined, this.webSearch)
+    const allTools = defineAgentTools(this.qs, this.projectPath, this.managedShells ?? undefined, this.projectId ?? undefined, this.webSearch, this.playwright ?? undefined, this.ollama, this.visionModel)
     const maxSubIterations = 100
 
     const runOne = async (taskIndex: number, task: SubAgentTask): Promise<string> => {
       const agentType: SubAgentType = task.type || 'explore'
       const taskId = `sa_${taskIndex}_${task.focus}`
       eventSink.emit('sub_agent_start', { taskId, title: task.title, task: task.task, type: agentType, startTime: Date.now() })
+
 
       // Build lean system prompt for sub-agents: base tool instructions only, no user context/skills/plan
       const agentPrompt = SUB_AGENT_SYSTEM_PROMPTS[agentType]

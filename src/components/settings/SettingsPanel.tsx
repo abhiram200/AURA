@@ -490,6 +490,8 @@ export function SettingsPanel({
                         defaultModel={settings.defaultVisionModel ?? ''}
                         onDefaultModelChange={(model) => onSettingsChange({ defaultVisionModel: model || null })}
                         filterEmbedding
+                        allowEmpty
+                        emptyLabel="None (use project model)"
                       />
                     </div>
                     <div className="settings-modal-section">

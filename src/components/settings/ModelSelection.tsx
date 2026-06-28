@@ -6,9 +6,11 @@ interface ModelSelectionProps {
   defaultModel: string;
   onDefaultModelChange: (model: string) => void;
   filterEmbedding?: boolean;
+  allowEmpty?: boolean;
+  emptyLabel?: string;
 }
 
-export function ModelSelection({ models, defaultModel, onDefaultModelChange, filterEmbedding = false }: ModelSelectionProps) {
+export function ModelSelection({ models, defaultModel, onDefaultModelChange, filterEmbedding = false, allowEmpty = false, emptyLabel = 'None (auto-detect)' }: ModelSelectionProps) {
   const filteredModels = filterEmbedding ? models.filter(m => !m.isEmbedding) : models;
 
   if (filteredModels.length === 0) {
@@ -25,12 +27,21 @@ export function ModelSelection({ models, defaultModel, onDefaultModelChange, fil
     );
   }
 
-  const options = filteredModels.map((model) => ({
+  const options = [];
+
+  // Add empty/none option when allowed (e.g. for vision model)
+  if (allowEmpty) {
+    options.push({ value: '', label: emptyLabel });
+  }
+
+  options.push(...filteredModels.map((model) => ({
     value: model.name,
     label: model.name,
-  }));
+  })));
 
-  const effectiveValue = defaultModel || filteredModels[0].name;
+  // When allowEmpty, use the actual saved value (which may be empty).
+  // When not allowEmpty, fall back to first model as before.
+  const effectiveValue = allowEmpty ? defaultModel : (defaultModel || filteredModels[0].name);
 
   return (
     <div className="model-selection">
@@ -38,7 +49,7 @@ export function ModelSelection({ models, defaultModel, onDefaultModelChange, fil
         options={options}
         value={effectiveValue}
         onChange={onDefaultModelChange}
-        placeholder="Select a model"
+        placeholder={allowEmpty ? emptyLabel : 'Select a model'}
       />
     </div>
   );

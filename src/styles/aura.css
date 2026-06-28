@@ -2431,13 +2431,29 @@
 
 .aura-chat__approval-card {
   background: #111820;
-  border: 1px solid #2a3a4a;
+  border: 2px solid #58a6ff;
   border-radius: 8px;
   margin: 12px 0;
   padding: 16px;
   display: flex;
   flex-direction: column;
   gap: 12px;
+  position: sticky;
+  bottom: 0;
+  z-index: 10;
+  box-shadow: 0 -4px 20px rgba(0, 0, 0, 0.5);
+  animation: approval-slide-in 0.2s ease-out;
+}
+
+@keyframes approval-slide-in {
+  from {
+    transform: translateY(20px);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
 }
 
 .aura-chat__approval-type {

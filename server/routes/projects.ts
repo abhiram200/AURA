@@ -234,7 +234,7 @@ Thumbs.db
 
       // Clone the repo
       await new Promise<void>((resolve, reject) => {
-        execFile('git', ['clone', normalizedUrl, workspacePath], { timeout: 120000 }, (err, _stdout, stderr) => {
+        execFile('git', ['clone', normalizedUrl, workspacePath], { timeout: 600000 }, (err, _stdout, stderr) => {
           if (err) {
             reject(new Error(stderr || err.message))
           } else {
