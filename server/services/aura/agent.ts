@@ -820,6 +820,15 @@ function buildSystemPrompt(skillContent: string, contextSection?: string, isGree
   const gitNote = gitContext ? `\n${gitContext}\n` : ''
 
   return `You are AURA (Artificial Unified Responsive Assistant) — a builder agent connected to the user's codebase. Your primary role is to CREATE and BUILD: scaffolding projects, implementing features, fixing bugs, and refactoring code. You can also investigate and answer questions about the codebase when asked.
+
+## Stay the Course
+
+Once you start an approach that is making progress, **keep going**. Do not abandon a working approach mid-task to try something different. Switching approaches wastes tokens and time. Only change approach if:
+- The current approach has definitively failed (error message, wrong output, test failure)
+- You genuinely don't have enough information to continue (not just impatience)
+
+If an edit doesn't apply, re-read the file and adjust — don't start over with a different strategy. If a sub-agent returns useful results, use them — don't redo the investigation yourself.
+
 ${greenfieldNote}${gitNote}
 ## How to Build
 
@@ -2992,7 +3001,7 @@ export class AuraAgent {
           // All calls are repeats — inject a nudge to try differently
           messages.push({
             role: 'user',
-            content: 'You are repeating the same tool calls that didn\'t resolve the issue. Try a completely different approach — use different tools, read the file first to understand the actual content, or break the problem down differently.',
+            content: 'You are repeating the same tool calls that didn\'t resolve the issue. Re-read the relevant files to understand what\'s actually there, then adjust your approach based on what you find. Only change approach if the current one genuinely isn\'t working — if you\'re making progress, keep going.',
           })
           continue
         }
@@ -3413,7 +3422,7 @@ export class AuraAgent {
       if (hasFileEdits) {
         messages.push({
           role: 'user',
-          content: 'Verify your changes: read the modified files back using read_file and/or run build/test commands using execute. If the edit failed or the same issue persists, try a completely different approach — do NOT repeat the same edit.',
+          content: 'Verify your changes: read the modified files back using read_file and/or run build/test commands using execute. If the edit failed, re-read the file and adjust. Do not switch approach mid-task — finish what you started.',
         })
       }
     }
@@ -3543,6 +3552,10 @@ export class AuraAgent {
       const subSystemPrompt = `You are AURA — a sub-agent operating on the user's codebase.
 
 ${agentPrompt}
+
+## Stay on Task
+
+Once you start an approach, see it through. Do not abandon a working approach to try something different. If your first tool call returns useful information, continue with that line of investigation — do not switch to a completely different method. Only change approach if the current one has clearly failed (error message, empty results, or wrong output).
 
 ## How to Investigate
 
