@@ -319,8 +319,10 @@ const SubAgentSection = memo(function SubAgentSection({ sa }: { sa: AuraSubAgent
     meta = parts.join(' · ')
   }
 
+  const openByDefault = sa.status !== 'running' && !!sa.result
+
   return (
-    <details className="aura-chat__sub-agent">
+    <details className="aura-chat__sub-agent" open={openByDefault}>
       <summary className="aura-chat__sub-agent-header">
         <StatusDot status={sa.status} />
         <span className={`aura-chat__sub-agent-task ${statusClass}`}>
@@ -376,7 +378,7 @@ function SubAgentsGroup({ subAgents }: { subAgents: AuraSubAgentInfo[] }) {
   const groupStatusClass = groupStatus === 'completed' ? 'aura-chat__status-text--done' : 'aura-chat__status-text--running'
 
   return (
-    <details className="aura-chat__sub-agents-group" open={running > 0}>
+    <details className="aura-chat__sub-agents-group" open={running > 0 || completed > 0}>
       <summary className="aura-chat__sub-agents-group-header">
         <StatusDot status={groupStatus} />
         <span className={`aura-chat__sub-agents-group-label ${groupStatusClass}`}>{label}</span>
