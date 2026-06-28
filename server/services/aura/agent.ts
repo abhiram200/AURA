@@ -44,6 +44,140 @@ function estimateMessagesTokens(messages: Array<{ role: string; content: string;
   }, 0)
 }
 
+// ── Sub-agent compaction ─────────────────────────────────────────────────────
+
+// Tool results to preserve verbatim in sub-agent compaction summaries
+// (no dispatch_sub_agents since sub-agents can't spawn more sub-agents)
+const SUB_AGENT_COMPACTION_TOOL_RESULTS = new Set(['write', 'update', 'ask_user'])
+
+// Build a rule-based summary for sub-agent compaction (no AI call — faster, leaner)
+function buildSubAgentFallbackSummary(messages: OllamaMessage[]): string {
+  const lines: string[] = ['## Previous Investigation (Compacted)', '', 'The earlier part of this sub-agent investigation has been summarized to save context.', '', 'Key findings:']
+
+  for (const m of messages) {
+    if (m.role === 'user') {
+      const snippet = m.content.slice(0, 200).trim()
+      if (snippet) lines.push(`- Task: ${snippet}`)
+    } else if (m.role === 'assistant') {
+      if (m.content) {
+        const snippet = m.content.slice(0, 300).trim()
+        if (snippet) lines.push(`- Finding: ${snippet}`)
+      }
+      if (m.tool_calls && m.tool_calls.length > 0) {
+        const callDescs = m.tool_calls.map(tc => `${tc.function.name}(${JSON.stringify(tc.function.arguments).slice(0, 80)})`)
+        lines.push(`  Called: ${callDescs.join(', ')}`)
+      }
+    } else if (m.role === 'tool') {
+      const toolName = m.name || 'unknown'
+      const content = typeof m.content === 'string' ? m.content : JSON.stringify(m.content)
+      if (content.startsWith('{"acknowledged":true')) continue
+      if (SUB_AGENT_COMPACTION_TOOL_RESULTS.has(toolName)) {
+        const snippet = content.slice(0, 300).trim()
+        if (snippet) lines.push(`  (tool result ${toolName}): ${snippet}...)`)
+      } else {
+        lines.push(`  (tool result ${toolName}): <omitted>)`)
+      }
+    }
+  }
+
+  lines.push('', 'Continue your investigation based on these findings.')
+  return lines.join('\n')
+}
+
+// Compact sub-agent messages when context pressure is high.
+// Uses rule-based summarization only (no AI call) for speed.
+// Preserves all system messages and recent conversation turns,
+// replacing older conversation turns with a summary.
+function compactSubAgentMessages(
+  messages: OllamaMessage[],
+  contextWindow: number,
+): OllamaMessage[] {
+  const totalTokens = estimateMessagesTokens(messages)
+  if (totalTokens <= contextWindow * COMPACT_THRESHOLD) {
+    return messages // No compaction needed
+  }
+
+  // Separate system messages (always preserved) from conversation messages
+  const systemMessages: OllamaMessage[] = []
+  const conversationMessages: OllamaMessage[] = []
+  for (const m of messages) {
+    if (m.role === 'system') {
+      systemMessages.push(m)
+    } else {
+      conversationMessages.push(m)
+    }
+  }
+
+  if (conversationMessages.length <= 1) {
+    // Can't compact — only one conversation message exists
+    return messages
+  }
+
+  // Group conversation messages into turns
+  const turns = groupMessagesIntoTurns(conversationMessages)
+
+  if (turns.length <= 1) {
+    return messages // Can't compact a single turn
+  }
+
+  // Walk backward, keeping complete turns that fit in the recent budget
+  const systemTokens = estimateMessagesTokens(systemMessages)
+  const recentTokenBudget = Math.floor(contextWindow * RECENT_BUDGET_RATIO)
+  let usedTokens = 0
+  let cutoffIndex = turns.length
+
+  for (let i = turns.length - 1; i >= 0; i--) {
+    const turnTokens = estimateMessagesTokens(turns[i])
+    if (usedTokens + turnTokens > recentTokenBudget) break
+    usedTokens += turnTokens
+    cutoffIndex = i
+  }
+
+  // Always keep at least the most recent turn
+  if (cutoffIndex >= turns.length) {
+    cutoffIndex = Math.max(0, turns.length - 1)
+  }
+
+  const removedTurns = turns.slice(0, cutoffIndex)
+  const recentTurns = turns.slice(cutoffIndex)
+
+  if (removedTurns.length === 0) return messages
+
+  const removedMessages = removedTurns.flat()
+  const recentMessages = recentTurns.flat()
+  const summary = buildSubAgentFallbackSummary(removedMessages)
+
+  // Determine summary role to avoid consecutive user messages
+  const summaryRole = (recentMessages.length > 0 && recentMessages[0].role === 'user')
+    ? 'system'
+    : 'user'
+
+  const summaryContent = `${summary}\n\n---\nContinue your investigation from where you left off.`
+
+  // Summary truncation safeguard
+  const recentTokens = estimateMessagesTokens(recentMessages)
+  const totalAfterCompaction = systemTokens + estimateTokens(summaryContent) + recentTokens
+  let finalSummaryContent = summaryContent
+  if (totalAfterCompaction > contextWindow) {
+    const maxSummaryTokens = contextWindow - systemTokens - recentTokens - 100
+    if (maxSummaryTokens > 0) {
+      const maxSummaryChars = Math.floor(maxSummaryTokens * CHARS_PER_TOKEN)
+      finalSummaryContent = summaryContent.slice(0, maxSummaryChars) + '\n\n[...summary truncated...]'
+    }
+  }
+
+  const result: OllamaMessage[] = [...systemMessages]
+
+  if (summaryRole === 'system') {
+    result.push({ role: 'system', content: finalSummaryContent })
+  } else {
+    result.push({ role: 'user', content: finalSummaryContent })
+  }
+
+  result.push(...recentMessages)
+  return result
+}
+
 // ── Context compaction ──────────────────────────────────────────────────────
 
 const COMPACT_THRESHOLD = 0.7 // Compact when tokens exceed 70% of context window
@@ -3499,6 +3633,13 @@ Focus on: ${task.focus}`
           } catch (err) {
             messages.push({ role: 'tool', content: JSON.stringify({ error: err instanceof Error ? err.message : String(err) }), tool_call_id: `${tc.name}_sub_${i}`, name: tc.name })
           }
+        }
+
+        // Compact sub-agent context if approaching the limit
+        const compacted = compactSubAgentMessages(messages, this.contextWindow)
+        if (compacted !== messages) {
+          messages.length = 0
+          messages.push(...compacted)
         }
       }
 
