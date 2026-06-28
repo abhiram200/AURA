@@ -6,7 +6,6 @@ import type { Settings, UserPreferences } from '../storage/types.ts'
 const DEFAULT_SETTINGS: Settings = {
   defaultModel: '',
   contextWindowSize: 131072,
-  autoExtractMemory: true,
   preferences: {
     responseDetail: null,
     technicalLevel: null,

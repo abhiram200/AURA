@@ -6,13 +6,12 @@ interface DependenciesPageProps {
   projectId: string
   projectName: string
   workspacePath: string
-  conversationId: string | null
   onFileOpen?: (filePath: string, startLine?: number) => void
   aura: ReturnType<typeof useAura>
   reportActivity?: (type: 'edit' | 'interaction') => void
 }
 
-export function DependenciesPage({ projectId, projectName, workspacePath, conversationId: _conversationId, onFileOpen, aura, reportActivity }: DependenciesPageProps) {
+export function DependenciesPage({ projectId, projectName, workspacePath, onFileOpen, aura, reportActivity }: DependenciesPageProps) {
   const { theme } = useTheme()
   const isLightMode = theme === 'light'
 

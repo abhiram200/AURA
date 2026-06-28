@@ -11,7 +11,6 @@ interface AssistantPageProps {
   projectId: string
   projectName: string
   workspacePath: string
-  conversationId: string | null
   aura: ReturnType<typeof useAura>
   reportActivity?: (type: 'edit' | 'interaction') => void
   onOpenGitTree?: () => void
@@ -19,7 +18,7 @@ interface AssistantPageProps {
 
 const SKIP_KEY = (pid: string) => `aura-skip-new-chat-confirm:${pid}`
 
-export function AssistantPage({ projectId, projectName, workspacePath: _workspacePath, conversationId: _conversationId, aura, isActive, reportActivity, onOpenGitTree }: AssistantPageProps & { isActive?: boolean }) {
+export function AssistantPage({ projectId, projectName, workspacePath: _workspacePath, aura, isActive, reportActivity, onOpenGitTree }: AssistantPageProps & { isActive?: boolean }) {
   const { theme } = useTheme()
   const isLight = theme === 'light'
   const [showConfirm, setShowConfirm] = useState(false)

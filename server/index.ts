@@ -4,16 +4,12 @@ import cors from 'cors'
 import { join, basename } from 'path'
 import { FileStore } from './storage/fileStore.ts'
 import { OllamaService } from './services/ollama.ts'
-import { ContextService } from './services/context.ts'
-import { ConversationService } from './services/conversation.ts'
 import { MemoryService } from './services/memory.ts'
 import { SkillsService } from './services/skills.ts'
 import { WebSearchService } from './services/aura/web-search.ts'
 import { ProjectService } from './services/project.ts'
 import { GroupService } from './services/group.ts'
-import { createChatRouter } from './routes/chat.ts'
 import { createModelsRouter } from './routes/models.ts'
-import { createConversationsRouter } from './routes/conversations.ts'
 import { createMemoryRouter } from './routes/memory.ts'
 import { createSkillsRouter } from './routes/skills.ts'
 import { createProjectsRouter } from './routes/projects.ts'
@@ -57,7 +53,6 @@ async function start() {
   const defaultSettings = {
     defaultModel: detectedModel,
     contextWindowSize: 131072,
-    autoExtractMemory: true,
     preferences: {
       responseDetail: null, technicalLevel: null, responseFormat: null,
       domains: null, personality: null, proactiveness: null,
@@ -81,8 +76,6 @@ async function start() {
     await store.write('settings.json', existingSettings)
   }
 
-  const contextService = new ContextService()
-  const conversationService = new ConversationService(store)
   const memoryService = new MemoryService(store)
   const webSearch = new WebSearchService(existingSettings?.ollamaApiKey)
   const skillsService = new SkillsService(store, webSearch)
@@ -97,9 +90,7 @@ async function start() {
   await skillsService.init()
   await projectService.init()
 
-  app.use('/api/chat', createChatRouter(ollama, contextService, conversationService, memoryService, skillsService, projectService, store))
   app.use('/api/models', createModelsRouter(ollama, store))
-  app.use('/api/conversations', createConversationsRouter(conversationService))
   app.use('/api/memory', createMemoryRouter(memoryService))
   app.use('/api/skills', createSkillsRouter(skillsService, ollama, store))
   app.use('/api/projects', createProjectsRouter(projectService, ollama, store))

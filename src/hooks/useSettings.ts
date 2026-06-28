@@ -14,7 +14,6 @@ export interface UserPreferences {
 export interface AppSettings {
   defaultModel: string
   contextWindowSize: number
-  autoExtractMemory: boolean
   preferences: UserPreferences
   preferencesSet: boolean
   activeSkillIds: string[]
@@ -32,7 +31,6 @@ export interface AppSettings {
 const DEFAULT_SETTINGS: AppSettings = {
   defaultModel: '',
   contextWindowSize: 131072,
-  autoExtractMemory: true,
   preferences: {
     responseDetail: null, technicalLevel: null, responseFormat: null,
     domains: null, personality: null, proactiveness: null,

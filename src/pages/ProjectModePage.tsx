@@ -1,109 +1,138 @@
 import { useState, useEffect, useRef } from 'react'
-import { Link, useLocation, useNavigate } from 'react-router-dom'
+import { useLocation, useNavigate } from 'react-router-dom'
 import { motion, AnimatePresence } from 'framer-motion'
 import { useProjectMode, type Project } from '../hooks/useProjectMode'
 import { useAnimationConfig, getTransition } from '../hooks/useAnimationConfig'
-import { DeleteProjectModal } from '../components/chat/DeleteProjectModal'
+import { DeleteProjectModal } from '../components/shared/DeleteProjectModal'
+import { SettingsPanel } from '../components/settings/SettingsPanel'
 import { useSettings } from '../hooks/useSettings'
 
-function ProjectCard({ project, onClick, onDelete }: { project: Project; onClick: () => void; onDelete: (e: React.MouseEvent) => void }) {
+// ── Project card with glow border ──────────────────────────────────────────
+
+function ProjectCard({ project, onClick, onDelete, index }: { project: Project; onClick: () => void; onDelete: (e: React.MouseEvent) => void; index: number }) {
+  const { animationIntensity } = useAnimationConfig()
   const statusColor = project.status === 'active' ? 'var(--accent-primary)' : 'var(--text-tertiary)'
   const statusLabel = project.status === 'active' ? 'Active' : 'Completed'
+  const timeAgo = getTimeAgo(project.updatedAt)
 
   return (
-    <div className="project-card" onClick={onClick} role="button" tabIndex={0} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') onClick() }}>
-      <button className="project-card__delete" onClick={onDelete} title="Delete project">
+    <motion.div
+      className="pm-card"
+      onClick={onClick}
+      role="button"
+      tabIndex={0}
+      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') onClick() }}
+      initial={{ opacity: 0, y: 20 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={getTransition({ duration: 0.3, delay: index * 0.05 }, animationIntensity)}
+    >
+      <div className="pm-card__glow" />
+      <button className="pm-card__delete" onClick={onDelete} title="Delete project">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
           <line x1="18" y1="6" x2="6" y2="18" />
           <line x1="6" y1="6" x2="18" y2="18" />
         </svg>
       </button>
-      <div className="project-card__name">{project.name}</div>
-      <div className="project-card__description">{project.description}</div>
-      <div className="project-card__footer">
-        <span className="project-card__status" style={{ color: statusColor }}>
-          {statusLabel}
-        </span>
-        <span className="project-card__date">{new Date(project.createdAt).toLocaleDateString()}</span>
+      <div className="pm-card__header">
+        <span className="pm-card__status-dot" style={{ background: statusColor, boxShadow: `0 0 6px ${statusColor}` }} />
+        <span className="pm-card__name">{project.name}</span>
       </div>
-    </div>
+      {project.description && <p className="pm-card__desc">{project.description}</p>}
+      <div className="pm-card__footer">
+        <span className="pm-card__status" style={{ color: statusColor }}>{statusLabel}</span>
+        <span className="pm-card__time">{timeAgo}</span>
+      </div>
+    </motion.div>
   )
 }
 
-function FolderPicker({ onPathSelected, isCreating }: { onPathSelected: (path: string) => void; isCreating: boolean }) {
-  const [folderPath, setFolderPath] = useState('')
+// ── New project command input ──────────────────────────────────────────────
+
+function NewProjectInput({ onSubmit, isCreating }: { onSubmit: (input: string) => void; isCreating: boolean }) {
+  const { animationIntensity } = useAnimationConfig()
+  const [value, setValue] = useState('')
+  const inputRef = useRef<HTMLInputElement>(null)
   const { settings } = useSettings()
 
   const cleanPath = (p: string) => p.replace(/^["'](.+)["']$/, '$1').trim()
   const isPathLike = (input: string) => /[\\/]/.test(input) || /^[A-Za-z]:/.test(input)
   const isGithubUrl = (input: string) => /^https?:\/\/github\.com\/.+\/.+/.test(input) || /^github\.com\/.+\/.+/.test(input)
+  const trimmed = cleanPath(value)
+
+  let hint = ''
+  let hintType: 'info' | 'warning' = 'info'
+  if (trimmed) {
+    if (isGithubUrl(trimmed)) {
+      hint = settings.defaultProjectPath
+        ? `Clone into ${settings.defaultProjectPath.replace(/[/\\]+$/, '')}`
+        : 'Set a default project path in Settings first'
+      hintType = settings.defaultProjectPath ? 'info' : 'warning'
+    } else if (isPathLike(trimmed)) {
+      hint = 'Open or create at this path'
+      hintType = 'info'
+    } else if (settings.defaultProjectPath) {
+      hint = `→ ${settings.defaultProjectPath.replace(/[/\\]+$/, '')}${settings.defaultProjectPath.includes('\\') ? '\\' : '/'}${trimmed}`
+      hintType = 'info'
+    } else {
+      hint = 'Set a default path in Settings, or enter a full path'
+      hintType = 'warning'
+    }
+  }
 
   return (
-    <div className="folder-picker">
-      <div className="folder-picker__icon">&#128193;</div>
-      <div className="folder-picker__title">Create a new project</div>
-      <div className="folder-picker__subtitle">
-        Enter a project name, a full local path, or a GitHub URL to clone.
-      </div>
-      <div className="folder-picker__input-group">
+    <motion.div
+      className="pm-command"
+      initial={{ opacity: 0, y: 12 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={getTransition(0.3, animationIntensity)}
+    >
+      <div className="pm-command__prompt">
+        <span className="pm-command__arrow">❯</span>
         <input
-          className="folder-picker__input"
+          ref={inputRef}
+          className="pm-command__input"
           type="text"
-          value={folderPath}
-          onChange={(e) => setFolderPath(e.target.value)}
+          value={value}
+          onChange={(e) => setValue(e.target.value)}
           onKeyDown={(e) => {
-            if (e.key === 'Enter' && folderPath.trim() !== '' && !isCreating) {
-              onPathSelected(cleanPath(folderPath))
-            }
+            if (e.key === 'Enter' && trimmed && !isCreating) onSubmit(trimmed)
           }}
-          placeholder="my-project, C:\Projects\my-project, or github.com/user/repo"
+          placeholder="project-name, C:\path\to\project, or github.com/user/repo"
+          disabled={isCreating}
+          autoFocus
         />
+        {isCreating && <span className="pm-command__spinner" />}
       </div>
-      {folderPath.trim() && isGithubUrl(cleanPath(folderPath)) && settings.defaultProjectPath && (
-        <div className="folder-picker__hint">
-          GitHub repo will be cloned into your default project path
-        </div>
-      )}
-      {folderPath.trim() && isGithubUrl(cleanPath(folderPath)) && !settings.defaultProjectPath && (
-        <div className="folder-picker__hint folder-picker__hint--warning">
-          No default project path set. Set a default path in Settings first, or enter a full local path instead.
-        </div>
-      )}
-      {folderPath.trim() && !isGithubUrl(cleanPath(folderPath)) && !isPathLike(cleanPath(folderPath)) && settings.defaultProjectPath && (
-        <div className="folder-picker__hint">
-          Will be created at: {settings.defaultProjectPath.replace(/[/\\]+$/, '') + (settings.defaultProjectPath.includes('\\') ? '\\' : '/') + cleanPath(folderPath)}
-        </div>
-      )}
-      {folderPath.trim() && !isGithubUrl(cleanPath(folderPath)) && !isPathLike(cleanPath(folderPath)) && !settings.defaultProjectPath && (
-        <div className="folder-picker__hint folder-picker__hint--warning">
-          No default project path set. Enter a full path or set a default path in Settings.
-        </div>
-      )}
-      <div className="folder-picker__actions">
-        <button
-          className="folder-picker__continue"
-          disabled={folderPath.trim() === '' || isCreating}
-          onClick={() => onPathSelected(cleanPath(folderPath))}
-        >
-          {isCreating ? 'Creating...' : 'Continue'}
-        </button>
-      </div>
-    </div>
+      {hint && <div className={`pm-command__hint pm-command__hint--${hintType}`}>{hint}</div>}
+    </motion.div>
   )
 }
+
+// ── Time formatting ─────────────────────────────────────────────────────────
+
+function getTimeAgo(dateStr: string): string {
+  const seconds = Math.floor((Date.now() - new Date(dateStr).getTime()) / 1000)
+  if (seconds < 60) return 'just now'
+  const minutes = Math.floor(seconds / 60)
+  if (minutes < 60) return `${minutes}m ago`
+  const hours = Math.floor(minutes / 60)
+  if (hours < 24) return `${hours}h ago`
+  const days = Math.floor(hours / 24)
+  if (days < 30) return `${days}d ago`
+  return new Date(dateStr).toLocaleDateString()
+}
+
+// ── Main page ───────────────────────────────────────────────────────────────
 
 export function ProjectModePage() {
   const location = useLocation()
   const navigate = useNavigate()
   const { projects, loading, view, setView, setupStep, setSetupStep, startNewProject, createProject, autoCreateProject, cloneGithub, deleteProject } = useProjectMode()
-  const { settings } = useSettings()
+  const { settings, models, updateSettings } = useSettings()
   const { animationIntensity } = useAnimationConfig()
   const hasAutoStarted = useRef(false)
   const [projectToDelete, setProjectToDelete] = useState<Project | null>(null)
   const [isCreating, setIsCreating] = useState(false)
-
-  const conversationId = (location.state as { conversationId?: string | null } | null)?.conversationId ?? null
-  const chatPath = conversationId ? `/chat/${conversationId}` : '/'
 
   useEffect(() => {
     const state = location.state as { tab?: string } | null
@@ -114,7 +143,7 @@ export function ProjectModePage() {
   }, [location.state, startNewProject])
 
   const handleSelectProject = (projectId: string) => {
-    navigate(`/project-mode/${projectId}`, { state: { conversationId } })
+    navigate(`/project-mode/${projectId}`)
   }
 
   const isPathLike = (input: string) => /[\\/]/.test(input) || /^[A-Za-z]:/.test(input)
@@ -131,32 +160,22 @@ export function ProjectModePage() {
         try {
           const project = await cloneGithub(input)
           if (project) {
-            if (conversationId) {
-              fetch(`/api/conversations/${conversationId}/project`, {
-                method: 'PATCH',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ projectId: project.id }),
-              }).catch(() => {})
-            }
-            navigate(`/project-mode/${project.id}`, { state: { workspacePath: project.workspacePath, conversationId } })
+            navigate(`/project-mode/${project.id}`, { state: { workspacePath: project.workspacePath } })
           }
         } catch (err: any) {
           alert(err.message || 'Failed to clone repository')
         }
       } else if (isPathLike(input)) {
-        // Full path — add existing directory or create at that path
         const projectName = input.split(/[\\/]/).pop() || input
         const project = await createProject(projectName, '', input)
         if (project) {
-          navigate(`/project-mode/${project.id}`, { state: { workspacePath: input, conversationId } })
+          navigate(`/project-mode/${project.id}`, { state: { workspacePath: input } })
         }
       } else {
-        // Just a name — create in default project path
         if (!settings.defaultProjectPath) {
-          // No default path — treat as a relative path (won't work well, but fallback)
           const project = await createProject(input, '', input)
           if (project) {
-            navigate(`/project-mode/${project.id}`, { state: { workspacePath: input, conversationId } })
+            navigate(`/project-mode/${project.id}`, { state: { workspacePath: input } })
           }
           return
         }
@@ -164,14 +183,7 @@ export function ProjectModePage() {
         const workspacePath = settings.defaultProjectPath.replace(/[/\\]+$/, '') + sep + input
         const project = await autoCreateProject(input, '', workspacePath)
         if (project) {
-          if (conversationId) {
-            fetch(`/api/conversations/${conversationId}/project`, {
-              method: 'PATCH',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ projectId: project.id }),
-            }).catch(() => {})
-          }
-          navigate(`/project-mode/${project.id}`, { state: { workspacePath, conversationId } })
+          navigate(`/project-mode/${project.id}`, { state: { workspacePath } })
         }
       }
     } finally {
@@ -191,125 +203,105 @@ export function ProjectModePage() {
     setProjectToDelete(null)
   }
 
-  const renderTabContent = () => {
-    if (view === 'my-projects') {
-      if (loading) {
-        return (
-          <motion.div
-            key="loading"
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            transition={getTransition(0.2, animationIntensity)}
-            className="project-mode-loading"
-          >
-            <div className="project-mode-loading__spinner" />
-            <div className="project-mode-loading__text">Loading projects...</div>
-          </motion.div>
-        )
-      }
-
-      if (projects.length === 0) {
-        return (
-          <motion.div
-            key="empty"
-            initial={{ opacity: 0, y: 10 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={getTransition({ duration: 0.3 }, animationIntensity)}
-            className="project-mode-empty"
-          >
-            <div className="project-mode-empty__icon">&#128194;</div>
-            <div className="project-mode-empty__text">No projects yet. Create your first one!</div>
-            <button className="project-mode-empty__btn" onClick={startNewProject}>
-              New Project
-            </button>
-          </motion.div>
-        )
-      }
-
-      return (
-        <motion.div
-          key="projects"
-          initial={{ opacity: 0, y: 10 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={getTransition({ duration: 0.3 }, animationIntensity)}
-          className="project-card-grid"
-        >
-          {projects.map((project) => (
-            <ProjectCard
-              key={project.id}
-              project={project}
-              onClick={() => handleSelectProject(project.id)}
-              onDelete={(e) => { e.stopPropagation(); setProjectToDelete(project) }}
-            />
-          ))}
-        </motion.div>
-      )
-    }
-
-    // new-project view
-    if (setupStep === 'loading') {
-      return (
-        <motion.div
-          key="loading"
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          transition={getTransition(0.2, animationIntensity)}
-          className="project-mode-loading"
-        >
-          <div className="project-mode-loading__spinner" />
-          <div className="project-mode-loading__text">Setting up your environment...</div>
-          <div className="project-mode-loading__subtext">This will only take a moment</div>
-        </motion.div>
-      )
-    }
-
-    if (setupStep === 'folder-picker') {
-      return (
-        <motion.div
-          key="folder-picker"
-          initial={{ opacity: 0, y: 10 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={getTransition({ duration: 0.3 }, animationIntensity)}
-        >
-          <FolderPicker onPathSelected={handlePathSelected} isCreating={isCreating} />
-        </motion.div>
-      )
-    }
-
-    return null
-  }
+  const stagger = (i: number) => getTransition({ duration: 0.35, delay: i * 0.04 }, animationIntensity)
 
   return (
-    <div className="project-mode-page">
-      <div className="project-mode-page__header">
-        <Link to={chatPath} className="project-mode-page__back">
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M19 12H5M12 19l-7-7 7-7" />
-          </svg>
-          Back to Chat
-        </Link>
-      </div>
-      <div className="project-mode-dashboard">
-        <div className="project-mode-tabs">
+    <div className="pm">
+      {/* ── Hero ── */}
+      <header className="pm-hero">
+        <motion.div
+          className="pm-hero__brand"
+          initial={{ opacity: 0, y: -20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={getTransition(0.5, animationIntensity)}
+        >
+          <h1 className="pm-hero__title">
+            <span className="pm-hero__glow">A.U.R.A.</span>
+          </h1>
+          <p className="pm-hero__sub">Artificial Unified Responsive Assistant</p>
+        </motion.div>
+
+        <motion.div
+          className="pm-hero__actions"
+          initial={{ opacity: 0, y: 10 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={getTransition(0.6, animationIntensity)}
+        >
           <button
-            className={`project-mode-tab${view === 'my-projects' ? ' project-mode-tab--active' : ''}`}
+            className={`pm-tab${view === 'my-projects' ? ' pm-tab--active' : ''}`}
             onClick={() => setView('my-projects')}
           >
-            My Projects
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" /></svg>
+            Projects
           </button>
           <button
-            className={`project-mode-tab${view === 'new-project' ? ' project-mode-tab--active' : ''}`}
+            className={`pm-tab${view === 'new-project' ? ' pm-tab--active' : ''}`}
             onClick={startNewProject}
           >
-            New Project
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" /></svg>
+            New
           </button>
-        </div>
-        <div className="project-mode-content">
-          <AnimatePresence mode="wait">
-            {renderTabContent()}
-          </AnimatePresence>
-        </div>
-      </div>
+          <button
+            className={`pm-tab${view === 'settings' ? ' pm-tab--active' : ''}`}
+            onClick={() => setView('settings')}
+          >
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="3" /><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" /></svg>
+            Settings
+          </button>
+        </motion.div>
+      </header>
+
+      {/* ── Content ── */}
+      <main className="pm-content">
+        <AnimatePresence mode="wait">
+          {view === 'my-projects' && (
+            loading ? (
+              <motion.div key="loading" className="pm-loading" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={getTransition(0.2, animationIntensity)}>
+                <div className="pm-loading__spinner" />
+                <div className="pm-loading__text">Scanning projects…</div>
+              </motion.div>
+            ) : projects.length === 0 ? (
+              <motion.div key="empty" className="pm-empty" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} transition={stagger(0)}>
+                <div className="pm-empty__icon">
+                  <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="var(--accent-primary)" strokeWidth="1" strokeLinecap="round" strokeLinejoin="round" opacity="0.4"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" /></svg>
+                </div>
+                <div className="pm-empty__title">No projects yet</div>
+                <div className="pm-empty__desc">Create your first project to get started with AURA.</div>
+                <button className="pm-empty__btn" onClick={startNewProject}>New Project</button>
+              </motion.div>
+            ) : (
+              <motion.div key="grid" className="pm-grid" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={getTransition(0.2, animationIntensity)}>
+                {projects.map((project, i) => (
+                  <ProjectCard
+                    key={project.id}
+                    project={project}
+                    index={i}
+                    onClick={() => handleSelectProject(project.id)}
+                    onDelete={(e) => { e.stopPropagation(); setProjectToDelete(project) }}
+                  />
+                ))}
+              </motion.div>
+            )
+          )}
+
+          {view === 'new-project' && (
+            <motion.div key="new" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }} transition={getTransition(0.3, animationIntensity)}>
+              <NewProjectInput onSubmit={handlePathSelected} isCreating={isCreating} />
+            </motion.div>
+          )}
+
+          {view === 'settings' && (
+            <motion.div key="settings" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }} transition={getTransition(0.3, animationIntensity)}>
+              <SettingsPanel
+                settings={settings}
+                models={models}
+                onSettingsChange={updateSettings}
+              />
+            </motion.div>
+          )}
+        </AnimatePresence>
+      </main>
+
       <DeleteProjectModal
         open={projectToDelete !== null}
         project={projectToDelete}

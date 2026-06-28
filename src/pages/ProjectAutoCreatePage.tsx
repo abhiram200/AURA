@@ -11,12 +11,9 @@ export function ProjectAutoCreatePage() {
   const { settings, loading: settingsLoading, updateSettings } = useSettings()
   const { autoCreateProject } = useProjectMode()
 
-  const stateData = location.state as { prompt?: string; conversationId?: string | null; projectName?: string | null } | null
+  const stateData = location.state as { prompt?: string; projectName?: string | null } | null
   const prompt = stateData?.prompt ?? ''
-  const conversationId = stateData?.conversationId ?? null
   const aiProjectName = stateData?.projectName ?? null
-
-  const chatPath = conversationId ? `/chat/${conversationId}` : '/'
 
   const [state, setState] = useState<AutoCreateState>('checking-settings')
   const [errorMsg, setErrorMsg] = useState('')
@@ -33,15 +30,7 @@ export function ProjectAutoCreatePage() {
         throw new Error('Failed to create project')
       }
 
-      if (conversationId) {
-        fetch(`/api/conversations/${conversationId}/project`, {
-          method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ projectId: project.id }),
-        }).catch(() => {})
-      }
-
-      navigate(`/project-mode/${project.id}`, { state: { workspacePath, conversationId }, replace: true })
+      navigate(`/project-mode/${project.id}`, { state: { workspacePath }, replace: true })
     } catch (err: any) {
       setErrorMsg(err.message || 'Something went wrong')
       setState('error')
@@ -65,7 +54,7 @@ export function ProjectAutoCreatePage() {
     const sep = settings.defaultProjectPath.includes('\\') ? '\\' : '/'
     const workspacePath = settings.defaultProjectPath.replace(/[/\\]+$/, '') + sep + projectName
     createProject(workspacePath)
-  }, [settingsLoading, settings.defaultProjectPath, prompt, projectName, conversationId, navigate])
+  }, [settingsLoading, settings.defaultProjectPath, prompt, projectName, navigate])
 
   const handleSetPath = async () => {
     const trimmed = pathInput.trim()
@@ -88,11 +77,11 @@ export function ProjectAutoCreatePage() {
     return (
       <div className="project-mode-page">
         <div className="project-mode-page__header">
-          <Link to={chatPath} className="project-mode-page__back">
+          <Link to="/project-mode" className="project-mode-page__back">
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <path d="M19 12H5M12 19l-7-7 7-7" />
             </svg>
-            Back to Chat
+            Back to Projects
           </Link>
         </div>
         <div className="project-mode-page__content">
@@ -133,11 +122,11 @@ export function ProjectAutoCreatePage() {
     return (
       <div className="project-mode-page">
         <div className="project-mode-page__header">
-          <Link to={chatPath} className="project-mode-page__back">
+          <Link to="/project-mode" className="project-mode-page__back">
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <path d="M19 12H5M12 19l-7-7 7-7" />
             </svg>
-            Back to Chat
+            Back to Projects
           </Link>
         </div>
         <div className="project-mode-page__content">
@@ -163,11 +152,11 @@ export function ProjectAutoCreatePage() {
   return (
     <div className="project-mode-page">
       <div className="project-mode-page__header">
-        <Link to={chatPath} className="project-mode-page__back">
+        <Link to="/project-mode" className="project-mode-page__back">
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
             <path d="M19 12H5M12 19l-7-7 7-7" />
           </svg>
-          Back to Chat
+          Back to Projects
         </Link>
       </div>
       <div className="project-mode-page__content">

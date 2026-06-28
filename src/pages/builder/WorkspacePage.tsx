@@ -17,7 +17,6 @@ interface WorkspacePageProps {
   projectId: string
   projectName: string
   workspacePath: string
-  conversationId: string | null
   pendingFileOpen?: { path: string; startLine?: number } | null
   onFileOpened?: () => void
   reportActivity?: (type: 'edit' | 'interaction') => void

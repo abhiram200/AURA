@@ -95,7 +95,6 @@ export interface CodeHandler {
 export interface Settings {
   defaultModel: string
   contextWindowSize: number
-  autoExtractMemory: boolean
   preferences: UserPreferences
   preferencesSet: boolean
   activeSkillIds: string[]

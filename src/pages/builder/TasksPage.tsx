@@ -5,7 +5,6 @@ interface TasksPageProps {
   projectId: string
   projectName: string
   workspacePath: string
-  conversationId: string | null
   reportActivity?: (type: 'edit' | 'interaction') => void
   onOpenGitTree?: () => void
 }

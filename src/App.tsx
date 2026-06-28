@@ -1,9 +1,7 @@
 import { useState } from 'react';
-import { BrowserRouter, Routes, Route } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { IntroSequence } from './components/intro/IntroSequence';
-import { ChatLayout } from './components/chat/ChatLayout';
-import { PlaygroundPage } from './pages/PlaygroundPage';
 import { ProjectModePage } from './pages/ProjectModePage';
 import { ProjectModeBuilderPage } from './pages/ProjectModeBuilderPage';
 import { ProjectAutoCreatePage } from './pages/ProjectAutoCreatePage';
@@ -22,18 +20,17 @@ function App() {
           <IntroSequence key="intro" onComplete={() => setIntroComplete(true)} />
         ) : (
           <motion.div
-            key="chat"
+            key="main"
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             transition={getTransition(0.8, animationIntensity)}
           >
             <ParticleBackground />
             <Routes>
-              <Route path="/playground" element={<PlaygroundPage />} />
+              <Route path="/" element={<Navigate to="/project-mode" replace />} />
               <Route path="/project-mode" element={<ProjectModePage />} />
               <Route path="/project-mode/auto" element={<ProjectAutoCreatePage />} />
               <Route path="/project-mode/:projectId" element={<ProjectModeBuilderPage />} />
-              <Route path="*" element={<ChatLayout />} />
             </Routes>
           </motion.div>
         )}

@@ -11,7 +11,7 @@ export interface Project {
   updatedAt: string
 }
 
-export type ProjectModeView = 'my-projects' | 'new-project'
+export type ProjectModeView = 'my-projects' | 'new-project' | 'settings'
 export type SetupStep = 'loading' | 'folder-picker' | 'builder'
 
 export function useProjectMode() {
