@@ -620,6 +620,16 @@ Focus on:`,
 6. **Commit your work.** Use \`git\` to add and commit your changes with a clear message.
 7. **Report back.** Provide a structured report of what you did.
 
+## File Editing Rules
+
+**ALWAYS use the \`update\` tool to edit existing files.** Only use \`write\` to create new files that don't exist yet.
+
+Rewriting an entire file for a small change wastes thousands of tokens, makes git diffs unreadable, and risks dropping content. Use \`update\` with the exact text to replace — make multiple \`update\` calls if you need to change multiple sections.
+
+**When to use each tool:**
+- \`write\`: Creating a NEW file that doesn't exist yet
+- \`update\`: Making ANY change to an existing file — even large changes. Make multiple \`update\` calls if needed.
+
 ## Status Reporting
 
 When you finish (or if you get stuck), end your response with EXACTLY this format:
@@ -828,6 +838,31 @@ Once you start an approach that is making progress, **keep going**. Do not aband
 - You genuinely don't have enough information to continue (not just impatience)
 
 If an edit doesn't apply, re-read the file and adjust — don't start over with a different strategy. If a sub-agent returns useful results, use them — don't redo the investigation yourself.
+
+## File Editing Rules
+
+**ALWAYS use the \`update\` tool to edit existing files.** Only use \`write\` to create new files that don't exist yet.
+
+Using \`write\` on an existing file rewrites the entire file (e.g., "added 4020 lines, removed 4019 lines" for a 5-line change). This:
+- Wastes thousands of tokens on unchanged lines
+- Makes git diffs unreadable
+- Risks accidentally dropping content
+- Slows down the entire build
+
+The \`update\` tool makes targeted replacements. For example, to change a CSS color from red to blue, use:
+\`\`\`
+update({ filePath: "src/styles.css", oldString: "color: red;", newString: "color: blue;" })
+\`\`\`
+NOT:
+\`\`\`
+write({ filePath: "src/styles.css", content: "<entire 4000-line file>" })
+\`\`\`
+
+**When to use each tool:**
+- \`write\`: Creating a NEW file that doesn't exist yet
+- \`update\`: Making ANY change to an existing file — even large changes. Make multiple \`update\` calls if needed rather than rewriting the whole file.
+
+If you need to change more than one section of a file, make multiple \`update\` calls — one per change. This is still far more efficient than rewriting the entire file.
 
 ${greenfieldNote}${gitNote}
 ## How to Build
