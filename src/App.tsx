@@ -6,6 +6,7 @@ import { ProjectModePage } from './pages/ProjectModePage';
 import { ProjectModeBuilderPage } from './pages/ProjectModeBuilderPage';
 import { ProjectAutoCreatePage } from './pages/ProjectAutoCreatePage';
 import { ParticleBackground } from './components/shared/ParticleBackground';
+import { ThemeToggle } from './components/shared/ThemeToggle';
 import { useAnimationConfig } from './hooks/useAnimationConfig';
 import { getTransition } from './hooks/useAnimationConfig';
 
@@ -26,6 +27,7 @@ function App() {
             transition={getTransition(0.8, animationIntensity)}
           >
             <ParticleBackground />
+            <ThemeToggle />
             <Routes>
               <Route path="/" element={<Navigate to="/project-mode" replace />} />
               <Route path="/project-mode" element={<ProjectModePage />} />
