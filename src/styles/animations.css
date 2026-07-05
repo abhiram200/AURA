@@ -108,3 +108,10 @@
   box-shadow: 0 0 12px rgba(0, 240, 255, 0.1);
   background: rgba(0, 240, 255, 0.06);
 }
+
+.theme-toggle--inline {
+  position: static;
+  z-index: auto;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}

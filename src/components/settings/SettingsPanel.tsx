@@ -45,22 +45,6 @@ export function SettingsPanel({
   return (
     <div className="settings-view">
       <div className="settings-view__grid">
-        {/* ── Animation ── */}
-        <div className="settings-view__card">
-          <div className="settings-view__card-label">Animation</div>
-          <div className="settings-pill-group">
-            {(['subtle', 'normal', 'intense'] as AnimationIntensity[]).map((level) => (
-              <button
-                key={level}
-                className={`settings-pill${animationIntensity === level ? ' settings-pill--active' : ''}`}
-                onClick={() => setAnimationIntensity(level)}
-              >
-                {level.charAt(0).toUpperCase() + level.slice(1)}
-              </button>
-            ))}
-          </div>
-        </div>
-
         {/* ── Ollama URL ── */}
         <div className="settings-view__card settings-view__card--wide">
           <div className="settings-view__card-label" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
@@ -381,19 +365,34 @@ export function SettingsPanel({
           </div>
         </div>
 
-        {/* ── Coffee ── */}
-        <div className="settings-view__card settings-view__card--wide settings-view__card--coffee">
-          <div className="settings-view__coffee-text">
-            <span>☕ Support AURA</span>
-            <a
-              href="https://buymeacoffee.com/sno0p3r"
-              target="_blank"
-              rel="noopener noreferrer"
-            >
-              Buy me a Coffee →
-            </a>
+        {/* ── Animation ── */}
+        <div className="settings-view__card settings-view__card--compact">
+          <div className="settings-view__card-label">Animation</div>
+          <div className="settings-pill-group">
+            {(['subtle', 'normal', 'intense'] as AnimationIntensity[]).map((level) => (
+              <button
+                key={level}
+                className={`settings-pill${animationIntensity === level ? ' settings-pill--active' : ''}`}
+                onClick={() => setAnimationIntensity(level)}
+              >
+                {level.charAt(0).toUpperCase() + level.slice(1)}
+              </button>
+            ))}
           </div>
         </div>
+
+        {/* ── Coffee ── */}
+        <a
+          className="settings-view__card settings-view__card--compact settings-view__card--coffee"
+          href="https://buymeacoffee.com/sno0p3r"
+          target="_blank"
+          rel="noopener noreferrer"
+        >
+          <div className="settings-view__coffee-text">
+            <span>☕ Support AURA</span>
+            <span className="settings-view__coffee-link-text">Buy a Coffee →</span>
+          </div>
+        </a>
       </div>
     </div>
   );

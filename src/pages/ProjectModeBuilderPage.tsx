@@ -7,8 +7,7 @@ import { DependenciesPage } from './builder/DependenciesPage'
 import { TasksPage } from './builder/TasksPage'
 import { IndexingOverlay } from '../components/aura/IndexingOverlay'
 import { GitTreePanel } from '../components/workspace/GitTreePanel'
-import { SettingsSidebar } from '../components/settings/SettingsSidebar'
-import { useSettings } from '../hooks/useSettings'
+import { ThemeToggle } from '../components/shared/ThemeToggle'
 
 type BuilderTab = 'workspace' | 'assistant' | 'dependencies' | 'visual' | 'tasks'
 
@@ -32,13 +31,10 @@ export function ProjectModeBuilderPage() {
   const [activeTab, setActiveTab] = useState<BuilderTab>(() => getTabFromSearch(location.search))
   const [pendingFileOpen, setPendingFileOpen] = useState<{ path: string; startLine?: number } | null>(null)
   const [gitTreeOpen, setGitTreeOpen] = useState(false)
-  const [showSettings, setShowSettings] = useState(false)
 
   // Shared aura hook — persists across tab switches
   const aura = useAura(projectId ?? null)
 
-  // Settings hook for the settings panel
-  const { settings, models, updateSettings } = useSettings()
 
   const handleTabChange = useCallback((tab: BuilderTab) => {
     setActiveTab(tab)
@@ -197,13 +193,7 @@ export function ProjectModeBuilderPage() {
             <span className={`builder-header__status-dot${statusPulse ? ' builder-header__status-dot--pulse' : ''}`} style={{ background: statusColor }} />
             {statusLabel}
           </span>
-          <button
-            className="builder-header__settings-btn"
-            onClick={() => setShowSettings(true)}
-            title="Settings"
-          >
-            ⚙️
-          </button>
+          <ThemeToggle className="theme-toggle--inline" />
         </div>
       </div>
       {pathMissing && (
@@ -249,13 +239,6 @@ export function ProjectModeBuilderPage() {
           // event will handle file explorer and status updates automatically
           setGitTreeOpen(false)
         }}
-      />
-      <SettingsSidebar
-        isOpen={showSettings}
-        onClose={() => setShowSettings(false)}
-        settings={settings}
-        models={models}
-        onSettingsChange={updateSettings}
       />
     </div>
   )

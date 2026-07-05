@@ -3,7 +3,11 @@ import { useTheme } from '../../hooks/useTheme';
 import { useAnimationConfig } from '../../hooks/useAnimationConfig';
 import { getTransition } from '../../hooks/useAnimationConfig';
 
-export function ThemeToggle() {
+interface ThemeToggleProps {
+  className?: string;
+}
+
+export function ThemeToggle({ className }: ThemeToggleProps) {
   const { theme, toggleTheme } = useTheme();
   const { animationIntensity } = useAnimationConfig();
   const isDark = theme === 'dark';
@@ -11,13 +15,13 @@ export function ThemeToggle() {
 
   return (
     <motion.button
-      className="theme-toggle"
+      className={`theme-toggle${className ? ` ${className}` : ''}`}
       onClick={toggleTheme}
-      whileHover={isSubtle ? undefined : { scale: 1.1 }}
-      whileTap={isSubtle ? undefined : { scale: 0.9 }}
-      animate={{ rotate: isDark ? 0 : 180 }}
-      transition={getTransition({ duration: 0.6, ease: 'easeInOut' }, animationIntensity)}
+      whileHover={isSubtle ? undefined : { scale: 1.05 }}
+      whileTap={isSubtle ? undefined : { scale: 0.95 }}
+      transition={getTransition({ duration: 0.15 }, animationIntensity)}
       aria-label={`Switch to ${isDark ? 'light' : 'dark'} theme`}
+      title={`Switch to ${isDark ? 'light' : 'dark'} mode`}
     >
       <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
         {isDark ? (
