@@ -2082,7 +2082,7 @@ function defineAgentTools(qs: AuraQueryService, projectPath: string, managedShel
         const gitArgs = (args.args as string).trim()
         const subcommand = gitArgs.split(/\s+/)[0]
 
-        const validSubcommands = ['add', 'branch', 'checkout', 'commit', 'diff', 'fetch', 'init', 'log', 'merge', 'pull', 'push', 'rebase', 'remote', 'reset', 'restore', 'revert', 'show', 'stash', 'status', 'switch', 'tag', 'worktree', 'reflog', 'blame', 'grep', 'ls-files', 'config']
+        const validSubcommands = ['add', 'branch', 'checkout', 'commit', 'diff', 'fetch', 'init', 'log', 'merge', 'pull', 'push', 'rebase', 'remote', 'reset', 'restore', 'revert', 'rev-parse', 'show', 'stash', 'status', 'switch', 'tag', 'worktree', 'reflog', 'blame', 'grep', 'ls-files', 'config']
         if (!validSubcommands.includes(subcommand)) {
           return { error: `Unknown git subcommand: "${subcommand}". Valid subcommands: ${validSubcommands.join(', ')}` }
         }
