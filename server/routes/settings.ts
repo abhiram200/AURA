@@ -193,5 +193,25 @@ export function createSettingsRouter(store: FileStore, ollama: OllamaService) {
     }
   })
 
+  // Validate that a project path exists on disk
+  router.post('/validate-path', async (req, res) => {
+    const { path } = req.body as { path?: string }
+    if (!path || !path.trim()) {
+      res.json({ valid: false, error: 'Path is empty' })
+      return
+    }
+    try {
+      const fs = await import('fs/promises')
+      const stat = await fs.stat(path.trim())
+      if (stat.isDirectory()) {
+        res.json({ valid: true })
+      } else {
+        res.json({ valid: false, error: 'Path exists but is not a directory' })
+      }
+    } catch {
+      res.json({ valid: false, error: 'Path does not exist' })
+    }
+  })
+
   return router
 }

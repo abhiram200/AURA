@@ -26,6 +26,7 @@ export function SettingsPanel({
   const [apiKeyVisible, setApiKeyVisible] = useState(false)
   const [apiKeyTestResult, setApiKeyTestResult] = useState<'idle' | 'testing' | 'success' | 'error'>('idle')
   const [apiKeyTestError, setApiKeyTestError] = useState('')
+  const [pathValidationError, setPathValidationError] = useState('')
   const { theme: appTheme, animationIntensity, setAnimationIntensity } = useTheme();
 
   const filteredThemes = getFilteredThemes(appTheme);
@@ -51,6 +52,32 @@ export function SettingsPanel({
   }, [settings.ollamaApiKey])
 
   const stripQuotes = (path: string) => path.replace(/^["'](.+)["']$/, '$1');
+
+  const validateAndSavePath = async (path: string) => {
+    const trimmed = stripQuotes(path.trim())
+    if (!trimmed) {
+      onSettingsChange({ defaultProjectPath: null })
+      setPathValidationError('')
+      return
+    }
+    try {
+      const res = await fetch('/api/settings/validate-path', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ path: trimmed }),
+      })
+      if (!res.ok) throw new Error(`Server error: ${res.status}`)
+      const data = await res.json()
+      if (data.valid) {
+        onSettingsChange({ defaultProjectPath: trimmed })
+        setPathValidationError('')
+      } else {
+        setPathValidationError(data.error || 'Path does not exist')
+      }
+    } catch {
+      setPathValidationError('Could not validate path')
+    }
+  }
 
   return (
     <div className="settings-view">
@@ -340,21 +367,20 @@ export function SettingsPanel({
             className="folder-picker__input"
             type="text"
             value={defaultProjectPathInput}
-            onChange={(e) => setDefaultProjectPathInput(e.target.value)}
+            onChange={(e) => { setDefaultProjectPathInput(e.target.value); setPathValidationError('') }}
             onKeyDown={(e) => {
               if (e.key === 'Enter') {
-                onSettingsChange({ defaultProjectPath: stripQuotes(defaultProjectPathInput.trim()) || null })
+                validateAndSavePath(defaultProjectPathInput)
                 ;(e.target as HTMLInputElement).blur()
               }
             }}
             onBlur={() => {
-              const trimmed = stripQuotes(defaultProjectPathInput.trim())
-              if (trimmed !== (settings.defaultProjectPath ?? '')) {
-                onSettingsChange({ defaultProjectPath: trimmed || null })
-              }
+              validateAndSavePath(defaultProjectPathInput)
             }}
             placeholder="C:\Projects"
           />
+          {pathValidationError && <span className="ollama-url-feedback ollama-url-feedback--error" style={{ marginTop: '4px' }}>{pathValidationError}</span>}
+          {settings.defaultProjectPath && !pathValidationError && <span className="ollama-url-feedback ollama-url-feedback--success" style={{ marginTop: '4px' }}>✓ Path saved</span>}
         </div>
 
         {/* ── Animation ── */}
