@@ -314,7 +314,7 @@ export function SettingsPanel({
         </div>
 
         {/* ── Editor Theme ── */}
-        <div className="settings-view__card">
+        <div className="settings-view__card settings-view__card--compact">
           <div className="settings-view__card-label" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
             Editor Theme
             <Tooltip content="Syntax highlighting theme for the workspace code editor." position="top">
@@ -329,50 +329,32 @@ export function SettingsPanel({
         </div>
 
         {/* ── Project Path ── */}
-        <div className="settings-view__card">
+        <div className="settings-view__card settings-view__card--compact">
           <div className="settings-view__card-label" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
             Project Path
-            <Tooltip content="AURA creates project directories inside this folder. Set once to skip the folder picker." position="top">
+            <Tooltip content="AURA creates project directories inside this folder. Set once to skip the folder picker. Press Enter or click outside to save." position="top">
               <span className="help-icon">?</span>
             </Tooltip>
           </div>
-          <div className="folder-picker__input-group" style={{ marginBottom: '8px' }}>
-            <input
-              className="folder-picker__input"
-              type="text"
-              value={defaultProjectPathInput}
-              onChange={(e) => setDefaultProjectPathInput(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter' && defaultProjectPathInput.trim()) {
-                  onSettingsChange({ defaultProjectPath: stripQuotes(defaultProjectPathInput.trim()) || null })
-                }
-              }}
-              placeholder="C:\Projects"
-            />
-          </div>
-          <div style={{ display: 'flex', gap: '8px' }}>
-            <button
-              className="settings-pill settings-pill--active"
-              style={{ flex: 1 }}
-              onClick={() => {
+          <input
+            className="folder-picker__input"
+            type="text"
+            value={defaultProjectPathInput}
+            onChange={(e) => setDefaultProjectPathInput(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
                 onSettingsChange({ defaultProjectPath: stripQuotes(defaultProjectPathInput.trim()) || null })
-              }}
-            >
-              Save
-            </button>
-            {settings.defaultProjectPath && (
-              <button
-                className="settings-pill"
-                style={{ flex: 1 }}
-                onClick={() => {
-                  setDefaultProjectPathInput('')
-                  onSettingsChange({ defaultProjectPath: null })
-                }}
-              >
-                Clear
-              </button>
-            )}
-          </div>
+                ;(e.target as HTMLInputElement).blur()
+              }
+            }}
+            onBlur={() => {
+              const trimmed = stripQuotes(defaultProjectPathInput.trim())
+              if (trimmed !== (settings.defaultProjectPath ?? '')) {
+                onSettingsChange({ defaultProjectPath: trimmed || null })
+              }
+            }}
+            placeholder="C:\Projects"
+          />
         </div>
 
         {/* ── Animation ── */}
