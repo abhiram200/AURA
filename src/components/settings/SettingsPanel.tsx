@@ -71,6 +71,24 @@ export function SettingsPanel({
       if (data.valid) {
         onSettingsChange({ defaultProjectPath: trimmed })
         setPathValidationError('')
+        // Auto-scan the path for git repos
+        try {
+          const scanRes = await fetch('/api/projects/scan-path', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ path: trimmed }),
+          })
+          if (scanRes.ok) {
+            const scanData = await scanRes.json()
+            if (scanData.total > 0) {
+              setPathValidationError('')
+              // Refresh parent project list — the hook will re-fetch on next render
+              window.dispatchEvent(new CustomEvent('projects-refresh'))
+            }
+          }
+        } catch {
+          // Scan failure is non-critical — path is still saved
+        }
       } else {
         setPathValidationError(data.error || 'Path does not exist')
       }

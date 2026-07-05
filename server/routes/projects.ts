@@ -1,5 +1,5 @@
 import { Router } from 'express'
-import { mkdir, access, writeFile } from 'fs/promises'
+import { mkdir, access, writeFile, readdir, stat } from 'fs/promises'
 import { execFile } from 'child_process'
 import path from 'path'
 import type { ProjectService } from '../services/project.ts'
@@ -274,6 +274,53 @@ Thumbs.db
       res.status(201).json(project)
     } catch (error) {
       res.status(500).json({ error: 'Failed to create project' })
+    }
+  })
+
+  // POST /scan-path - Scan a directory for git repos and register unregistered ones
+  router.post('/scan-path', async (req, res) => {
+    try {
+      const { path: scanPath } = req.body as { path?: string }
+      if (!scanPath || typeof scanPath !== 'string') {
+        res.status(400).json({ error: 'path is required' })
+        return
+      }
+
+      let entries
+      try {
+        entries = await readdir(scanPath, { withFileTypes: true })
+      } catch {
+        res.status(400).json({ error: 'Cannot read directory' })
+        return
+      }
+
+      const existingProjects = await projectService.list()
+      const registeredPaths = new Set(existingProjects.map(p => p.workspacePath))
+      const added: any[] = []
+
+      for (const entry of entries) {
+        if (!entry.isDirectory()) continue
+        const dirPath = path.join(scanPath, entry.name)
+
+        // Check for .git to confirm it's a repo (or just a project directory)
+        let isGitRepo = false
+        try {
+          await stat(path.join(dirPath, '.git'))
+          isGitRepo = true
+        } catch {
+          // Not a git repo, skip
+          continue
+        }
+
+        if (registeredPaths.has(dirPath)) continue
+
+        const project = await projectService.create(entry.name, '', dirPath)
+        added.push(project)
+      }
+
+      res.json({ added, total: added.length })
+    } catch (error) {
+      res.status(500).json({ error: 'Failed to scan path' })
     }
   })
 

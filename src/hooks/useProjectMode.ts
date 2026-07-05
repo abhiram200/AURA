@@ -39,6 +39,13 @@ export function useProjectMode() {
     fetchProjects()
   }, [fetchProjects])
 
+  // Listen for project list refresh events (e.g. after path scan)
+  useEffect(() => {
+    const handler = () => fetchProjects()
+    window.addEventListener('projects-refresh', handler)
+    return () => window.removeEventListener('projects-refresh', handler)
+  }, [fetchProjects])
+
   const createProject = useCallback(async (name: string, description: string, workspacePath: string): Promise<Project | null> => {
     try {
       const res = await fetch('/api/projects', {
