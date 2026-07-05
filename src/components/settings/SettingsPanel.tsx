@@ -5,7 +5,7 @@ import { useTheme } from '../../hooks/useTheme';
 import type { AnimationIntensity } from '../../hooks/useTheme';
 import { Tooltip } from '../shared/Tooltip';
 import { CustomSelect } from './CustomSelect';
-import { EDITOR_THEMES } from '../../utils/editorThemes';
+import { getFilteredThemes, getEffectiveThemeKey } from '../../utils/editorThemes';
 
 interface SettingsPanelProps {
   settings: AppSettings;
@@ -26,7 +26,17 @@ export function SettingsPanel({
   const [apiKeyVisible, setApiKeyVisible] = useState(false)
   const [apiKeyTestResult, setApiKeyTestResult] = useState<'idle' | 'testing' | 'success' | 'error'>('idle')
   const [apiKeyTestError, setApiKeyTestError] = useState('')
-  const { animationIntensity, setAnimationIntensity } = useTheme();
+  const { theme: appTheme, animationIntensity, setAnimationIntensity } = useTheme();
+
+  const filteredThemes = getFilteredThemes(appTheme);
+  const effectiveThemeKey = getEffectiveThemeKey(settings.codeEditorTheme, appTheme);
+
+  // Auto-switch editor theme when app theme changes
+  useEffect(() => {
+    if (effectiveThemeKey !== settings.codeEditorTheme) {
+      onSettingsChange({ codeEditorTheme: effectiveThemeKey });
+    }
+  }, [appTheme]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     setDefaultProjectPathInput(settings.defaultProjectPath ?? '')
@@ -312,8 +322,8 @@ export function SettingsPanel({
             </Tooltip>
           </div>
           <CustomSelect
-            options={EDITOR_THEMES.map(t => ({ value: t.key, label: t.label }))}
-            value={settings.codeEditorTheme}
+            options={filteredThemes.map(t => ({ value: t.key, label: t.label }))}
+            value={effectiveThemeKey}
             onChange={(value) => onSettingsChange({ codeEditorTheme: value })}
           />
         </div>

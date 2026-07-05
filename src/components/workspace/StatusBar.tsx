@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import type { OpenFile } from '../../hooks/useWorkspace'
-import { EDITOR_THEMES, getThemeInfo } from '../../utils/editorThemes'
+import { EDITOR_THEMES, getThemeInfo, getFilteredThemes, getEffectiveThemeKey } from '../../utils/editorThemes'
+import { useTheme } from '../../hooks/useTheme'
 
 interface StatusBarProps {
   projectId: string
@@ -45,6 +46,16 @@ function getLanguageLabel(path: string | null): string {
 export function StatusBar({ projectId, activeFile, workspacePath, editorTheme, autoSave, onAutoSaveChange, onThemeChange, onOpenGitTree, gitBranch }: StatusBarProps) {
   const [themeMenuOpen, setThemeMenuOpen] = useState(false)
   const menuRef = useRef<HTMLDivElement>(null)
+  const { theme: appTheme } = useTheme()
+  const filteredThemes = getFilteredThemes(appTheme)
+  const effectiveThemeKey = getEffectiveThemeKey(editorTheme, appTheme)
+
+  // Auto-switch editor theme when app theme changes and current theme doesn't match
+  useEffect(() => {
+    if (effectiveThemeKey !== editorTheme) {
+      onThemeChange(effectiveThemeKey)
+    }
+  }, [appTheme]) // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     if (!themeMenuOpen) return
@@ -58,7 +69,7 @@ export function StatusBar({ projectId, activeFile, workspacePath, editorTheme, a
   }, [themeMenuOpen])
 
   const language = getLanguageLabel(activeFile?.path || null)
-  const currentTheme = getThemeInfo(editorTheme)
+  const currentTheme = getThemeInfo(effectiveThemeKey)
 
   return (
     <div className="status-bar">
@@ -100,10 +111,10 @@ export function StatusBar({ projectId, activeFile, workspacePath, editorTheme, a
           </button>
           {themeMenuOpen && (
             <div className="status-bar__theme-menu">
-              {EDITOR_THEMES.map((t) => (
+              {filteredThemes.map((t) => (
                 <button
                   key={t.key}
-                  className={`status-bar__theme-option${t.key === editorTheme ? ' status-bar__theme-option--active' : ''}`}
+                  className={`status-bar__theme-option${t.key === effectiveThemeKey ? ' status-bar__theme-option--active' : ''}`}
                   onClick={() => { onThemeChange(t.key); setThemeMenuOpen(false) }}
                 >
                   <span className="status-bar__theme-dot" style={{ background: t.bg }} />

@@ -49,3 +49,32 @@ export function getThemeExtension(key: string): Extension {
 export function getThemeInfo(key: string): EditorThemeInfo {
   return themeMap.get(key) ?? EDITOR_THEMES[0]
 }
+
+/** Filter editor themes by app theme mode (dark/light). */
+export function getFilteredThemes(appTheme: 'dark' | 'light'): EditorThemeInfo[] {
+  return EDITOR_THEMES.filter((t) => t.isLight === (appTheme === 'light'))
+}
+
+/**
+ * Get the effective editor theme key for the current app theme.
+ * If the current selection matches the app mode, keep it.
+ * Otherwise, return the default for this mode (or the last selected matching one).
+ */
+export function getEffectiveThemeKey(
+  currentKey: string,
+  appTheme: 'dark' | 'light',
+  lastDarkKey?: string,
+  lastLightKey?: string
+): string {
+  const current = themeMap.get(currentKey)
+  if (current && current.isLight === (appTheme === 'light')) {
+    return currentKey
+  }
+  // Current theme doesn't match app mode — pick the last used theme for this mode, or the first available
+  const filtered = getFilteredThemes(appTheme)
+  const lastKey = appTheme === 'dark' ? lastDarkKey : lastLightKey
+  if (lastKey && themeMap.get(lastKey)) {
+    return lastKey
+  }
+  return filtered[0]?.key ?? currentKey
+}
