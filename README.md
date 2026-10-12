@@ -1,73 +1,57 @@
-# React + TypeScript + Vite
+# AURA
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+**A local AI coding workspace whose agent works from a live knowledge graph of your project instead of reading the raw code.**
 
-Currently, two official plugins are available:
+A coding agent that knows nothing about a project has two bad options: have the whole codebase pasted into its context window, or explore with tools, listing folders and opening files round after round, spending tokens just to learn where things are. AURA gives the agent a map up front. Its understanding of a project comes from a code knowledge graph, so a structural question is one graph query rather than a dozen file reads.
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+The graph engine started life as [SYNAPSE](https://github.com/abhiram200/SYNAPSE), which I built first for exactly this purpose and then integrated here.
 
-## React Compiler
+## What's in it
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+**The workspace.** A development environment in the browser: file explorer, CodeMirror editor, real terminals (xterm.js over node-pty), a git tree view, a 3D dependency graph, and settings for models, skills, memory and the system prompt. Models run locally through [Ollama](https://ollama.com).
 
-## Expanding the ESLint configuration
+**The knowledge graph.** Tree-sitter parses the project into files, functions, classes, methods and variables, with import, call and inheritance edges. A file watcher keeps it current. On top of it:
 
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
+- impact analysis with propagation-based severity and trace paths
+- hybrid BM25 and embedding search fused with Reciprocal Rank Fusion
+- HTTP route and API-call mapping, response-shape checks and process tracing
+- git diff change detection and cross-codebase rename with dry runs
 
-```js
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
+Parsing covers 17 Tree-sitter grammars: JavaScript, TypeScript, TSX, Python, HTML, CSS, SCSS, PHP, Java, C, C++, C#, Go, Rust, Kotlin, Dart and Bash. The standalone SYNAPSE supports JavaScript, TypeScript and Python.
 
-      // Remove tseslint.configs.recommended and replace with this
-      tseslint.configs.recommendedTypeChecked,
-      // Alternatively, use this for stricter rules
-      tseslint.configs.strictTypeChecked,
-      // Optionally, add this for stylistic rules
-      tseslint.configs.stylisticTypeChecked,
+**The agent.**
 
-      // Other configs...
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+- About 40 tools: graph queries, file reads and writes, managed shell sessions, browser automation through Playwright, web search and vision
+- splits large questions across sub-agents and merges their findings
+- compacts long conversations with an AI-written summary, falling back to a rule-based one if that call fails
+- notices when it is repeating tool calls without progress and changes approach
+- loads skills on demand: playbooks for exploring, debugging, refactoring, building and impact analysis
+
+## Run it
+
+Requires Node.js 20+, Python with pip (for the Crawl4AI web-search fallback) and Ollama.
+
+```bash
+git clone https://github.com/abhiram200/AURA.git
+cd AURA
+npm install        # also runs scripts/setup-crawl4ai.js: Tree-sitter grammars, Crawl4AI, Ollama
+npm run dev        # client on Vite, API server on :3001
 ```
 
-You can also install [eslint-plugin-react-x](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-dom) for React-specific lint rules:
+Production build: `npm run build`, then `npm start`.
 
-```js
-// eslint.config.js
-import reactX from 'eslint-plugin-react-x'
-import reactDom from 'eslint-plugin-react-dom'
+Unit tests: `npm run test:unit`. End-to-end tests: `npm test` (Playwright).
 
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-      // Enable lint rules for React
-      reactX.configs['recommended-typescript'],
-      // Enable lint rules for React DOM
-      reactDom.configs.recommended,
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
-```
+## How it was built
+
+I built AURA with Claude Code as an AI-assisted workflow, which is why many commits carry a co-author trailer. I reviewed and shaped the design documents and specs before implementation (some are in `docs/superpowers/`), and when the agent got stuck on a bug I worked through the logic myself and steered it to the right fix.
+
+About 48,000 lines of TypeScript, written between May and July 2026.
+
+## Credits
+
+SYNAPSE's design was inspired by [GitNexus](https://github.com/abhigyanpatwari/GitNexus). AURA can also call the GitNexus CLI for its dependency view.
+
+## Author
+
+Abhiram RS · [portfolio](https://abhiram200.github.io/portfolio/) · [GitHub](https://github.com/abhiram200)
